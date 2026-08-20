@@ -3,7 +3,7 @@ import { testAgentConfig, saveAgentConfig, getAgentConfig, revealAgentToken, get
 import { useParams, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { ArrowLeft, Save, Eye, EyeOff, Plus, X, Trash2, KeyRound, MessageSquareText, Sparkles, Tag as TagIcon, Hash, ArrowUpDown, ListChecks } from 'lucide-react';
-import { Card, AdminIconPicker, renderIcon, PrimaryButton, SecondaryButton } from '../adminUI.jsx';
+import { Card, AdminIconPicker, TutorialSettings, renderIcon, PrimaryButton, SecondaryButton } from '../adminUI.jsx';
 import CozeBotPicker, { MOCK_PROVIDER_ID } from '../components/CozeBotPicker.jsx';
 import { listKnowledgeBases } from '../knowledgeApi.js';
 
@@ -12,6 +12,7 @@ const COLOR_OPTIONS = ['bg-blue-600', 'bg-rose-600', 'bg-emerald-600', 'bg-amber
 const blankForm = {
   name: '', desc: '', category: 'copy', icon: 'FileText', iconColor: 'bg-blue-600',
   avatar: '', tags: [], published: false, vip: false, sortOrder: 999,
+  tutorialImage: '', tutorialUrl: '', tutorialTitle: '新手使用教程',
   platform: 'coze-new', apiKey: '', baseUrl: '', projectId: '', botId: '', authProviderId: '',
   model: 'deepseek-v4-flash', thinkingEnabled: false, reasoningEffort: 'medium',
   instructions: '', contextMaxTokens: 32000, maxTokens: 8192,
@@ -423,6 +424,12 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
             </div>
             <input onKeyDown={addTag} placeholder="输入标签后回车" className={inputCls} />
           </Field>
+          <TutorialSettings
+            image={form.tutorialImage}
+            url={form.tutorialUrl}
+            title={form.tutorialTitle}
+            onChange={set}
+          />
           <Field label="图标颜色">
             <div className="flex gap-2 flex-wrap">
               {COLOR_OPTIONS.map(c => (

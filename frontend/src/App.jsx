@@ -256,9 +256,9 @@ function Footer() {
   return (
     <footer className="bg-transparent border-t border-slate-200/40">
       <div className="max-w-7xl mx-auto px-6 pt-5 md:pt-6 pb-6 md:pb-8">
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 md:gap-5">
+        <div className="grid grid-cols-2 gap-x-5 gap-y-7 md:grid-cols-5 md:gap-5">
           {/* 品牌区 */}
-          <div className="md:col-span-2">
+          <div className="col-span-2 md:col-span-2">
             <div className="flex items-center gap-2 mb-4">
               <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-sm">
                 <Sparkles size={18} />

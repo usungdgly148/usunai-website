@@ -8,6 +8,7 @@
     "check:baseline": "node scripts/verify-baseline.mjs",
     "check:stage-a": "node scripts/check-stage-a-contracts.mjs",
     "check:stage-b": "node scripts/check-stage-b-contracts.mjs",
-    "verify": "npm run check:secrets && npm run check:baseline && npm run check:stage-a && npm run check:stage-b"
+    "check:stage-c": "node scripts/check-stage-c-contracts.mjs",
+    "verify": "npm run check:secrets && npm run check:baseline && npm run check:stage-a && npm run check:stage-b && npm run check:stage-c"
   }
 }

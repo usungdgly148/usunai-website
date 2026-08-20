@@ -168,9 +168,9 @@ function SectionReveal({ children, className = '', delay = 0 }) {
 
 export default function Home() {
   const { sortedCategories, agents, workflows, banners, recommended, landing, openRechargeModal, refreshAllConfig } = useStore();
-  useEffect(() => { refreshAllConfig(); }, [refreshAllConfig]);
   const [searchParams] = useSearchParams();
   const activeCat = searchParams.get('category') || 'all';
+  useEffect(() => { refreshAllConfig(); }, [refreshAllConfig, activeCat]);
   const [slide, setSlide] = useState(0);
   const [paused, setPaused] = useState(false);
 
@@ -384,13 +384,13 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+          <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-3 md:grid md:grid-cols-2 md:gap-6 md:overflow-visible md:pb-0 xl:grid-cols-4">
             {landing.features.map((f, i) => {
               const Icon = FEATURE_ICONS[f.icon] || Zap;
               const LinkTag = f.linkHref && (f.linkHref.startsWith('http') || f.linkHref.startsWith('#')) ? 'a' : Link;
               const linkProps = LinkTag === 'a' ? { href: f.linkHref || '#' } : { to: f.linkHref || '#' };
               return (
-                <div key={i} className="bg-white rounded-3xl overflow-hidden shadow-sm border border-slate-100 hover:shadow-lg transition duration-300 flex flex-col">
+                <div key={i} className="flex min-w-[82vw] snap-start flex-col overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm transition duration-300 hover:shadow-lg md:min-w-0">
                   <div className="relative aspect-square bg-slate-50 overflow-hidden">
                     {f.image ? (
                       <img src={f.image} alt={f.title} className="w-full h-full object-cover" />
@@ -429,9 +429,9 @@ export default function Home() {
             <h2 className="text-3xl md:text-5xl font-bold text-slate-900 mb-4">客户用友尚AI拿到了结果</h2>
             <p className="text-lg md:text-xl text-slate-500">不是概念，是看得见的获客增长。</p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-3 md:grid md:grid-cols-3 md:gap-6 md:overflow-visible md:pb-0">
             {cases.map((c, i) => (
-              <div key={i} className="bg-white rounded-3xl border border-slate-100 shadow-sm hover:shadow-lg transition duration-300 p-6 flex flex-col">
+              <div key={i} className="flex min-w-[82vw] snap-start flex-col rounded-3xl border border-slate-100 bg-white p-6 shadow-sm transition duration-300 hover:shadow-lg md:min-w-0">
                 <span className="self-start text-xs font-semibold text-brand-700 bg-brand-50 px-3 py-1 rounded-full mb-4">{c.tag}</span>
                 <div className="text-2xl font-extrabold text-slate-900 mb-1">{c.metric}</div>
                 <p className="text-slate-600 text-sm leading-relaxed mb-5 flex-1">{c.desc}</p>
@@ -445,9 +445,9 @@ export default function Home() {
       {/* 客户口碑评价区：CTA 之前的临门一脚（#10 滚动渐入） */}
       {activeCat === 'all' && testimonials.length > 0 && (
         <SectionReveal className="mb-8">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-3 md:grid md:grid-cols-3 md:gap-6 md:overflow-visible md:pb-0">
             {testimonials.map((t, i) => (
-              <div key={i} className="bg-slate-50 rounded-3xl p-6 flex flex-col">
+              <div key={i} className="flex min-w-[82vw] snap-start flex-col rounded-3xl bg-slate-50 p-6 md:min-w-0">
                 <Quote size={28} className="text-brand-500/40 mb-3" />
                 <p className="text-slate-700 text-sm leading-relaxed flex-1">“{t.quote}”</p>
                 <div className="mt-4 flex items-center gap-0.5 text-amber-400">

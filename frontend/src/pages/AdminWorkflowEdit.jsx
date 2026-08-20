@@ -6,7 +6,7 @@ import {
   List, Download, Search, ChevronLeft, ChevronRight, Loader2, AlertCircle, CheckCircle2,
   Sliders, Upload, RefreshCw, Pencil, GripVertical, MessageSquare,
 } from 'lucide-react';
-import { Card, AdminIconPicker, renderIcon, Toggle, PrimaryButton, SecondaryButton, Modal } from '../adminUI.jsx';
+import { Card, AdminIconPicker, TutorialSettings, renderIcon, Toggle, PrimaryButton, SecondaryButton, Modal } from '../adminUI.jsx';
 import { listCozeWorkspaces, listCozeWorkflows, getCozeWorkflowInfo, runWorkflow } from '../cozeApi.js';
 
 const COLOR_OPTIONS = ['bg-blue-600', 'bg-rose-600', 'bg-emerald-600', 'bg-amber-600', 'bg-violet-600', 'bg-slate-700', 'bg-cyan-600', 'bg-teal-600'];
@@ -66,6 +66,7 @@ const PLATFORMS = [
 const blankForm = {
   name: '', desc: '', category: 'short-video', icon: 'Clapperboard', iconColor: 'bg-cyan-600',
   avatar: '', tags: [], published: false, vip: false, sortOrder: 999,
+  tutorialImage: '', tutorialUrl: '', tutorialTitle: '新手使用教程',
   // 工作流专属
   platform: 'coze-old',
   authProviderId: '',
@@ -855,6 +856,12 @@ export default function AdminWorkflowEdit({ isNew: isNewProp }) {
             </div>
             <input onKeyDown={addTag} placeholder="输入标签后回车" className={inputCls} />
           </Field>
+          <TutorialSettings
+            image={form.tutorialImage}
+            url={form.tutorialUrl}
+            title={form.tutorialTitle}
+            onChange={set}
+          />
           <Field label="图标颜色">
             <div className="flex gap-2 flex-wrap">
               {COLOR_OPTIONS.map(c => (

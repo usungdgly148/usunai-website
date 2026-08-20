@@ -771,7 +771,7 @@ export default function Workflow() {
   const [running, setRunning] = useState(false);
   const [runErr, setRunErr] = useState('');
   const [showLogin, setShowLogin] = useState(false);
-  const [configOpen, setConfigOpen] = useState(false);
+  const [mobileConfigView, setMobileConfigView] = useState(true);
   const [infoOpen, setInfoOpen] = useState(false);
   const [toast, setToast] = useState('');
   const scrollRef = useRef(null);
@@ -787,7 +787,10 @@ export default function Workflow() {
   }, [workflow]);
 
   // 2026-07-31：workflowHistory 按 createdAt 升序（最早在上、最新在下），scroll 到底部 = 最新记录。
-  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }); }, [history, running, id]);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'auto' }));
+    return () => cancelAnimationFrame(frame);
+  }, [history, running, id, mobileConfigView]);
   useEffect(() => () => clearTimeout(toastTimer.current), []);
 
   const handleChange = (key, value) => setFormData((prev) => ({ ...prev, [key]: value }));
@@ -945,7 +948,7 @@ export default function Workflow() {
   if (!workflow) return <div className="p-10 text-center text-slate-500">工作流不存在</div>;
 
   return (
-    <div className="h-[calc(100vh-64px)] flex bg-[#f0f4f9] overflow-hidden">
+    <div className="h-[calc(100vh-64px)] flex bg-[#f0f4f9] overflow-hidden" style={{ height: 'calc(100dvh - 64px)' }}>
       {/* Left: config panel (desktop) */}
       <aside className="hidden md:flex w-80 lg:w-96 bg-white/55 backdrop-blur border-r border-slate-200/50 flex-col shrink-0 rounded-t-2xl">
         <ConfigPanel workflow={workflow} formData={formData} onChange={handleChange} onRun={handleRun} running={running} errMsg={runErr} auth={auth} />
@@ -956,8 +959,9 @@ export default function Workflow() {
         <SubHeader
           entity={workflow}
           type="workflow"
-          onToggleHistory={() => setConfigOpen(true)}
+          onToggleHistory={() => setMobileConfigView(v => !v)}
           onToggleInfo={() => setInfoOpen(true)}
+          mobileActionTitle={mobileConfigView ? '历史记录' : '配置参数'}
           right={
             workflowHistory.length > 0 ? (
               <button
@@ -970,7 +974,13 @@ export default function Workflow() {
           }
         />
 
-        <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin px-4 lg:px-6 py-6">
+        {mobileConfigView && (
+          <div className="md:hidden flex-1 min-h-0 bg-white/55">
+            <ConfigPanel workflow={workflow} formData={formData} onChange={handleChange} onRun={handleRun} running={running} errMsg={runErr} auth={auth} />
+          </div>
+        )}
+
+        <div ref={scrollRef} className={`flex-1 overflow-y-auto scrollbar-thin px-4 lg:px-6 py-6 ${mobileConfigView ? 'hidden md:block' : ''}`}>
           <div className="max-w-3xl mx-auto">
             {workflowHistory.length === 0 && !running ? (
               <EmptyState />
@@ -994,10 +1004,6 @@ export default function Workflow() {
         <InfoCard entity={workflow} type="workflow" />
       </aside>
 
-      {/* Mobile drawer for config */}
-      <Drawer open={configOpen} onClose={() => setConfigOpen(false)} side="left" title="配置参数">
-        <ConfigPanel workflow={workflow} formData={formData} onChange={handleChange} onRun={handleRun} running={running} errMsg={runErr} auth={auth} />
-      </Drawer>
       <Drawer open={infoOpen} onClose={() => setInfoOpen(false)} side="right" title="工作流信息">
         <InfoCard entity={workflow} type="workflow" />
       </Drawer>

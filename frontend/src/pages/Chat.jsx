@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
-import { Send, Paperclip, Image as ImageIcon, Square, Bot, Sparkles, ChevronRight, ChevronDown, Copy, RefreshCw, PlusSquare, Zap } from 'lucide-react';
+import { Send, Square, Bot, Sparkles, ChevronRight, ChevronDown, Copy, RefreshCw, PlusSquare, Plus, Zap } from 'lucide-react';
 import { useStore, getUserPlanStatus } from '../store.jsx';
 import { chatWithAgent } from '../cozeApi.js';
 import { tryUploadToBlob } from '../blobUpload.js';
@@ -13,12 +13,12 @@ import { copyText } from '../clipboard.js';
 
 function AutoResizeTextarea({ value, onChange, placeholder, className, onKeyDown }) {
   const ref = useRef(null);
+  const minHeight = typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches ? 36 : 88;
   useEffect(() => {
     if (!ref.current) return;
     ref.current.style.height = 'auto';
-    const minHeight = 88; // ~3 lines
-    ref.current.style.height = Math.max(minHeight, ref.current.scrollHeight) + 'px';
-  }, [value]);
+    ref.current.style.height = (value ? Math.max(minHeight, ref.current.scrollHeight) : minHeight) + 'px';
+  }, [value, minHeight]);
   return (
     <textarea
       ref={ref}
@@ -28,7 +28,7 @@ function AutoResizeTextarea({ value, onChange, placeholder, className, onKeyDown
       placeholder={placeholder}
       rows={1}
       className={className}
-      style={{ height: '88px' }}
+      style={{ height: `${minHeight}px` }}
     />
   );
 }
@@ -219,14 +219,13 @@ function Thinking({ agent }) {
 }
 
 function Composer({ input, setInput, onSubmit, streaming, attachments, setAttachments }) {
-  const imgRef = useRef(null);
   const fileRef = useRef(null);
 
-  const handleFiles = async (fileList, isImage) => {
+  const handleFiles = async (fileList) => {
     const files = Array.from(fileList || []);
     if (!files.length) return;
     const results = await Promise.all(files.map(async (f) => {
-      const isImg = isImage || f.type.startsWith('image/');
+      const isImg = f.type.startsWith('image/');
       let url = await tryUploadToBlob(f);
       if (!url) {
         // 本地/未配置 Blob 时降级为 base64 内联，保证功能可用
@@ -269,14 +268,10 @@ function Composer({ input, setInput, onSubmit, streaming, attachments, setAttach
           </div>
         )}
         <div className="flex items-end gap-1.5 bg-white rounded-2xl border border-slate-200 shadow-soft px-3 py-2.5 focus-within:border-blue-400 focus-within:ring-4 focus-within:ring-blue-50 transition">
-          <button type="button" onClick={() => fileRef.current?.click()} className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition shrink-0" title="上传附件">
-            <Paperclip size={18} />
+          <button type="button" onClick={() => fileRef.current?.click()} className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition shrink-0" title="添加附件或图片">
+            <Plus size={20} />
           </button>
-          <button type="button" onClick={() => imgRef.current?.click()} className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition shrink-0" title="上传图片">
-            <ImageIcon size={18} />
-          </button>
-          <input ref={imgRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { handleFiles(e.target.files, true); e.target.value = ''; }} />
-          <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { handleFiles(e.target.files, false); e.target.value = ''; }} />
+          <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }} />
           <AutoResizeTextarea
             value={input}
             onChange={setInput}
@@ -287,7 +282,7 @@ function Composer({ input, setInput, onSubmit, streaming, attachments, setAttach
               }
             }}
             placeholder="描述你的需求，或直接点上面的示例…"
-            className="flex-1 bg-transparent outline-none text-[15px] px-1 py-1.5 resize-none min-h-[88px] max-h-[220px] overflow-y-auto leading-6 placeholder:text-slate-400"
+            className="flex-1 bg-transparent outline-none text-[15px] px-1 py-1.5 resize-none min-h-9 md:min-h-[88px] max-h-[220px] overflow-y-auto leading-6 placeholder:text-slate-400"
           />
           <button
             onClick={onSubmit}
@@ -644,7 +639,7 @@ export default function Chat() {
   );
 
   return (
-    <div className="h-[calc(100vh-64px)] flex bg-[#f0f4f9] overflow-hidden">
+    <div className="h-[calc(100vh-64px)] flex bg-[#f0f4f9] overflow-hidden" style={{ height: 'calc(100dvh - 64px)' }}>
       {/* Left: history (desktop) */}
       <aside className="hidden md:flex w-72 lg:w-80 bg-white/55 backdrop-blur border-r border-slate-200/50 flex-col shrink-0 rounded-t-2xl">
         <HistoryPanel

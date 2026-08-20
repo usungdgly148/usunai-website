@@ -7,8 +7,8 @@ const PAGE_SIZE = 9;
 
 export default function AgentList({ mode }) {
   const { sortedCategories, agents, workflows, refreshAllConfig } = useStore();
-  useEffect(() => { refreshAllConfig(); }, [refreshAllConfig]);
   const [activeCat, setActiveCat] = useState('all');
+  useEffect(() => { refreshAllConfig(); }, [refreshAllConfig, activeCat]);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
 

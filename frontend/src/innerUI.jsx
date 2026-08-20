@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useStore } from './store.jsx';
 import { CategoryIcon, formatCount, genCaptcha } from './components.jsx';
 import {
-  MessageSquare, Clock, Plus, X, Sparkles, Users, Zap, CheckCircle2, MessageCircle,
+  MessageSquare, SlidersHorizontal, Clock, Plus, X, Sparkles, Users, Zap, CheckCircle2, MessageCircle,
 } from 'lucide-react';
 
 /* ---------- helpers ---------- */
@@ -85,6 +85,10 @@ export function HistoryPanel({ label, items, activeId, onSelect, onNew, emptyHin
 /* ---------- right info card (shared by chat & workflow) ---------- */
 
 export function InfoCard({ entity, type }) {
+  const tutorialImage = String(entity.tutorialImage || '').trim();
+  const tutorialUrl = String(entity.tutorialUrl || '').trim();
+  const tutorialUrlValid = /^(https?:\/\/|\/(?!\/))/i.test(tutorialUrl);
+
   return (
     <div className="h-full overflow-y-auto scrollbar-thin p-6">
       <div className="text-center">
@@ -123,6 +127,16 @@ export function InfoCard({ entity, type }) {
           </span>
           <span className="text-base text-slate-900 tabular-nums">{formatCount(entity.uses)}</span>
         </div>
+        {tutorialImage && tutorialUrlValid ? (
+          <a href={tutorialUrl} target="_blank" rel="noopener noreferrer" className="group block overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="overflow-hidden bg-slate-100" style={{ aspectRatio: '21 / 9' }}>
+              <img src={tutorialImage} alt={`${entity.name}新手使用教程`} loading="lazy" decoding="async" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]" />
+            </div>
+            <div className="px-3 py-2 text-center text-sm font-medium text-slate-700 group-hover:text-blue-600">
+              {String(entity.tutorialTitle || '').trim() || '新手使用教程'}
+            </div>
+          </a>
+        ) : null}
       </div>
     </div>
   );
@@ -158,7 +172,7 @@ export function Drawer({ open, onClose, side = 'left', title, children }) {
 
 /* ---------- inner sub-header (within center column) ---------- */
 
-export function SubHeader({ entity, type, onToggleHistory, onToggleInfo, right }) {
+export function SubHeader({ entity, type, onToggleHistory, onToggleInfo, right, mobileActionTitle }) {
   return (
     <div className="flex items-center gap-3 px-4 lg:px-6 h-14 bg-[#f0f4f9]/85 backdrop-blur-md border-b border-slate-200/60 shrink-0">
       <div className={`relative overflow-hidden w-9 h-9 rounded-xl ${entity.iconColor} text-white flex items-center justify-center shadow-soft shrink-0`}>
@@ -178,9 +192,9 @@ export function SubHeader({ entity, type, onToggleHistory, onToggleInfo, right }
         <button
           onClick={onToggleHistory}
           className="md:hidden w-9 h-9 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500"
-          title="历史记录"
+          title={mobileActionTitle || '历史记录'}
         >
-          <MessageSquare size={18} />
+          {mobileActionTitle === '配置参数' ? <SlidersHorizontal size={18} /> : <MessageSquare size={18} />}
         </button>
         <button
           onClick={onToggleInfo}

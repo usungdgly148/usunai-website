@@ -192,7 +192,7 @@ function UserMenuDropdown({ user, onClose, onLogout, onRecharge }) {
 }
 
 export function Header() {
-  const { user, sidebarOpen, setSidebarOpen, logout, adminLogout, announcements, computePackages, customerService, rechargeInfo, openRechargeModal, refreshCurrentUser } = useStore();
+  const { user, sidebarOpen, setSidebarOpen, logout, announcements, computePackages, customerService, rechargeInfo, openRechargeModal, refreshCurrentUser } = useStore();
   const [loginOpen, setLoginOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -256,14 +256,6 @@ export function Header() {
         )}
       </div>
       <div className="flex items-center gap-3 md:gap-4 ml-auto">
-        <button
-          onClick={() => { adminLogout(); window.open('/admin/login', '_blank'); }}
-          title="管理后台"
-          aria-label="管理后台"
-          className="w-9 h-9 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500 shrink-0"
-        >
-          <Settings size={18} />
-        </button>
         <button onClick={() => setSearchOpen(true)} className="w-9 h-9 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
           <Search size={18} />
         </button>
@@ -1140,7 +1132,7 @@ export function AgentCard({ item, to, featured = false, className = '' }) {
         </div>
       )}
       {featured && (
-        <div className={`absolute left-4 bottom-4 w-14 h-14 rounded-2xl ${item.iconColor || (isDark ? 'bg-white/20' : 'bg-white/70')} ${isDark ? 'text-white' : 'text-brand-700'} flex items-center justify-center shadow-md overflow-hidden`}>
+        <div className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 md:left-4 md:top-auto md:bottom-4 md:translate-x-0 md:translate-y-0 w-12 h-12 md:w-14 md:h-14 rounded-2xl ${item.iconColor || (isDark ? 'bg-white/20' : 'bg-white/70')} ${isDark ? 'text-white' : 'text-brand-700'} flex items-center justify-center shadow-md overflow-hidden`}>
           {item.avatar ? (
             <img src={item.avatar} alt="" className="w-full h-full object-cover" />
           ) : (
@@ -1152,11 +1144,16 @@ export function AgentCard({ item, to, featured = false, className = '' }) {
   );
 
   const body = (
-    <div className={`flex flex-col ${featured ? 'p-5 md:p-7 flex-1 justify-center' : 'p-4 flex-1'}`}>
-      <h3 className={`font-semibold text-slate-900 leading-snug mb-1 truncate group-hover:text-brand-600 transition ${featured ? 'text-2xl md:text-3xl' : 'text-lg'}`}>{item.name}</h3>
-      <p className={`text-slate-500 leading-relaxed flex-1 ${featured ? 'text-sm md:text-base line-clamp-3 md:max-w-md' : 'text-xs line-clamp-2 min-h-[2.25rem]'}`}>{item.desc}</p>
-      <div className={`flex items-center gap-1 text-[11px] text-slate-400 ${featured ? 'mt-4' : 'mt-3'}`}>
-        <Users size={13} /> {formatCount(item.uses)}人使用
+    <div className={`flex flex-col ${featured ? 'p-4 md:p-7 flex-1 justify-center' : 'p-4 flex-1'}`}>
+      <h3 className={`font-semibold text-slate-900 leading-snug mb-1 truncate group-hover:text-brand-600 transition ${featured ? 'text-lg md:text-3xl' : 'text-lg'}`}>{item.name}</h3>
+      <p className={`text-slate-500 leading-relaxed flex-1 ${featured ? 'text-xs md:text-base line-clamp-2 md:line-clamp-3 md:max-w-md min-h-[2.25rem]' : 'text-xs line-clamp-2 min-h-[2.25rem]'}`}>{item.desc}</p>
+      <div className={`mt-3 flex min-w-0 items-center justify-between gap-2 text-[11px] text-slate-400 ${featured ? 'md:mt-4' : ''}`}>
+        <div className="flex min-w-0 items-center gap-1 overflow-hidden">
+          {(item.tags || []).slice(0, 3).map(tag => (
+            <span key={tag} className="max-w-[5rem] truncate rounded bg-slate-100 px-1.5 py-0.5 text-slate-500">{tag}</span>
+          ))}
+        </div>
+        <span className="ml-auto flex shrink-0 items-center gap-1"><Users size={13} /> {formatCount(item.uses)}人使用</span>
       </div>
     </div>
   );
@@ -1168,7 +1165,7 @@ export function AgentCard({ item, to, featured = false, className = '' }) {
     >
       {featured ? (
         <div className="flex flex-col md:flex-row h-full">
-          <Header cls="h-40 md:h-auto md:w-5/12 shrink-0" />
+          <Header cls="h-28 md:h-auto md:w-5/12 shrink-0" />
           <div className="flex-1 flex">{body}</div>
         </div>
       ) : (

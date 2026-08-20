@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { tryUploadToBlob } from './blobUpload.js';
+import { compressImage } from './imageCompress.js';
 import {
   LayoutDashboard, Box, Tag, Users, Zap, Receipt, Settings, Sparkles, Grid3X3, Upload, FileText, X,
   Video, Radio, BookOpen, Target, Handshake, Mic, Crown, UserCircle, Lightbulb,
@@ -327,6 +328,57 @@ export function AdminIconPicker({ icon, avatar, onIconChange, onAvatarChange, co
           )          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// 智能体 / 工作流共用的新手教程配置。仅保存图片地址、跳转地址和标题。
+export function TutorialSettings({ image, url, title, onChange }) {
+  const [uploading, setUploading] = useState(false);
+
+  const handleFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setUploading(true);
+    try {
+      let processed = file;
+      try { processed = await compressImage(file); } catch { /* 压缩失败时保留原图 */ }
+      let nextImage = await tryUploadToBlob(processed);
+      if (!nextImage) {
+        nextImage = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(processed);
+        });
+      }
+      onChange({ tutorialImage: nextImage || '' });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+      <div className="text-sm font-medium text-slate-700">新手教程链接图</div>
+      <div className="aspect-[21/9] overflow-hidden rounded-lg border border-dashed border-slate-300 bg-white">
+        {image ? (
+          <img src={image} alt="教程链接图预览" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full items-center justify-center text-xs text-slate-400">建议尺寸 1400 × 600（21:9）</div>
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 hover:bg-slate-50">
+          <Upload size={14} /> {uploading ? '上传中…' : '上传图片'}
+          <input type="file" accept="image/*" className="hidden" disabled={uploading} onChange={handleFile} />
+        </label>
+        {image && <button type="button" onClick={() => onChange({ tutorialImage: '' })} className="text-xs text-slate-400 hover:text-rose-500">清除图片</button>}
+      </div>
+      <input value={title || ''} onChange={e => onChange({ tutorialTitle: e.target.value })} placeholder="标题，如：3 分钟快速上手" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" />
+      <input value={url || ''} onChange={e => onChange({ tutorialUrl: e.target.value })} placeholder="跳转链接，如：https://..." className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" />
+      <p className="text-xs leading-5 text-slate-400">前台仅在图片和有效链接都已填写时显示，点击后在新窗口打开。</p>
     </div>
   );
 }
