@@ -9,7 +9,8 @@
     "check:stage-a": "node scripts/check-stage-a-contracts.mjs",
     "check:stage-b": "node scripts/check-stage-b-contracts.mjs",
     "check:stage-c": "node scripts/check-stage-c-contracts.mjs",
-    "check:stage-d": "node scripts/check-stage-d-contracts.mjs && node scripts/check-stage-d-integration.mjs",
+    "check:stage-d": "node scripts/check-stage-d-contracts.mjs",
+    "check:stage-d:integration": "node scripts/check-stage-d-integration.mjs",
     "candidate:build": "node scripts/build-candidate.mjs",
     "verify": "npm run check:secrets && npm run check:baseline && npm run check:stage-a && npm run check:stage-b && npm run check:stage-c && npm run check:stage-d"
   }

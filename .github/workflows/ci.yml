@@ -22,11 +22,14 @@ jobs:
         with:
           node-version: 24
 
+      - name: Verify repository
+        run: npm run verify
+
       - name: Install server dependencies for integration checks
         run: npm ci --prefix server
 
-      - name: Verify repository
-        run: npm run verify
+      - name: Run isolated backend integration checks
+        run: npm run check:stage-d:integration
 
       - name: Install recovered frontend dependencies
         run: npm ci --prefix frontend

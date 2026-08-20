@@ -11,7 +11,7 @@
 
 ## 自动回归
 
-`npm run check:stage-d` 包含：
+`npm run check:stage-d` 检查静态契约，`npm run check:stage-d:integration` 执行隔离后端集成回归，合计覆盖：
 
 1. 三种智能体平台、DeepSeek 流式事件、思考过程、知识库与 RAG 静态契约检查。
 2. 隔离启动真实 Node 后端与 SQLite 数据层。
@@ -22,7 +22,7 @@
 7. 套餐点数以服务端配置为准，有效期同步写入用户与注册镜像。
 8. 算力流水、订单记录同时落库，重复请求不会重复加点。
 
-GitHub Actions 会先安装服务端依赖，再运行完整 `npm run verify`，随后安装并构建前端。
+GitHub Actions 会先运行不依赖运行时目录的完整 `npm run verify`，再安装服务端依赖并执行隔离集成回归，最后安装并构建前端。
 
 ## 隔离候选构建
 
