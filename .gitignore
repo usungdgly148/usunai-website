@@ -1,0 +1,43 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Runtime data — never commit production data
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+uploads/
+knowledge-files/
+qdrant-storage/
+qdrant-snapshots/
+image-variants/
+data/
+
+# Dependencies, logs and caches
+node_modules/
+coverage/
+logs/
+*.log
+.cache/
+.tmp/
+
+# Production and ad-hoc backups
+backups/
+deploy-backups/
+*.bak
+*.bak-*
+*.bak.*
+*.pre-*
+*.pre.*
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

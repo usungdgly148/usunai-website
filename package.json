@@ -1,0 +1,11 @@
+{
+  "name": "usunai-website-baseline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "check:baseline": "node scripts/verify-baseline.mjs",
+    "verify": "npm run check:secrets && npm run check:baseline"
+  }
+}

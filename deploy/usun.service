@@ -1,0 +1,28 @@
+[Unit]
+Description=Usun AI Backend
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/usun
+ExecStart=/usr/bin/node server/index.mjs
+Restart=always
+User=ubuntu
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/usun/.env
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/usun-data
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryMax=1G
+TasksMax=256
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

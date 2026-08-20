@@ -1,0 +1,15 @@
+{
+  "name": "usun-server",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node index.mjs",
+    "check": "node --check index.mjs && node --check billing.js && node --check kv-local.js && node --check rag.mjs"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "nodemailer": "^9.0.4",
+    "sharp": "0.35.3"
+  }
+}
