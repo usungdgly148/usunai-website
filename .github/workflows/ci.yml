@@ -1,6 +1,7 @@
 name: Verify code baseline
 
 on:
+  workflow_dispatch:
   push:
     branches: [main, "feature/**", "fix/**", "recovery/**"]
   pull_request:
@@ -34,5 +35,30 @@ jobs:
       - name: Install recovered frontend dependencies
         run: npm ci --prefix frontend
 
+      - name: Audit production frontend dependencies
+        run: npm audit --prefix frontend --omit=dev --audit-level=high
+
       - name: Build recovered frontend source
         run: npm run build --prefix frontend
+
+      - name: Build isolated full-stack candidate
+        if: github.event_name == 'workflow_dispatch'
+        run: npm run candidate:build -- "$CANDIDATE_LABEL"
+        env:
+          CANDIDATE_LABEL: github-${{ github.run_id }}-${{ github.sha }}
+
+      - name: Verify isolated full-stack candidate
+        if: github.event_name == 'workflow_dispatch'
+        run: npm run candidate:verify -- "$CANDIDATE_LABEL"
+        env:
+          CANDIDATE_LABEL: github-${{ github.run_id }}-${{ github.sha }}
+
+      - name: Upload isolated candidate
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: usunai-candidate-${{ github.sha }}
+          path: .tmp/candidates/github-${{ github.run_id }}-${{ github.sha }}/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14
