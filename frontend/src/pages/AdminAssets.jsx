@@ -4,7 +4,7 @@ import {
   Search, FileText, Image as ImageIcon, Video, Mic, Layers, CheckSquare,
   Eye, Trash2, X, Download
 } from 'lucide-react';
-import { AdminPageHeader, Card } from '../adminUI.jsx';
+import { AdminPageHeader, AdminPagination, Card } from '../adminUI.jsx';
 import { ASSET_TYPE_LABELS } from '../mock.js';
 import { SOURCE_TYPE_NAMES, formatDuration, formatCost } from '../assetUtils.js';
 import Markdown from 'react-markdown';
@@ -123,6 +123,7 @@ export default function AdminAssets() {
   const [tab, setTab] = useState('all');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState(null);
+  const [page, setPage] = useState(1);
 
   const filtered = allAssets
     .filter((a) => tab === 'all' || a.type === tab || (tab === 'copy' && a.type === 'soft'))
@@ -139,6 +140,11 @@ export default function AdminAssets() {
         || (user?.phone || '').toLowerCase().includes(q);
     })
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const pageSize = 10;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const pagedAssets = filtered.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => { setPage(1); }, [tab, search]);
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
 
   return (
     <div className="space-y-6">
@@ -175,7 +181,7 @@ export default function AdminAssets() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((a) => {
+            {pagedAssets.map((a) => {
               const user = adminUsers.find((u) => u.id === a.userId);
               const Icon = TYPE_ICON[a.type] || FileText;
               return (
@@ -210,6 +216,7 @@ export default function AdminAssets() {
             {filtered.length === 0 && <tr><td colSpan={7} className="px-5 py-12 text-center text-slate-400 text-sm">暂无资产</td></tr>}
           </tbody>
         </table>
+        <AdminPagination page={page} total={filtered.length} pageSize={pageSize} onPageChange={setPage} />
       </Card>
 
       {selected && <Detail asset={selected} onClose={() => setSelected(null)} />}

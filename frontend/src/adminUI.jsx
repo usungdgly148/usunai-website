@@ -31,6 +31,7 @@ export const ADMIN_NAV = [
       { label: '推荐配置', icon: Sparkles, href: '/admin/recommend' },
       { label: '公告通知', icon: Megaphone, href: '/admin/announcements' },
       { label: '首页内容', icon: LayoutTemplate, href: '/admin/landing' },
+      { label: '政策协议', icon: FileText, href: '/admin/legal-agreements' },
     ],
   },
   {
@@ -108,6 +109,23 @@ export function Card({ children, className = '', ...props }) {
       className={`bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_2px_rgba(15,23,42,0.04)] ${className}`}
       {...props}
     >{children}</div>
+  );
+}
+
+export function AdminPagination({ page, total, pageSize = 10, onPageChange }) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const current = Math.min(Math.max(1, page), totalPages);
+  const start = total === 0 ? 0 : (current - 1) * pageSize + 1;
+  const end = Math.min(current * pageSize, total);
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-5 py-4 border-t border-slate-100 bg-slate-50/40 text-sm">
+      <span className="text-slate-500">共 {total} 条，当前 {start}-{end} 条</span>
+      <div className="flex items-center gap-2">
+        <button type="button" disabled={current <= 1} onClick={() => onPageChange(current - 1)} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50">上一页</button>
+        <span className="min-w-20 text-center text-slate-600">第 {current} / {totalPages} 页</span>
+        <button type="button" disabled={current >= totalPages} onClick={() => onPageChange(current + 1)} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50">下一页</button>
+      </div>
+    </div>
   );
 }
 

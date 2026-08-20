@@ -6,6 +6,7 @@
   "scripts": {
     "check:secrets": "node scripts/check-secrets.mjs",
     "check:baseline": "node scripts/verify-baseline.mjs",
-    "verify": "npm run check:secrets && npm run check:baseline"
+    "check:stage-a": "node scripts/check-stage-a-contracts.mjs",
+    "verify": "npm run check:secrets && npm run check:baseline && npm run check:stage-a"
   }
 }

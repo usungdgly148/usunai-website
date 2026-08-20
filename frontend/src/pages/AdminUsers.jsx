@@ -2,7 +2,7 @@ import { useStore } from '../store.jsx';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, User, Eye, Ban, CheckCircle, ArrowLeftRight, ChevronRight, Zap, ShoppingBag, ArrowDownRight, ArrowUpRight, Trash2, AlertTriangle, Phone, MessageCircle, Copy, Key } from 'lucide-react';
-import { AdminPageHeader, Card, Modal, StatusBadge, PrimaryButton, SecondaryButton } from '../adminUI.jsx';
+import { AdminPageHeader, AdminPagination, Card, Modal, StatusBadge, PrimaryButton, SecondaryButton } from '../adminUI.jsx';
 
 export default function AdminUsers() {
   const { adminUsers, computeRecords, orders, rechargeUserPoints, toggleUserStatus, deleteUser, adminResetUserPassword, allAssets, history, adminUser, computePackages, refreshAdminUsersFromServer, refreshAllAssets } = useStore();
@@ -19,6 +19,10 @@ export default function AdminUsers() {
   const [adjustReason, setAdjustReason] = useState('');
   const [adjustPackageId, setAdjustPackageId] = useState('');   // 选中的算力套餐 id（快捷选项）
   const [adjustValidDays, setAdjustValidDays] = useState(''); // 不使用套餐时的有效期天数（可选）：空=保留现有，0=永久，N=今天+N 天
+  const [adjustMode, setAdjustMode] = useState('package');
+  const [adjustBusy, setAdjustBusy] = useState(false);
+  const [adjustError, setAdjustError] = useState('');
+  const [page, setPage] = useState(1);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [resetPwdTarget, setResetPwdTarget] = useState(null);
   const [resetPwdValue, setResetPwdValue] = useState('');
@@ -29,6 +33,11 @@ export default function AdminUsers() {
     const matchStatus = status === 'all' || u.status === status;
     return matchSearch && matchStatus;
   });
+  const pageSize = 10;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const pagedUsers = filtered.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => { setPage(1); }, [search, status]);
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
 
   const wechatCount = adminUsers.filter(u => u.wechatOpenid || u.provider === 'wechat').length;
   const phoneCount = adminUsers.filter(u => u.provider === 'phone' || (u.phone && !u.email && !u.wechatOpenid && u.provider !== 'wechat')).length;
@@ -54,8 +63,12 @@ export default function AdminUsers() {
     setAdjustOpen(true);
     setAdjustAmount('');
     setAdjustReason('');
-    setAdjustPackageId('');
+    const firstPackage = computePackages.find(p => p.published !== false);
+    setAdjustMode(firstPackage ? 'package' : 'manual');
+    setAdjustPackageId(firstPackage?.id || '');
+    setAdjustAmount(firstPackage ? String(firstPackage.points) : '');
     setAdjustValidDays('');
+    setAdjustError('');
   };
 
   // 选中套餐时自动填入点数 + 默认备注（但仍允许管理员手动覆盖），并清空手动有效期（套餐自带）
@@ -68,30 +81,29 @@ export default function AdminUsers() {
     }
   };
 
-  const submitAdjust = () => {
-    const amt = Number(adjustAmount) || 0;
-    if (!amt || !selected) return;
-    let pkg = adjustPackageId ? computePackages.find(p => p.id === adjustPackageId) : null;
-    // 「不使用套餐」分支下若管理员填写了有效期天数 → 构造轻量伪 pkg 复用 store 的 planPatch 写入路径
-    //   空 → 保留现有 planValid*; 0 → 永久(validDays=0); >0 → 今天起 N 天到期
-    if (!pkg && adjustValidDays !== '') {
-      const today = new Date().toISOString().slice(0, 10);
-      pkg = {
-        id: '__manual__',
-        name: Number(adjustValidDays) === 0 ? '手动调整（永久）' : `手动调整（${adjustValidDays}天有效）`,
-        points: 0,
-        price: 0,
-        validDays: Number(adjustValidDays),
-        validFrom: today,
+  const submitAdjust = async () => {
+    if (!selected) return;
+    const selectedPackage = adjustMode === 'package' ? computePackages.find(p => p.id === adjustPackageId && p.published !== false) : null;
+    const amt = selectedPackage ? Number(selectedPackage.points) : Number(adjustAmount);
+    if (!Number.isFinite(amt) || amt === 0) { setAdjustError('请输入非 0 的调整点数'); return; }
+    let packageInfo = selectedPackage || { id: '__manual__', name: adjustReason.trim() || '手动调整点数' };
+    if (!selectedPackage && adjustValidDays !== '') {
+      packageInfo = {
+        ...packageInfo,
+        validDays: Math.max(0, Number(adjustValidDays) || 0),
+        validFrom: new Date().toISOString().slice(0, 10),
       };
     }
-    rechargeUserPoints(selected.id, amt, adminUser?.name, pkg);
+    setAdjustBusy(true);
+    setAdjustError('');
+    const result = await rechargeUserPoints(selected.id, amt, adminUser?.name, packageInfo);
+    setAdjustBusy(false);
+    if (!result.ok) { setAdjustError(result.msg || '调整失败'); return; }
     setAdjustOpen(false);
+    setSelected(null);
     setAdjustAmount('');
     setAdjustReason('');
     setAdjustPackageId('');
-    // refresh selected snapshot
-    setSelected(prev => adminUsers.find(u => u.id === prev.id) || prev);
   };
 
   const userRecords = (userId) => computeRecords.filter(r => r.userId === userId).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -155,7 +167,7 @@ export default function AdminUsers() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map(u => (
+            {pagedUsers.map(u => (
               <tr key={u.id} className="border-t border-slate-100 hover:bg-slate-50">
                 <td className="px-5 py-3">
                   <div className="flex items-center gap-1.5">
@@ -209,6 +221,7 @@ export default function AdminUsers() {
             )}
           </tbody>
         </table>
+        <AdminPagination page={page} total={filtered.length} pageSize={pageSize} onPageChange={setPage} />
       </Card>
 
       {/* 详情抽屉 */}
@@ -298,11 +311,11 @@ export default function AdminUsers() {
       </Modal>
 
       {/* 调整余额弹窗 */}
-      <Modal open={adjustOpen} onClose={() => setAdjustOpen(false)} title="手动调整余额"
+      <Modal open={adjustOpen} onClose={() => setAdjustOpen(false)} title="调整余额"
         footer={
           <>
             <SecondaryButton onClick={() => setAdjustOpen(false)}>取消</SecondaryButton>
-            <PrimaryButton onClick={submitAdjust}>确认调整</PrimaryButton>
+            <PrimaryButton onClick={submitAdjust} disabled={adjustBusy}>{adjustBusy ? '提交中…' : '确认调整'}</PrimaryButton>
           </>
         }
       >
@@ -318,28 +331,38 @@ export default function AdminUsers() {
               <div className="text-xs text-slate-500">当前余额 {selected?.points || 0} 点</div>
             </div>
           </div>
-          {/* 算力套餐快捷选项（取自算力中心 → 只列上架中的） */}
-          {computePackages.filter(p => p.published).length > 0 && (
+          <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-slate-100">
+            <button type="button" onClick={() => setAdjustMode('package')} className={`py-2 rounded-lg text-sm font-medium transition ${adjustMode === 'package' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>算力套餐</button>
+            <button type="button" onClick={() => { setAdjustMode('manual'); setAdjustPackageId(''); setAdjustAmount(''); setAdjustReason(''); }} className={`py-2 rounded-lg text-sm font-medium transition ${adjustMode === 'manual' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>手动调整点数</button>
+          </div>
+
+          {adjustMode === 'package' && (
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                算力套餐（快捷选项）
-                <span className="text-xs text-slate-400 font-normal ml-1">选好后会自动填入点数与备注</span>
+                算力套餐
+                <span className="text-xs text-slate-400 font-normal ml-1">点数和有效期以服务器套餐配置为准</span>
               </label>
               <select
                 value={adjustPackageId}
                 onChange={e => handleSelectPackage(e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white"
               >
-                <option value="">— 不使用套餐，手动输入 —</option>
-                {computePackages.filter(p => p.published).map(pkg => (
+                <option value="">请选择已上架套餐</option>
+                {computePackages.filter(p => p.published !== false).map(pkg => (
                   <option key={pkg.id} value={pkg.id}>
                     {pkg.name}（{pkg.points.toLocaleString()} 点 · ¥{pkg.price}）
                   </option>
                 ))}
               </select>
+              {adjustPackageId && (
+                <p className="mt-2 text-xs text-slate-500">
+                  本次增加 {Number(computePackages.find(p => p.id === adjustPackageId)?.points || 0).toLocaleString()} 点；有效期由套餐配置自动顺延。
+                </p>
+              )}
             </div>
           )}
-          <div>
+
+          {adjustMode === 'manual' && <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">调整点数（正数为充值，负数为扣减）</label>
             <div className="flex items-center gap-2">
               <input type="number" value={adjustAmount} onChange={e => setAdjustAmount(e.target.value)}
@@ -347,9 +370,8 @@ export default function AdminUsers() {
                 className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
               <span className="text-sm text-slate-500">点</span>
             </div>
-          </div>
-          {/* 「不使用套餐」分支下才允许设置有效期；选了套餐则由套餐自带 */}
-          {adjustPackageId === '' && (
+          </div>}
+          {adjustMode === 'manual' && (
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">
                 有效期（天）<span className="text-xs text-slate-400 font-normal ml-1">（可选）</span>
@@ -370,12 +392,13 @@ export default function AdminUsers() {
               </p>
             </div>
           )}
-          <div>
+          {adjustMode === 'manual' && <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">备注（可选）</label>
             <input type="text" value={adjustReason} onChange={e => setAdjustReason(e.target.value)}
               placeholder="活动赠送 / 补偿 / 测试"
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
-          </div>
+          </div>}
+          {adjustError && <p className="text-sm text-rose-600">{adjustError}</p>}
           <div className="text-xs text-slate-400">
             确认后将自动生成一条算力记录（任务名 = 套餐名）+ 一条订单记录（商品名 = 套餐名），并写入操作日志。
           </div>

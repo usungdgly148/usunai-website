@@ -477,6 +477,22 @@ export function StoreProvider({ children }) {
   const [rechargeInfo, setRechargeInfo] = useState(() => {
     try { return localStorage.getItem('clone_recharge_info') || ''; } catch { return ''; }
   });
+  const LEGAL_AGREEMENTS_DEFAULT = {
+    privacy: { title: '隐私政策', content: '' },
+    terms: { title: '服务条款', content: '' },
+  };
+  const [legalAgreements, setLegalAgreements] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('clone_legal_agreements'));
+      if (saved && typeof saved === 'object') {
+        return {
+          privacy: { ...LEGAL_AGREEMENTS_DEFAULT.privacy, ...(saved.privacy || {}) },
+          terms: { ...LEGAL_AGREEMENTS_DEFAULT.terms, ...(saved.terms || {}) },
+        };
+      }
+    } catch { /* ignore */ }
+    return LEGAL_AGREEMENTS_DEFAULT;
+  });
   // 站点级设置：网站名称 / 标语 / 备案号 / 域名标识（后台「站点设置」可编辑，持久化到服务端 KV）
   const SITE_CONFIG_DEFAULT = {
     name: '友尚 AI',
@@ -541,6 +557,7 @@ export function StoreProvider({ children }) {
   useEffect(() => { localStorage.setItem('clone_site_config', JSON.stringify(siteConfig)); }, [siteConfig]);
   useEffect(() => { localStorage.setItem('clone_customer_service', JSON.stringify(customerService)); }, [customerService]);
   useEffect(() => { localStorage.setItem('clone_announcements', JSON.stringify(announcements)); }, [announcements]);
+  useEffect(() => { localStorage.setItem('clone_legal_agreements', JSON.stringify(legalAgreements)); }, [legalAgreements]);
   useEffect(() => { localStorage.setItem('clone_orders', JSON.stringify(orders)); }, [orders]);
   useEffect(() => { localStorage.setItem('clone_compute_records', JSON.stringify(computeRecords)); }, [computeRecords]);
   useEffect(() => { localStorage.setItem('clone_assets', JSON.stringify(assets)); }, [assets]);
@@ -609,6 +626,7 @@ export function StoreProvider({ children }) {
     { key: 'computePackages', set: setComputePackages },
     { key: 'rechargeInfo', set: setRechargeInfo },
     { key: 'siteConfig', set: setSiteConfig },
+    { key: 'legalAgreements', set: setLegalAgreements },
   ];
 
   const hydratedRef = useRef(false); // 水合完成前禁止写回，防止覆盖服务端真实数据
@@ -632,28 +650,25 @@ export function StoreProvider({ children }) {
       if (!Array.isArray(rawKeys) || rawKeys.length === 0) continue;
       const ids = rawKeys
         .map((k) => String(k).replace(PREFIX_RE, ''))
-        .filter(Boolean)
-        .slice(0, 80); // 只拉前 80 条，避免超时；后管列表页够用
+        .filter(Boolean);
       if (ids.length === 0) continue;
       try {
-        // v14：改用 /api/data/get-records（嵌套子目录端点，api 根目录不可用）
-        // 2026-08-03 商用安全：仅登录用户拉取自己的记录；未登录时服务端直接返回空（不泄露用户表）
-        // 2026-08-04：admin 页面传 useAdminToken=true，用 adminFetch 拉全量；普通用户用 apiFetch 只能拉自己的。
-        const r = await fetcher('/api/data/get-records', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type, ids }),
-        });
-        if (r.ok) {
+        const items = [];
+        // 后端单次最多接收 200 个 id；分批读取全部 key，分页总数不再受旧 80 条上限影响。
+        for (let offset = 0; offset < ids.length; offset += 200) {
+          const r = await fetcher('/api/data/get-records', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type, ids: ids.slice(offset, offset + 200) }),
+          });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
           const jr = await r.json();
-          const items = (jr && jr.items) || [];
-          const p = SERVER_PERSIST.find((x) => x.key === stateKey);
-          // 2026-08-04：admin 刷新必须 set（即使空数组也要清空旧值，避免残留前一个账号的状态）。
-          // 普通用户保留 items.length > 0 才 set 的行为（避免空数组覆盖已 hydrate 的 state）。
-          if (p && (useAdminToken || items.length > 0)) {
-            if (stateKey === 'history') p.set(prev => mergeHydratedHistory(items, prev));
-            else p.set(items);
-          }
+          if (Array.isArray(jr && jr.items)) items.push(...jr.items);
+        }
+        const p = SERVER_PERSIST.find((x) => x.key === stateKey);
+        if (p && (useAdminToken || items.length > 0)) {
+          if (stateKey === 'history') p.set(prev => mergeHydratedHistory(items, prev));
+          else p.set(items);
         }
       } catch (e) { /* ignore */ }
     }
@@ -674,23 +689,22 @@ export function StoreProvider({ children }) {
       }
       const ids = userKeys
         .map((k) => String(k).replace(/^user_/, ''))
-        .filter(Boolean)
-        .slice(0, 200); // admin 列表够用
+        .filter(Boolean);
       if (ids.length === 0) return { ok: true };
-      const r2 = await adminFetch('/api/data/get-records', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'users', ids }),
-      });
-      if (r2.ok) {
+      const items = [];
+      for (let offset = 0; offset < ids.length; offset += 200) {
+        const r2 = await adminFetch('/api/data/get-records', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'users', ids: ids.slice(offset, offset + 200) }),
+        });
+        if (!r2.ok) return { ok: false };
         const jr = await r2.json();
-        const items = (jr && jr.items) || [];
-        // admin 全量拉取：直接用服务端真值替换，不保留前一个账号的 localOnly 残留
-        // （之前保留 localOnly 是为了防止刚 push 的新用户被覆盖，现在用 adminFetch 必然能拿到全量）
-        setAdminUsers(items);
-        return { ok: true, count: items.length };
+        if (Array.isArray(jr && jr.items)) items.push(...jr.items);
       }
-      return { ok: false };
+      // admin 全量拉取：直接用服务端真值替换，不保留前一个账号的 localOnly 残留。
+      setAdminUsers(items);
+      return { ok: true, count: items.length };
     } catch (e) {
       return { ok: false, err: e.message };
     }
@@ -803,6 +817,23 @@ export function StoreProvider({ children }) {
     }
   }, []);
 
+  const saveRechargeInfo = useCallback(async (value) => {
+    const next = String(value || '');
+    const result = await persistAdminKey('rechargeInfo', next);
+    if (result.ok) setRechargeInfo(next);
+    return result;
+  }, [persistAdminKey]);
+
+  const saveLegalAgreements = useCallback(async (value) => {
+    const next = {
+      privacy: { ...LEGAL_AGREEMENTS_DEFAULT.privacy, ...((value && value.privacy) || {}) },
+      terms: { ...LEGAL_AGREEMENTS_DEFAULT.terms, ...((value && value.terms) || {}) },
+    };
+    const result = await persistAdminKey('legalAgreements', next);
+    if (result.ok) setLegalAgreements(next);
+    return result;
+  }, [persistAdminKey]);
+
   // 启动：从服务端拉取最新数据并覆盖（实现重新部署后保留）；server 为空则把当前数据迁移上去
   useEffect(() => {
     let cancelled = false;
@@ -909,6 +940,29 @@ export function StoreProvider({ children }) {
     } catch (e) { /* 网络错误忽略，下次 focus / 打开菜单时再拉 */ }
   }, [user]);
 
+  const refreshCurrentUserCompute = useCallback(async () => {
+    if (!user || !user.id) return;
+    try {
+      const listResponse = await apiFetch('/api/data/list-keys');
+      if (!listResponse.ok) return;
+      const listJson = await listResponse.json();
+      const keys = (listJson && listJson.keys && listJson.keys.computes) || [];
+      const ids = keys.map((key) => String(key).replace(/^compute_/, '')).filter(Boolean);
+      const items = [];
+      for (let offset = 0; offset < ids.length; offset += 200) {
+        const response = await apiFetch('/api/data/get-records', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'computes', ids: ids.slice(offset, offset + 200) }),
+        });
+        if (!response.ok) return;
+        const json = await response.json();
+        if (Array.isArray(json && json.items)) items.push(...json.items);
+      }
+      setComputeRecords(items);
+    } catch { /* 下次进入算力记录页或窗口聚焦时再刷新 */ }
+  }, [user]);
+
   // 用 ref 持有最新 refreshCurrentUser，避免 focus/visibility 监听闭包到过期版本
   const refreshCurrentUserRef = useRef(refreshCurrentUser);
   useEffect(() => { refreshCurrentUserRef.current = refreshCurrentUser; }, [refreshCurrentUser]);
@@ -957,18 +1011,8 @@ export function StoreProvider({ children }) {
     const amt = Number(amount) || 0;
     if (amt <= 0) return;
     const uid = user.id;
-    // 乐观更新（即时 UI 反馈，非权威）：本地先减，用于即时展示
-    const optimistic = Math.max(0, (points || 0) - amt);
-    setPoints(optimistic);
-    setUser(prev => prev ? { ...prev, points: optimistic } : prev);
-    // id-only 身份匹配：同步后台用户表内存态（铁律：绝不用 email/phone 匹配，会串号）
-    setAdminUsers(prev => prev.map(u => (u.id === uid) ? { ...u, points: optimistic } : u));
-    // 算力流水（前端写，非余额字段，无超卖风险）
-    const record = { id: Date.now() + Math.random(), type: 'consume', amount: amt, reason, createdAt: new Date().toISOString(), userId: uid, ...(meta ? { meta } : {}) };
-    setComputeRecords(prev => [record, ...prev]);
-    tryWriteSingleKey('compute', record);
-    // 服务端原子扣减（根除超卖）：用返回权威余额校准本地；失败/余额不足回滚提示。
-    // 不再由前端算 points 写回 user_<id>（旧逻辑是读改写，并发互相覆盖 = 超卖根因）。
+    // 智能体/工作流执行接口已经在服务端扣费并写入唯一流水。
+    // 这里仅查询权威余额，禁止浏览器再次乐观扣点或新增重复 compute 记录。
     deductComputeRemote(uid, amt, reason, meta);
   };
 
@@ -987,6 +1031,7 @@ export function StoreProvider({ children }) {
           setPoints(authoritative);
           setUser(prev => prev ? { ...prev, points: authoritative } : prev);
           setAdminUsers(prev => prev.map(u => (u.id === userId) ? { ...u, points: authoritative } : u));
+          refreshCurrentUserCompute();
         } else if (data && data.reason === 'insufficient') {
           // 余额不足：回滚到服务端真值并提示
           const sv = data.points ?? 0;
@@ -1383,13 +1428,13 @@ export function StoreProvider({ children }) {
   // 旧设计：assets 整表存一条 KV（所有用户的运行记录挤在一起），任何登录用户 PUT 整表即可覆盖全站资产。
   // 新设计：每用户一条 assets_<userId>，服务端 /api/data/assets 强制 userId = session.userId，
   //         用户物理上写不到别人的 key，越权覆盖全表从此不可能。
-  // 写入统一走 persistMyAssets（全量替换"我"的那把 key），不依赖 useEffect 防 stale 覆盖。
-  const persistMyAssets = useCallback(async (next) => {
+  // 新增/更新只提交单条记录，避免历史资产越多请求体越大并最终触发 HTTP 500/413。
+  const persistMyAsset = useCallback(async (item) => {
     try {
       const r = await apiFetch('/api/data/assets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: next }),
+        body: JSON.stringify({ item }),
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
@@ -1398,6 +1443,24 @@ export function StoreProvider({ children }) {
     } catch (e) {
       console.error('[assets] 保存失败', e);
       const msg = '资产保存到服务端失败：' + (e.message || e) + '。请刷新后重试。';
+      setPersistError({ key: 'assets', msg, ts: Date.now() });
+      return { ok: false, msg };
+    }
+  }, []);
+
+  const deleteMyAsset = useCallback(async (assetId) => {
+    try {
+      const r = await apiFetch('/api/data/assets/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assetId }),
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      if (!j || !j.ok) throw new Error((j && j.msg) || '服务端返回失败');
+      return { ok: true };
+    } catch (e) {
+      const msg = '资产删除同步失败：' + (e.message || e) + '。请刷新后重试。';
       setPersistError({ key: 'assets', msg, ts: Date.now() });
       return { ok: false, msg };
     }
@@ -1461,35 +1524,30 @@ export function StoreProvider({ children }) {
   }, []);
 
   const addAsset = (asset) => {
-    const id = 'asset' + Date.now();
+    const id = 'asset' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
     const record = { status: 'success', ...asset, id, userId: user?.id, createdAt: new Date().toISOString() };
-    setAssets(prev => {
-      const next = [record, ...prev];
-      persistMyAssets(next);
-      return next;
-    });
+    setAssets(prev => [record, ...prev]);
+    persistMyAsset(record);
     return id;
   };
-  const updateAsset = (id, patch) => setAssets(prev => {
-    const next = prev.map(a => a.id === id ? { ...a, ...patch } : a);
-    persistMyAssets(next);
-    return next;
-  });
-  const deleteAsset = (id) => setAssets(prev => {
-    const next = prev.filter(a => a.id !== id);
-    persistMyAssets(next);
-    return next;
-  });
+  const updateAsset = (id, patch) => {
+    const current = assets.find(a => a.id === id);
+    if (!current) return;
+    const next = { ...current, ...patch };
+    setAssets(prev => prev.map(a => a.id === id ? next : a));
+    persistMyAsset(next);
+  };
+  const deleteAsset = (id) => {
+    setAssets(prev => prev.filter(a => a.id !== id));
+    deleteMyAsset(id);
+  };
 
   const addTask = (task) => {
     if (!user) return null;
-    const id = 'task' + Date.now();
+    const id = 'task' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
     const record = { ...task, id, type: 'task', userId: user.id, status: 'success', createdAt: new Date().toISOString() };
-    setAssets(prev => {
-      const next = [record, ...prev];
-      persistMyAssets(next);
-      return next;
-    });
+    setAssets(prev => [record, ...prev]);
+    persistMyAsset(record);
     return id;
   };
 
@@ -1501,68 +1559,38 @@ export function StoreProvider({ children }) {
     return id;
   };
 
-  const rechargeUserPoints = (userId, amount, adminName, pkg) => {
-    // pkg：可选算力套餐对象（{ id, name, points, price }）；传入时 title/action/name 用套餐信息
-    const isRecharge = amount > 0;
-    const pkgName = pkg && pkg.name ? pkg.name : null;
-    const title = pkgName ? pkgName : (isRecharge ? '充值' : '扣减');
-    const action = pkgName ? `管理员调整（${pkgName}）` : (isRecharge ? '管理员充值' : '管理员扣减');
-    const reason = pkgName
-      ? `管理员 ${adminName || '系统'} 通过「${pkgName}」${isRecharge ? '充值' : '扣减'}`
-      : `管理员 ${adminName || '系统'} ${isRecharge ? '充值' : '扣减'}`;
-    // 套餐有效期：pkg 带 validDays 时，把套餐有效期绑定到该用户（写入 planValidFrom / planValidDays）
-    const planTarget = adminUsers.find(u => u.id === userId);
-    let planPatch = {};
-    if (pkg && pkg.validDays) {
-      const pkgValidDays = Number(pkg.validDays) || 0;
-      const planFrom = pkg.validFrom || new Date().toISOString().slice(0, 10);
-      let planDays = pkgValidDays;
-      // 不缩短用户已持有的、尚未过期的更晚到期套餐（续费更友好）
-      if (planTarget && planTarget.planValidDays) {
-        const tFrom = new Date(planTarget.planValidFrom).getTime();
-        const tTo = planTarget.planValidDays === 0 ? Infinity : tFrom + planTarget.planValidDays * DAY_MS;
-        const candidateTo = new Date(planFrom).getTime() + pkgValidDays * DAY_MS;
-        const now = Date.now();
-        if (tTo > now && tTo > candidateTo) planDays = Math.round((tTo - new Date(planFrom).getTime()) / DAY_MS);
+  const rechargeUserPoints = async (userId, amount, adminName, pkg) => {
+    const requestId = 'adj_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+    const packageInfo = pkg && pkg.id
+      ? pkg
+      : { id: '__manual__', name: (pkg && pkg.name) || '手动调整点数' };
+    try {
+      const response = await adminFetch('/api/admin/users/adjust-points', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, amount, adminName, packageInfo, requestId }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result || !result.ok) {
+        throw new Error((result && result.msg) || ('HTTP ' + response.status));
       }
-      planPatch = { planValidFrom: planFrom, planValidDays: planDays };
-    } else if (pkg && pkg.validFrom && !pkg.validDays) {
-      // 仅设置生效日期、未设天数 → 视为长期有效（永久）
-      planPatch = { planValidFrom: pkg.validFrom || new Date().toISOString().slice(0, 10), planValidDays: 0 };
+      if (result.user) {
+        setAdminUsers(prev => prev.map(item => item.id === userId ? result.user : item));
+        if (user && user.id === userId) {
+          setUser(prev => prev ? { ...prev, ...result.user } : prev);
+          setPoints(result.points);
+        }
+      }
+      if (result.computeRecord) setComputeRecords(prev => [result.computeRecord, ...prev.filter(item => item.id !== result.computeRecord.id)]);
+      if (result.order) setOrders(prev => [result.order, ...prev.filter(item => item.id !== result.order.id)]);
+      addLog(adminName || '系统', amount > 0 ? '调整算力' : '扣减算力', `${userId} ${amount > 0 ? '+' : ''}${amount} 点`);
+      await Promise.all([refreshAdminUsersFromServer(), refreshAllAdminLists()]);
+      return { ok: true, ...result };
+    } catch (error) {
+      const msg = (error && error.message) || '调整失败';
+      setPersistError({ key: 'compute', msg: '算力调整失败：' + msg, ts: Date.now() });
+      return { ok: false, msg };
     }
-    const newPoints = (planTarget?.points || 0) + amount;
-    setAdminUsers(prev => prev.map(u => u.id === userId ? { ...u, points: newPoints, ...planPatch } : u));
-    const record = { id: Date.now() + Math.random(), userId, type: 'recharge', amount, reason, title, createdAt: new Date().toISOString() };
-    setComputeRecords(prev => [record, ...prev]);
-    addLog(adminName || '系统', isRecharge ? '手动充值' : '手动扣减', `${userId} ${isRecharge ? '+' : ''}${amount} 点${pkgName ? `（套餐：${pkgName}）` : ''}`);
-    // 同步产生订单记录（前端「订单记录」/admin 后台订单管理都能看到）
-    // 套餐：amount=套餐 price（元），status='paid'；手动：amount 视为元（admin 输入的整数或小数）
-    const orderAmount = pkg && typeof pkg.price === 'number' ? pkg.price : Math.abs(amount);
-    const newOrder = {
-      id: 'o' + Date.now() + Math.floor(Math.random() * 1000),
-      userId,
-      type: 'compute',
-      action,                                       // "管理员调整（金卡）" / "管理员充值"
-      name: pkgName || (isRecharge ? `后台充值 +${amount} 点` : `后台扣减 ${amount} 点`), // 商品名称
-      amount: orderAmount,
-      status: 'paid',
-      createdAt: new Date().toISOString(),
-      meta: pkg ? { packageId: pkg.id, packageName: pkg.name, points: pkg.points, price: pkg.price } : { points: amount },
-    };
-    setOrders(prev => [newOrder, ...prev]);
-    tryWriteSingleKey('order', newOrder);
-    // 若充值的正是当前登录用户，同步更新其登录态余额（头像下拉等展示用 user.points）
-    if (user && user.id === userId) {
-      setUser(prev => prev ? { ...prev, points: (prev.points || 0) + amount, ...planPatch } : prev);
-      setPoints(p => p + amount);
-    }
-    // 单条 key 同步（用户 + 算力记录）。user_<id> 是前台 refreshCurrentUser 的权威来源，
-    // 必须可靠写入：用计算后的新值构造完整记录，失败时重试一次，避免静默丢写导致前后端余额不一致。
-    const userRecord = { ...(planTarget || { id: userId }), points: newPoints, ...planPatch };
-    tryWriteSingleKey('user', userRecord).then(r => {
-      if (!r || r.ok === false) tryWriteSingleKey('user', userRecord);
-    });
-    tryWriteSingleKey('compute', record);
   };
 
   const toggleUserStatus = (userId) => {
@@ -2073,7 +2101,8 @@ export function StoreProvider({ children }) {
     updateLandingFooterLegalLink, addLandingFooterLegalLink, removeLandingFooterLegalLink, resetLanding,
     customerService, setCustomerService, updateCustomerService,
     announcements, setAnnouncements, addAnnouncement, updateAnnouncement, deleteAnnouncement,
-    rechargeInfo, setRechargeInfo,
+    rechargeInfo, setRechargeInfo, saveRechargeInfo,
+    legalAgreements, saveLegalAgreements,
     rechargeModalOpen, openRechargeModal, closeRechargeModal, rechargeExpiryDate, rechargeHideExpiry, getUserPlanStatus, refreshCurrentUser,
     // admin 子页面 mount 时拉最新 adminUsers（2026-08-04 修复「点用户管理只看到新用户」）
     refreshAdminUsersFromServer,

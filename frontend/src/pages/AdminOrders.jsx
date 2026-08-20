@@ -1,7 +1,7 @@
 import { useStore } from '../store.jsx';
 import { useState, useEffect } from 'react';
 import { Search, Receipt, RotateCcw, XCircle, CheckCircle2, CreditCard } from 'lucide-react';
-import { AdminPageHeader, Card } from '../adminUI.jsx';
+import { AdminPageHeader, AdminPagination, Card } from '../adminUI.jsx';
 import { ORDER_TYPE_LABELS } from '../mock.js';
 
 const STATUS_LABEL = {
@@ -30,6 +30,7 @@ export default function AdminOrders() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [page, setPage] = useState(1);
 
   const filtered = orders.filter(o => {
     const user = adminUsers.find(u => u.id === o.userId);
@@ -38,6 +39,11 @@ export default function AdminOrders() {
     const matchType = typeFilter === 'all' || o.type === typeFilter;
     return matchSearch && matchStatus && matchType;
   }).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const pageSize = 10;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const pagedOrders = filtered.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => { setPage(1); }, [search, statusFilter, typeFilter]);
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
 
   const todayRevenue = orders.filter(o => o.status === 'paid' && new Date(o.createdAt).toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10)).reduce((s, o) => s + o.amount, 0);
   const weekRevenue = orders.filter(o => o.status === 'paid' && new Date(o.createdAt) >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).reduce((s, o) => s + o.amount, 0);
@@ -106,7 +112,7 @@ export default function AdminOrders() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map(o => {
+            {pagedOrders.map(o => {
               const user = adminUsers.find(u => u.id === o.userId);
               return (
                 <tr key={o.id} className="border-t border-slate-100 hover:bg-slate-50">
@@ -140,6 +146,7 @@ export default function AdminOrders() {
             {filtered.length === 0 && <tr><td colSpan={9} className="px-5 py-12 text-center text-slate-400 text-sm">没有符合条件的订单</td></tr>}
           </tbody>
         </table>
+        <AdminPagination page={page} total={filtered.length} pageSize={pageSize} onPageChange={setPage} />
       </Card>
     </div>
   );

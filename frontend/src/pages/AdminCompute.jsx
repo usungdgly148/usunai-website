@@ -1,10 +1,10 @@
 import { useStore, formatPlanDate } from '../store.jsx';
 import { useState, useEffect, useRef } from 'react';
 import { ArrowUpRight, ArrowDownRight, Package, Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Search, User, Check } from 'lucide-react';
-import { AdminPageHeader, Card, Modal, PrimaryButton, SecondaryButton, Toggle } from '../adminUI.jsx';
+import { AdminPageHeader, AdminPagination, Card, Modal, PrimaryButton, SecondaryButton, Toggle } from '../adminUI.jsx';
 
 export default function AdminCompute() {
-  const { computeRecords, computePackages, adminUsers, addComputePackage, updateComputePackage, deleteComputePackage, togglePackagePublished, rechargeUserPoints, adminUser, rechargeInfo, setRechargeInfo, refreshAllAdminLists, refreshAllConfig } = useStore();
+  const { computeRecords, computePackages, adminUsers, addComputePackage, updateComputePackage, deleteComputePackage, togglePackagePublished, rechargeUserPoints, adminUser, rechargeInfo, saveRechargeInfo: persistRechargeInfo, refreshAllAdminLists, refreshAllConfig } = useStore();
   useEffect(() => { refreshAllAdminLists(); refreshAllConfig(); }, [refreshAllAdminLists, refreshAllConfig]);
   const totalRecharge = computeRecords.filter(r => r.type === 'recharge').reduce((s, r) => s + r.amount, 0);
   const totalConsume = computeRecords.filter(r => r.type === 'consume').reduce((s, r) => s + r.amount, 0);
@@ -18,6 +18,9 @@ export default function AdminCompute() {
   const [rechargeUserId, setRechargeUserId] = useState('');
   const [rechargeAmount, setRechargeAmount] = useState('');
   const [rechargeReason, setRechargeReason] = useState('');
+  const [page, setPage] = useState(1);
+  const [rechargeBusy, setRechargeBusy] = useState(false);
+  const [rechargeError, setRechargeError] = useState('');
 
   // 「提示信息」显式保存：本地草稿与已落库值分离，点保存才同步
   const [infoDraft, setInfoDraft] = useState(rechargeInfo || '');
@@ -31,9 +34,10 @@ export default function AdminCompute() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rechargeInfo]);
   const infoDirty = (infoDraft || '') !== (rechargeInfo || '');
-  const saveRechargeInfo = () => {
+  const saveRechargeInfo = async () => {
     if (!infoDirty) return;
-    setRechargeInfo(infoDraft);
+    const result = await persistRechargeInfo(infoDraft);
+    if (!result.ok) return;
     setInfoSavedAt(Date.now());
     if (infoSavedTimerRef.current) clearTimeout(infoSavedTimerRef.current);
     infoSavedTimerRef.current = setTimeout(() => setInfoSavedAt(null), 2500);
@@ -45,6 +49,11 @@ export default function AdminCompute() {
     const matchType = filterType === 'all' || r.type === filterType;
     return matchSearch && matchType;
   }).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const pageSize = 10;
+  const totalPages = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
+  const pagedRecords = filteredRecords.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => { setPage(1); }, [search, filterType]);
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
 
   const openPkgAdd = () => { setEditingPkg(null); setPkgForm({ name: '', points: '', price: '', validDays: '', validFrom: '' }); setPkgOpen(true); };
   const openPkgEdit = (pkg) => { setEditingPkg(pkg); setPkgForm({ name: pkg.name, points: pkg.points, price: pkg.price, validDays: pkg.validDays ?? '', validFrom: pkg.validFrom || '' }); setPkgOpen(true); };
@@ -73,10 +82,17 @@ export default function AdminCompute() {
     return '长期有效';
   };
 
-  const submitRecharge = () => {
+  const submitRecharge = async () => {
     const amt = Number(rechargeAmount);
     if (!rechargeUserId || !amt) return;
-    rechargeUserPoints(rechargeUserId, amt, adminUser?.name);
+    setRechargeBusy(true);
+    setRechargeError('');
+    const result = await rechargeUserPoints(rechargeUserId, amt, adminUser?.name, {
+      id: '__manual__',
+      name: rechargeReason.trim() || '手动调整点数',
+    });
+    setRechargeBusy(false);
+    if (!result.ok) { setRechargeError(result.msg || '充值失败'); return; }
     setRechargeOpen(false);
     setRechargeAmount('');
     setRechargeReason('');
@@ -208,7 +224,7 @@ export default function AdminCompute() {
             </tr>
           </thead>
           <tbody>
-            {filteredRecords.map(r => {
+            {pagedRecords.map(r => {
               const user = adminUsers.find(u => u.id === r.userId);
               return (
                 <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50">
@@ -227,6 +243,7 @@ export default function AdminCompute() {
             })}
           </tbody>
         </table>
+        <AdminPagination page={page} total={filteredRecords.length} pageSize={pageSize} onPageChange={setPage} />
       </Card>
 
       {/* 套餐编辑弹窗 */}
@@ -276,7 +293,7 @@ export default function AdminCompute() {
         footer={
           <>
             <SecondaryButton onClick={() => setRechargeOpen(false)}>取消</SecondaryButton>
-            <PrimaryButton onClick={submitRecharge}>确认充值</PrimaryButton>
+            <PrimaryButton onClick={submitRecharge} disabled={rechargeBusy}>{rechargeBusy ? '提交中…' : '确认充值'}</PrimaryButton>
           </>
         }
       >
@@ -298,6 +315,7 @@ export default function AdminCompute() {
             <label className="block text-sm font-medium text-slate-700 mb-1.5">备注</label>
             <input type="text" value={rechargeReason} onChange={e => setRechargeReason(e.target.value)} placeholder="活动赠送 / 补偿" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
           </div>
+          {rechargeError && <p className="text-sm text-rose-600">{rechargeError}</p>}
         </div>
       </Modal>
     </div>

@@ -1,6 +1,8 @@
 import { Routes, Route, useLocation, Link, Navigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Sidebar, Header, RechargeDialog } from './components.jsx';
 import { useStore } from './store.jsx';
 import { getToken, getAdminToken } from './authFetch.js';
@@ -31,6 +33,7 @@ import AdminRecommend from './pages/AdminRecommend.jsx';
 import AdminLanding from './pages/AdminLanding.jsx';
 import AdminAuthProviders from './pages/AdminAuthProviders.jsx';
 import AdminAnnouncements from './pages/AdminAnnouncements.jsx';
+import AdminLegalAgreements from './pages/AdminLegalAgreements.jsx';
 import CustomerService from './CustomerService.jsx';
 
 function FrontLayout() {
@@ -185,6 +188,7 @@ function AdminLayout() {
             <Route path="/admin/recommend" element={<AdminRecommend />} />
             <Route path="/admin/landing" element={<AdminLanding />} />
             <Route path="/admin/announcements" element={<AdminAnnouncements />} />
+            <Route path="/admin/legal-agreements" element={<AdminLegalAgreements />} />
             <Route path="/admin/users" element={<AdminUsers />} />
             <Route path="/admin/assets" element={<AdminAssets />} />
             <Route path="/admin/compute" element={<AdminCompute />} />
@@ -238,8 +242,14 @@ function AdminLayout() {
 }
 
 function Footer() {
-  const { landing, siteConfig } = useStore();
+  const { landing, siteConfig, legalAgreements } = useStore();
   const { footer } = landing;
+  const [openAgreement, setOpenAgreement] = useState(null);
+  const agreement = openAgreement ? legalAgreements?.[openAgreement] : null;
+  const extraLegalLinks = (footer.legalLinks || []).filter(l => {
+    const text = String(l.label || '');
+    return !/隐私政策|服务条款|ICP|备案/.test(text);
+  });
 
   return (
     <footer className="bg-transparent border-t border-slate-200/40">
@@ -286,15 +296,37 @@ function Footer() {
         <div className="mt-12 pt-8 border-t border-slate-200/60 flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-slate-400">
           <span>{footer.copyright}</span>
           <div className="flex flex-wrap items-center gap-4 md:gap-6">
-            {footer.legalLinks.map(l => (
+            {extraLegalLinks.map(l => (
               <a key={l.label} href={l.href} className="hover:text-slate-600" target={l.href && l.href.startsWith('http') ? '_blank' : undefined} rel="noopener noreferrer">{l.label}</a>
             ))}
+            <button type="button" onClick={() => setOpenAgreement('privacy')} className="hover:text-slate-600">隐私政策</button>
+            <button type="button" onClick={() => setOpenAgreement('terms')} className="hover:text-slate-600">服务条款</button>
             {/* ICP 备案号（合规必挂，2026-07-29 上线，从站点设置读取） */}
             <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer" className="hover:text-slate-600">{siteConfig.icp}</a>
             {/* 公安联网备案：数据码 52f49c065ac090ca842c1359deccefbd。待主人从公安平台「复制代码」粘贴完整片段后启用（见 store.jsx 同名注释）。 */}
           </div>
         </div>
       </div>
+      {openAgreement && createPortal(
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/45 backdrop-blur-sm p-4" onClick={() => setOpenAgreement(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between gap-4 px-5 md:px-7 py-4 border-b border-slate-100">
+              <h2 className="text-lg font-bold text-slate-900">{agreement?.title || (openAgreement === 'privacy' ? '隐私政策' : '服务条款')}</h2>
+              <button type="button" onClick={() => setOpenAgreement(null)} className="w-9 h-9 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="关闭">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="overflow-y-auto px-5 md:px-7 py-5 text-sm leading-7 text-slate-700 prose prose-slate max-w-none">
+              {agreement?.content ? (
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{agreement.content}</ReactMarkdown>
+              ) : (
+                <p className="text-slate-400">协议内容暂未配置。</p>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </footer>
   );
 }
