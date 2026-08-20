@@ -177,10 +177,6 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
       if (r && r.hasToken) {
         setServerHasToken(true);
         setTokenStatus('saved');
-        // coze-new：直接拉取并在输入框显示真实 Token（明文），不再用黑点占位
-        if (r.platform === 'coze-new' && typeof r.apiKey === 'string' && r.apiKey) {
-          setForm(prev => ({ ...prev, apiKey: r.apiKey }));
-        }
       } else {
         setServerHasToken(false);
         setTokenStatus('missing');
