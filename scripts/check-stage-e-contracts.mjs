@@ -16,12 +16,14 @@ const required = [
   ]],
   ['.github/workflows/ci.yml', [
     'workflow_dispatch:',
+    'tags: ["candidate-*"]',
     'Build isolated full-stack candidate',
     'Verify isolated full-stack candidate',
     'Audit production frontend dependencies',
     'actions/upload-artifact@v7',
     'if-no-files-found: error',
     'retention-days: 14',
+    "startsWith(github.ref, 'refs/tags/candidate-')",
   ]],
   ['scripts/verify-candidate.mjs', [
     'sourceCommit mismatch',

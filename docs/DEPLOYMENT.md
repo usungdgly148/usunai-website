@@ -19,7 +19,7 @@ npm run candidate:build -- <candidate-label>
 - `deploy/`：systemd 与 Nginx 配置样例；
 - `manifest.json`：源码提交号、文件大小与 SHA-256 清单。
 
-也可以在 GitHub Actions 中手动运行 `Verify code baseline`。手动运行会完成全部检查并提供保留 14 天的候选产物下载，不会发布到服务器。
+推送 `candidate-*` 候选标签会完成全部检查并提供保留 14 天的候选产物下载，不会发布到服务器。工作流进入默认分支后，也可以在 GitHub Actions 中手动运行 `Verify code baseline` 生成同样的候选包。
 
 ## 2. 发布前条件
 
