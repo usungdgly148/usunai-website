@@ -123,7 +123,7 @@ try {
   assert.equal(savedHistory.data.ok, true);
 
   const keysOnSecondSession = await request('/api/data/list-keys', { token: tokenB });
-  assert.ok(keysOnSecondSession.data.keys.history.includes(`hist_${history.id}`), 'second session must see newly saved history');
+  assert.ok(keysOnSecondSession.data.keys.history.includes(savedHistory.data.key), 'second session must see newly saved history');
   const loadedHistory = await request('/api/data/get-records', {
     token: tokenB,
     method: 'POST',
