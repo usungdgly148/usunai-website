@@ -21,6 +21,8 @@ data/
 
 # Dependencies, logs and caches
 node_modules/
+frontend/dist/
+frontend/.vite/
 coverage/
 logs/
 *.log

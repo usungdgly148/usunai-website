@@ -18,11 +18,13 @@ const forbiddenSegments = new Set([
   "backups", "deploy-backups", "image-variants", "knowledge-files", "node_modules",
   "qdrant-snapshots", "qdrant-storage", "uploads",
 ]);
+const skippedDirectories = new Set([".git", "frontend/node_modules"]);
 
 function walk(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    if (entry.name === ".git") return [];
     const path = join(directory, entry.name);
+    const relativePath = relative(root, path).replaceAll("\\", "/");
+    if (entry.isDirectory() && skippedDirectories.has(relativePath)) return [];
     return entry.isDirectory() ? walk(path) : [path];
   });
 }

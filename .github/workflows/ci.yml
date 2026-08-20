@@ -2,7 +2,7 @@ name: Verify code baseline
 
 on:
   push:
-    branches: [main, "feature/**", "fix/**"]
+    branches: [main, "feature/**", "fix/**", "recovery/**"]
   pull_request:
     branches: [main]
 
@@ -24,3 +24,9 @@ jobs:
 
       - name: Verify repository
         run: npm run verify
+
+      - name: Install recovered frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Build recovered frontend source
+        run: npm run build --prefix frontend
