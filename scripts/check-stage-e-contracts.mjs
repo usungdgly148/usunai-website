@@ -20,6 +20,8 @@ const required = [
     'Build isolated full-stack candidate',
     'Verify isolated full-stack candidate',
     'Audit production frontend dependencies',
+    'actions/checkout@v6',
+    'actions/setup-node@v6',
     'actions/upload-artifact@v7',
     'if-no-files-found: error',
     'retention-days: 14',
