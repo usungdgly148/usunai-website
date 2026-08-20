@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../store.jsx';
 import { Search, Zap, ArrowUpRight, ArrowDownRight, Clock } from 'lucide-react';
+import UserPagination from '../components/UserPagination.jsx';
+import { paginate, USER_PAGE_SIZE } from '../pagination.js';
 
 const TYPE_TABS = [
   { key: 'all', label: '全部' },
@@ -19,6 +21,7 @@ export default function ComputeRecords() {
   const [type, setType] = useState('all');
   const [task, setTask] = useState('all');
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
 
   if (!user) return <div className="text-center text-slate-500 py-20">请先登录</div>;
 
@@ -47,6 +50,7 @@ export default function ComputeRecords() {
     .filter(r => type === 'all' || r.type === type)
     .filter(r => task === 'all' || (r.title || r.reason || '其他') === task)
     .filter(r => (r.title || r.reason || '').includes(search) || (r.id || '').toString().includes(search));
+  const pagination = paginate(filtered, page);
 
   const fmt = (n) => (typeof n === 'number' ? n.toFixed(2) : n);
 
@@ -63,19 +67,19 @@ export default function ComputeRecords() {
             {TYPE_TABS.map(t => (
               <button
                 key={t.key}
-                onClick={() => setType(t.key)}
+                onClick={() => { setType(t.key); setPage(1); }}
                 className={`px-3.5 py-2 rounded-xl text-sm font-medium transition ${type === t.key ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
               >
                 {t.label}
               </button>
             ))}
           </div>
-          <select value={task} onChange={e => setTask(e.target.value)} className="px-4 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none bg-white">
+          <select value={task} onChange={e => { setTask(e.target.value); setPage(1); }} className="px-4 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none bg-white">
             {taskOptions.map(t => <option key={t} value={t}>{t === 'all' ? '所有任务' : t}</option>)}
           </select>
           <div className="relative flex-1 lg:max-w-sm lg:ml-auto">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索流水号 / 备注..." className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition text-sm" />
+            <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} placeholder="搜索流水号 / 备注..." className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition text-sm" />
           </div>
         </div>
 
@@ -93,7 +97,7 @@ export default function ComputeRecords() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(r => (
+              {pagination.items.map(r => (
                 <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-5 py-4 text-slate-500 font-mono text-xs">{r.id}</td>
                   <td className="px-5 py-4">
@@ -116,6 +120,15 @@ export default function ComputeRecords() {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="px-5 pb-5">
+          <UserPagination
+            page={pagination.currentPage}
+            total={pagination.total}
+            totalPages={pagination.totalPages}
+            pageSize={USER_PAGE_SIZE}
+            onPageChange={setPage}
+          />
         </div>
       </div>
     </div>

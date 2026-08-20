@@ -9,6 +9,8 @@ import { SOURCE_TYPE_NAMES, formatDuration, formatCost, collectMedia, extractRes
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { copyText } from '../clipboard.js';
+import UserPagination from '../components/UserPagination.jsx';
+import { paginate, USER_PAGE_SIZE } from '../pagination.js';
 
 const TABS = [
   { key: 'task', label: '任务', icon: CheckSquare },
@@ -550,6 +552,7 @@ export default function Assets() {
   const [tab, setTab] = useState('task');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState(null);
+  const [page, setPage] = useState(1);
 
   // 2026-08-05 拆表后：我的资产按用户单独存储，页面挂载/登录态变化时从服务端拉取
   useEffect(() => {
@@ -571,6 +574,8 @@ export default function Assets() {
         || (a.sourceName || '').toLowerCase().includes(q);
     })
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const pagination = paginate(filtered, page);
+  const pagedAssets = pagination.items;
 
   const handleCopy = async (text) => {
     // HTTP 下 navigator.clipboard 是 undefined；copyText 自动走 execCommand 兜底
@@ -599,7 +604,7 @@ export default function Assets() {
               return (
                 <button
                   key={t.key}
-                  onClick={() => setTab(t.key)}
+                  onClick={() => { setTab(t.key); setPage(1); }}
                   className={`px-3.5 py-2 rounded-xl text-sm font-medium transition flex items-center gap-1.5 ${tab === t.key ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
                 >
                   <Icon size={16} />
@@ -610,7 +615,7 @@ export default function Assets() {
           </div>
           <div className="relative flex-1 lg:max-w-sm lg:ml-auto">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="搜索资产..." className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition text-sm" />
+            <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="搜索资产..." className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition text-sm" />
           </div>
         </div>
 
@@ -631,7 +636,7 @@ export default function Assets() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((a) => (
+                  {pagedAssets.map((a) => (
                     <tr key={a.id} className="border-t border-slate-100 hover:bg-slate-50">
                       <td className="px-4 py-4">
                         <div className="font-medium text-slate-900">{a.name}</div>
@@ -664,7 +669,7 @@ export default function Assets() {
 
           {(tab === 'copy') && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filtered.map((a) => (
+              {pagedAssets.map((a) => (
                 <TextCard
                   key={a.id}
                   asset={a}
@@ -679,7 +684,7 @@ export default function Assets() {
 
           {(tab === 'image' || tab === 'video' || tab === 'audio') && (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {filtered.map((a) => (
+              {pagedAssets.map((a) => (
                 <MediaCard key={a.id} asset={a} onSelect={() => setSelected(a)} onDelete={() => handleDelete(a.id)} />
               ))}
               {filtered.length === 0 && <div className="col-span-full text-center text-slate-400 py-16 text-sm">暂无「{currentTab?.label}」资产</div>}
@@ -688,7 +693,7 @@ export default function Assets() {
 
           {tab === 'graphic' && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filtered.map((a) => {
+              {pagedAssets.map((a) => {
                 const imgs = a.images || [];
                 return (
                 <div key={a.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-md transition">
@@ -733,6 +738,13 @@ export default function Assets() {
               {filtered.length === 0 && <div className="col-span-full text-center text-slate-400 py-16 text-sm">暂无「图文」资产</div>}
             </div>
           )}
+          <UserPagination
+            page={pagination.currentPage}
+            total={pagination.total}
+            totalPages={pagination.totalPages}
+            pageSize={USER_PAGE_SIZE}
+            onPageChange={setPage}
+          />
         </div>
       </div>
 
