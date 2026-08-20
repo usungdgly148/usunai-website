@@ -26,6 +26,7 @@ export const ADMIN_NAV = [
     label: '内容管理',
     items: [
       { label: '授权中心', icon: KeyRound, href: '/admin/auth-providers' },
+      { label: '知识库', icon: BookOpen, href: '/admin/knowledge-bases' },
       { label: '项目管理', icon: Box, href: '/admin/agents' },
       { label: '分类管理', icon: Tag, href: '/admin/categories' },
       { label: '推荐配置', icon: Sparkles, href: '/admin/recommend' },

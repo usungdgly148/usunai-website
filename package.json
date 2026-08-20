@@ -7,6 +7,7 @@
     "check:secrets": "node scripts/check-secrets.mjs",
     "check:baseline": "node scripts/verify-baseline.mjs",
     "check:stage-a": "node scripts/check-stage-a-contracts.mjs",
-    "verify": "npm run check:secrets && npm run check:baseline && npm run check:stage-a"
+    "check:stage-b": "node scripts/check-stage-b-contracts.mjs",
+    "verify": "npm run check:secrets && npm run check:baseline && npm run check:stage-a && npm run check:stage-b"
   }
 }

@@ -161,13 +161,17 @@ const assistantMarkdownComponents = {
   pre: ({ children }) => <pre className="p-3 rounded-xl bg-slate-900 text-slate-100 text-sm font-mono overflow-x-auto mb-3">{children}</pre>,
 };
 
-function AssistantBubble({ content, agent, onCopy, onRegenerate, onAsset, usage }) {
+function AssistantBubble({ content, reasoning, agent, onCopy, onRegenerate, onAsset, usage }) {
   return (
     <div className="animate-msg flex gap-3 mb-5">
       <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${agent.iconColor} text-white shadow-soft`}>
         <Bot size={16} />
       </div>
       <div className="flex-1 min-w-0">
+        {reasoning && <details className="mb-2 rounded-xl border border-violet-100 bg-violet-50/60 px-4 py-3 text-sm text-slate-600">
+          <summary className="cursor-pointer font-medium text-violet-700">查看思考过程</summary>
+          <div className="mt-2 whitespace-pre-wrap leading-relaxed">{reasoning}</div>
+        </details>}
         <div className="md-render rounded-2xl px-5 py-4 text-[15px] leading-relaxed bg-transparent border border-slate-200/40 text-slate-800">
           <Markdown remarkPlugins={[remarkGfm]} components={assistantMarkdownComponents}>{content}</Markdown>
         </div>
@@ -195,7 +199,7 @@ function AssistantBubble({ content, agent, onCopy, onRegenerate, onAsset, usage 
 
 function Bubble({ m, agent, onCopy, onRegenerate, onAsset }) {
   if (m.role === 'user') return <UserBubble content={m.content} images={m.images} files={m.files} />;
-  return <AssistantBubble content={m.content} agent={agent} onCopy={onCopy} onRegenerate={onRegenerate} onAsset={onAsset} usage={m.usage} />;
+  return <AssistantBubble content={m.content} reasoning={m.reasoning} agent={agent} onCopy={onCopy} onRegenerate={onRegenerate} onAsset={onAsset} usage={m.usage} />;
 }
 
 function Thinking({ agent }) {
@@ -310,7 +314,7 @@ function Composer({ input, setInput, onSubmit, streaming, attachments, setAttach
 
 export default function Chat() {
   const { id } = useParams();
-  const { user, points, consume, addHistory, history, agents, addAsset, addTask, openRechargeModal, refreshAllConfig } = useStore();
+  const { user, points, setPoints, consume, addHistory, history, agents, addAsset, addTask, openRechargeModal, refreshAllConfig } = useStore();
   useEffect(() => { refreshAllConfig(); }, [refreshAllConfig]);
   const agent = useMemo(() => agents.find((a) => a.id === id) || null, [id, agents]);
   const [input, setInput] = useState('');
@@ -385,7 +389,7 @@ export default function Chat() {
   const loadHistory = (h) => {
     const storedMessages = (Array.isArray(h.messages) ? h.messages : [])
       .filter(m => (m?.role === 'user' || m?.role === 'assistant') && typeof m.content === 'string')
-      .map(m => ({ role: m.role, content: m.content, ...(m.usage ? { usage: m.usage } : {}) }));
+      .map(m => ({ role: m.role, content: m.content, ...(m.usage ? { usage: m.usage } : {}), ...(m.reasoning ? { reasoning: m.reasoning } : {}) }));
     // 新记录恢复完整多轮 transcript；旧记录没有 messages 时继续兼容原先的一问一答结构。
     setMessages(storedMessages.length ? storedMessages : [
       { role: 'user', content: h.userPrompt || h.title || '' },
@@ -422,7 +426,9 @@ export default function Chat() {
         content: String(m.content ?? ''),
         ...(m.usage ? { usage: m.usage } : {}),
       }));
-    const system = [agent.instructions, agent.opening].filter(Boolean).join('\n');
+    const system = agent.platform === 'deepseek-native'
+      ? String(agent.instructions || '')
+      : [agent.instructions, agent.opening].filter(Boolean).join('\n');
     const historyMsgs = conversationBefore.map(m => ({ role: m.role, content: m.content }));
     // 拆开 inputTokens，让前端能展示"系统提示词 X / 历史 Y / 用户 Z"的明细
     // —— 之前只是合计 504 token，主人误以为系统提示词没算进去（实际它占了 460+ token）
@@ -442,6 +448,7 @@ export default function Chat() {
     if (!agent.platform) missing.push('平台');
     if (agent.platform === 'coze-new' && !agent.projectId) missing.push('Project ID');
     if (agent.platform === 'coze-old' && !agent.botId) missing.push('Bot ID');
+    if (agent.platform === 'deepseek-native' && !agent.authProviderId) missing.push('DeepSeek 授权凭证');
     if (missing.length) {
       setMessages((prev) => [...prev, { role: 'user', content: text }]);
       setMessages((prev) => [...prev, {
@@ -471,6 +478,8 @@ export default function Chat() {
     setResult('');
     startTimeRef.current = Date.now();
     let acc = '';
+    let reasoningAcc = '';
+    let serverUsage = null;
     let displayed = 0;
     let typewriterRef = null;
     const TW_MS = 25;   // 打字机节奏：每 25ms 一拍
@@ -523,11 +532,23 @@ export default function Chat() {
           // 触发打字机（有节奏地推 displayed 追上 acc）
           startTypewriter();
         },
+        onReasoning: (delta) => {
+          reasoningAcc += delta;
+          setMessages(prev => {
+            if (!prev.length) return prev;
+            const next = prev.slice();
+            next[next.length - 1] = { ...next[next.length - 1], reasoning: reasoningAcc };
+            return next;
+          });
+        },
+        onUsage: (usage) => { serverUsage = usage; },
         signal: controller.signal,
       });
       // 流式完成：确保 displayed 追上 acc，停下打字机，把最后一条 message 标为完整 + usage
       if (typewriterRef) { clearInterval(typewriterRef); typewriterRef = null; }
-      const est = await fetchEstimate({ system, history: historyMsgs, message: text, answer: acc, priceRate: agent.priceRate });
+      const est = agent.platform === 'deepseek-native' && serverUsage
+        ? serverUsage
+        : await fetchEstimate({ system, history: historyMsgs, message: text, answer: acc, priceRate: agent.priceRate });
       const finalContent = acc || '(智能体未返回内容，请检查该智能体的扣子配置是否正确，以及项目是否已在扣子后台发布为 API 服务)';
       displayed = finalContent.length;
       // 把 system / history / user 拆分写进 usage，底部展示用
@@ -535,10 +556,10 @@ export default function Chat() {
       setMessages((prev) => {
         if (!prev.length) return prev;
         const next = prev.slice();
-        next[next.length - 1] = { ...next[next.length - 1], content: finalContent, usage: usageWithBreakdown };
+        next[next.length - 1] = { ...next[next.length - 1], content: finalContent, reasoning: reasoningAcc || undefined, usage: usageWithBreakdown };
         return next;
       });
-      consume(est.points, `使用智能体：${agent.name}`, {
+      if (agent.platform !== 'deepseek-native') consume(est.points, `使用智能体：${agent.name}`, {
         inputTokens: est.inputTokens,
         outputTokens: est.outputTokens,
         totalTokens: est.totalTokens,
@@ -546,6 +567,9 @@ export default function Chat() {
         priceRate: agent.priceRate,
         bufferCoef: est.bufferCoef,
       });
+      if (agent.platform === 'deepseek-native' && Number.isFinite(Number(serverUsage?.balance))) {
+        setPoints(Number(serverUsage.balance));
+      }
       const duration = startTimeRef.current ? (Date.now() - startTimeRef.current) / 1000 : 0;
       // 一次会话只写一条历史：首轮创建，追问按相同 sessionId 原位更新。
       // 历史项保存完整 transcript，点击左侧记录时可恢复中间会话区的全部问答。
@@ -557,7 +581,7 @@ export default function Chat() {
       const conversationMessages = [
         ...conversationBefore,
         { role: 'user', content: text },
-        { role: 'assistant', content: finalContent, usage: est },
+        { role: 'assistant', content: finalContent, reasoning: reasoningAcc || undefined, usage: est },
       ];
       const historyItem = {
         id: historyItemId,
@@ -591,7 +615,9 @@ export default function Chat() {
       showToast('已生成 · 可继续追问');
     } catch (e) {
       // 流式失败：替换占位 assistant 为错误提示，避免与占位重复
-      const errContent = '❌ 调用扣子失败：' + (e.message || e) + '\n请确认智能体的扣子配置（Base URL / API Token / Project ID）正确，且该项目已在扣子后台发布为 API 服务。';
+      const errContent = agent.platform === 'deepseek-native'
+        ? '❌ 调用原生模型失败：' + (e.message || e) + '\n请检查 DeepSeek 授权凭证、模型配置和账户状态。'
+        : '❌ 调用扣子失败：' + (e.message || e) + '\n请确认智能体的扣子配置（Base URL / API Token / Project ID）正确，且该项目已在扣子后台发布为 API 服务。';
       setMessages((prev) => {
         if (!prev.length) return prev;
         const next = prev.slice();

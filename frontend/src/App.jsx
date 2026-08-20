@@ -34,6 +34,7 @@ import AdminLanding from './pages/AdminLanding.jsx';
 import AdminAuthProviders from './pages/AdminAuthProviders.jsx';
 import AdminAnnouncements from './pages/AdminAnnouncements.jsx';
 import AdminLegalAgreements from './pages/AdminLegalAgreements.jsx';
+import AdminKnowledgeBases from './pages/AdminKnowledgeBases.jsx';
 import CustomerService from './CustomerService.jsx';
 
 function FrontLayout() {
@@ -182,6 +183,7 @@ function AdminLayout() {
             <Route path="/admin/agents/new" element={<AdminAgentEdit isNew />} />
             <Route path="/admin/agents/:id" element={<AdminAgentEdit />} />
             <Route path="/admin/auth-providers" element={<AdminAuthProviders />} />
+            <Route path="/admin/knowledge-bases" element={<AdminKnowledgeBases />} />
             <Route path="/admin/workflows/new" element={<AdminWorkflowEdit isNew />} />
             <Route path="/admin/workflows/:id" element={<AdminWorkflowEdit />} />
             <Route path="/admin/categories" element={<AdminCategories />} />

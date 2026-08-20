@@ -2,7 +2,7 @@
 // 智能体连接配置由前端随请求携带，函数只做转发（带 Token 调扣子），避免浏览器直连扣子的 CORS 问题。
 // 浏览器里不再出现任何扣子 Token。
 // 2026-08-03 商用安全：所有请求经 apiFetch 携带登录会话 token（对话/工作流运行需登录）。
-import { apiFetch } from './authFetch.js';
+import { apiFetch, adminFetch } from './authFetch.js';
 
 // 解析 SSE 文本流，回调每一条 event 的 type 与 payload
 function parseSSE(buffer, onEvent) {
@@ -25,7 +25,7 @@ function parseSSE(buffer, onEvent) {
 
 // 通过后端（EdgeOne 函数）发起扣子对话（SSE 流式）。
 // 无状态函数环境无持久存储，前端随请求携带智能体的连接配置，函数只做转发（带 Token 调扣子）。
-export async function chatWithAgent({ agentId, message, sessionId, onDelta, signal, cfg }) {
+export async function chatWithAgent({ agentId, message, sessionId, onDelta, onReasoning, onUsage, signal, cfg }) {
   const body = {
     agentId,
     sessionId: sessionId || `s-${Date.now()}`,
@@ -66,14 +66,14 @@ export async function chatWithAgent({ agentId, message, sessionId, onDelta, sign
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
+    let streamError = null;
     parseSSE(buffer, (event, payload) => {
-      if (payload?.type === 'answer' && payload?.content?.answer != null) {
-        onDelta(payload.content.answer);
-      }
-      if (payload?.type === 'error' || payload?.content?.error) {
-        throw new Error(payload.content?.error || '智能体执行出错');
-      }
+      if (payload?.type === 'answer' && payload?.content?.answer != null) onDelta?.(payload.content.answer);
+      if (payload?.type === 'reasoning' && payload?.content?.reasoning != null) onReasoning?.(payload.content.reasoning);
+      if (payload?.type === 'usage' && payload?.content?.usage != null) onUsage?.(payload.content.usage);
+      if (payload?.type === 'error' || payload?.content?.error) streamError = payload.content?.error || '智能体执行出错';
     });
+    if (streamError) throw new Error(streamError);
     const idx = buffer.lastIndexOf('\n\n');
     if (idx >= 0) buffer = buffer.slice(idx + 2);
   }
@@ -81,7 +81,7 @@ export async function chatWithAgent({ agentId, message, sessionId, onDelta, sign
 
 // 后台「测试连接 / 检测项目」：把表单配置发给后端，由后端带 Token 探测扣子。
 export async function testAgentConfig(cfg) {
-  const res = await apiFetch('/api/coze/test', {
+  const res = await adminFetch('/api/coze/test', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(cfg),
@@ -150,7 +150,7 @@ export async function uploadCozeFile(cfg, file) {
 
 // 后台保存智能体配置到后端（Token 落服务端；前端本地仅存脱敏占位）。
 export async function saveAgentConfig(id, cfg) {
-  const res = await apiFetch(`/api/admin/agents/${encodeURIComponent(id)}`, {
+  const res = await adminFetch(`/api/admin/agents/${encodeURIComponent(id)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(cfg),
@@ -161,7 +161,7 @@ export async function saveAgentConfig(id, cfg) {
 // 拉取单个 agent 的服务端配置（仅元数据 + hasToken 标志，不返回真实 Token）
 export async function getAgentConfig(id) {
   try {
-    const res = await apiFetch(`/api/admin/agents/${encodeURIComponent(id)}`, {
+    const res = await adminFetch(`/api/admin/agents/${encodeURIComponent(id)}`, {
       method: 'GET',
     });
     return await res.json();
@@ -173,7 +173,7 @@ export async function getAgentConfig(id) {
 // 拉取真实 Token 明文（仅 admin 后台眼睛图标点击时一次性调用，前端不缓存明文）
 export async function revealAgentToken(id) {
   try {
-    const res = await apiFetch(`/api/admin/agents/${encodeURIComponent(id)}/reveal-token`, {
+    const res = await adminFetch(`/api/admin/agents/${encodeURIComponent(id)}/reveal-token`, {
       method: 'GET',
     });
     return await res.json();

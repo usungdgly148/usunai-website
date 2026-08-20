@@ -1667,22 +1667,30 @@ export function StoreProvider({ children }) {
   const toggleAdminAccountStatus = (id) => setAdminAccounts(prev => prev.map(a => a.id === id ? { ...a, status: a.status === 'active' ? 'banned' : 'active' } : a));
 
   // AI 授权管理 CRUD（显式 persistKey 写回）
-  const addAuthProvider = (p) => {
+  const addAuthProvider = async (p) => {
     const id = 'auth' + Date.now();
-    const next = [...authProviders, { ...p, id, status: 'active', createdAt: new Date().toISOString() }];
+    const previous = authProviders;
+    const next = [...previous, { ...p, id, status: p.status || 'active', createdAt: new Date().toISOString() }];
     setAuthProviders(next);
-    persistAdminKey('authProviders', next);
+    const result = await persistAdminKey('authProviders', next);
+    if (!result.ok) { setAuthProviders(previous); return null; }
     return id;
   };
-  const updateAuthProvider = (id, patch) => {
-    const next = authProviders.map(a => a.id === id ? { ...a, ...patch } : a);
+  const updateAuthProvider = async (id, patch) => {
+    const previous = authProviders;
+    const next = previous.map(a => a.id === id ? { ...a, ...patch } : a);
     setAuthProviders(next);
-    persistAdminKey('authProviders', next);
+    const result = await persistAdminKey('authProviders', next);
+    if (!result.ok) { setAuthProviders(previous); return false; }
+    return true;
   };
-  const deleteAuthProvider = (id) => {
-    const next = authProviders.filter(a => a.id !== id);
+  const deleteAuthProvider = async (id) => {
+    const previous = authProviders;
+    const next = previous.filter(a => a.id !== id);
     setAuthProviders(next);
-    persistAdminKey('authProviders', next);
+    const result = await persistAdminKey('authProviders', next);
+    if (!result.ok) { setAuthProviders(previous); return false; }
+    return true;
   };
 
   // 操作日志

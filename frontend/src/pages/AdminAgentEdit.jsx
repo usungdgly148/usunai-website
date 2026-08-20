@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { ArrowLeft, Save, Eye, EyeOff, Plus, X, Trash2, KeyRound, MessageSquareText, Sparkles, Tag as TagIcon, Hash, ArrowUpDown, ListChecks } from 'lucide-react';
 import { Card, AdminIconPicker, renderIcon, PrimaryButton, SecondaryButton } from '../adminUI.jsx';
 import CozeBotPicker, { MOCK_PROVIDER_ID } from '../components/CozeBotPicker.jsx';
+import { listKnowledgeBases } from '../knowledgeApi.js';
 
 const COLOR_OPTIONS = ['bg-blue-600', 'bg-rose-600', 'bg-emerald-600', 'bg-amber-600', 'bg-violet-600', 'bg-slate-700', 'bg-cyan-600', 'bg-teal-600'];
 
@@ -12,6 +13,9 @@ const blankForm = {
   name: '', desc: '', category: 'copy', icon: 'FileText', iconColor: 'bg-blue-600',
   avatar: '', tags: [], published: false, vip: false, sortOrder: 999,
   platform: 'coze-new', apiKey: '', baseUrl: '', projectId: '', botId: '', authProviderId: '',
+  model: 'deepseek-v4-flash', thinkingEnabled: false, reasoningEffort: 'medium',
+  instructions: '', contextMaxTokens: 32000, maxTokens: 8192,
+  ragEnabled: false, knowledgeBaseIds: [], ragTopK: 5, ragThreshold: 0.3,
   opening: '', suggestedQuestions: [],
   priceType: 'token', priceRate: 6,
   gradientFrom: '#DBEAFE', gradientTo: '#FFFFFF', gradientAngle: 30,
@@ -84,7 +88,12 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
   const [fetching, setFetching] = useState(false);
   const [fetchMsg, setFetchMsg] = useState(null); // {ok, msg}
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [knowledgeBases, setKnowledgeBases] = useState([]);
   const set = (patch) => setForm(prev => ({ ...prev, ...patch }));
+
+  useEffect(() => {
+    listKnowledgeBases().then(data => setKnowledgeBases(data.items || [])).catch(() => setKnowledgeBases([]));
+  }, []);
 
   // 列表选择对话框：选中智能体后同步名称/简介/头像，并拉取详情回填开场白与建议问题
   const onPickBot = async (bot) => {
@@ -156,6 +165,14 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
     let cancelled = false;
     getAgentConfig(id).then((r) => {
       if (cancelled) return;
+      if (r?.ok !== false) {
+        const { apiKey: ignoredApiKey, ...safeConfig } = r || {};
+        setForm(prev => ({
+          ...prev,
+          ...safeConfig,
+          knowledgeBaseIds: Array.isArray(r?.knowledgeBaseIds) ? r.knowledgeBaseIds : prev.knowledgeBaseIds,
+        }));
+      }
       if (r && r.hasToken) {
         setServerHasToken(true);
         setTokenStatus('saved');
@@ -177,6 +194,7 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
   const platformOptions = [
     { key: 'coze-new', label: 'Coze 新版', desc: 'Project ID + API Token' },
     { key: 'coze-old', label: 'Coze 旧版', desc: 'Bot ID + 授权凭证' },
+    { key: 'deepseek-native', label: 'DeepSeek 原生模型', desc: '服务器凭证 + 真正流式输出' },
   ];
 
   const onSelectPlatform = (key) => {
@@ -288,6 +306,7 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
   // 因此这里必须 await，否则拿到的会是 Promise 而非真实 id。
   const persist = async () => {
     if (!form.name.trim()) { window.alert('请先填写名称'); return null; }
+    if (form.platform === 'deepseek-native' && !form.authProviderId) { window.alert('请先选择 DeepSeek 授权凭证'); return null; }
     // 明文保存：本地 store（localStorage）也存真实 apiKey，不再用 TOKEN_MASK 占位
     const storeForm = { ...form, apiKey: form.apiKey || '' };
     if (isNew) { const nid = await addAgent(storeForm); return nid; }
@@ -299,11 +318,21 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
       platform: form.platform,
       baseUrl: form.baseUrl.trim(),
       // coze-new：直接传真实 apiKey（明文保存）；coze-old 的令牌在授权中心，不在此传
-      apiKey: form.platform === 'coze-old' ? '' : (form.apiKey || ''),
+      apiKey: form.platform === 'coze-new' ? (form.apiKey || '') : '',
       projectId: form.projectId.trim(),
       botId: form.botId.trim(),
       authProviderId: form.authProviderId || '',
       authType: form.platform === 'oauth' ? 'oauth' : 'apikey',
+      model: form.model,
+      thinkingEnabled: Boolean(form.thinkingEnabled),
+      reasoningEffort: form.reasoningEffort || 'medium',
+      instructions: form.instructions || '',
+      contextMaxTokens: Number(form.contextMaxTokens) || 32000,
+      maxTokens: Number(form.maxTokens) || 8192,
+      ragEnabled: Boolean(form.ragEnabled),
+      knowledgeBaseIds: Array.isArray(form.knowledgeBaseIds) ? form.knowledgeBaseIds : [],
+      ragTopK: Number(form.ragTopK) || 5,
+      ragThreshold: Number(form.ragThreshold) || 0.3,
     };
     try {
       const r = await saveAgentConfig(aid, cfg);
@@ -462,7 +491,7 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
         {/* 中：Coze 参数 */}
         <div className="space-y-5">
           <Card className="p-5 space-y-4">
-            <h2 className="font-semibold text-slate-900 flex items-center gap-2"><KeyRound size={16} className="text-blue-600" /> Coze 连接配置</h2>
+            <h2 className="font-semibold text-slate-900 flex items-center gap-2"><KeyRound size={16} className="text-blue-600" /> 智能体平台与连接</h2>
 
             <div className="space-y-2">
               <label className="block text-sm font-medium text-slate-700">智能体平台</label>
@@ -578,6 +607,48 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
                     {fetching ? '测试中…' : '测试连接'}
                   </button>
                 </div>
+              </div>
+            )}
+
+            {form.platform === 'deepseek-native' && (
+              <div className="space-y-4">
+                <p className="text-xs text-slate-600 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                  API Key 由授权中心加密保存在服务器。浏览器只保存凭证 ID；对话强制使用服务器 SSE 流式输出。
+                </p>
+                <Field label="DeepSeek 授权凭证">
+                  <select value={form.authProviderId} onChange={e => set({ authProviderId: e.target.value })} className={inputCls}>
+                    <option value="">请选择授权凭证</option>
+                    {authProviders.filter(p => p.type === 'deepseek' && p.status !== 'disabled').map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </Field>
+                <Field label="模型">
+                  <select value={form.model} onChange={e => set({ model: e.target.value })} className={inputCls}>
+                    <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+                    <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+                  </select>
+                </Field>
+                <label className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2.5">
+                  <span className="text-sm font-medium text-slate-700">展示思考过程</span>
+                  <input type="checkbox" checked={form.thinkingEnabled} onChange={e => set({ thinkingEnabled: e.target.checked })} />
+                </label>
+                {form.thinkingEnabled && <Field label="思考强度"><select value={form.reasoningEffort} onChange={e => set({ reasoningEffort: e.target.value })} className={inputCls}><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></Field>}
+                <Field label="System Prompt" hint="只用于约束智能体行为；用户输入仍由前端对话框提供。">
+                  <textarea rows={8} value={form.instructions} onChange={e => set({ instructions: e.target.value })} className={`${inputCls} resize-y`} placeholder="请输入系统提示词" />
+                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="上下文上限"><input type="number" min="1024" value={form.contextMaxTokens} onChange={e => set({ contextMaxTokens: Number(e.target.value) })} className={inputCls} /></Field>
+                  <Field label="单次输出上限"><input type="number" min="256" value={form.maxTokens} onChange={e => set({ maxTokens: Number(e.target.value) })} className={inputCls} /></Field>
+                </div>
+                <label className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2.5">
+                  <span className="text-sm font-medium text-slate-700">启用 RAG 知识库</span>
+                  <input type="checkbox" checked={form.ragEnabled} onChange={e => set({ ragEnabled: e.target.checked })} />
+                </label>
+                {form.ragEnabled && <div className="space-y-3 rounded-xl border border-slate-200 p-3">
+                  <div className="text-sm font-medium text-slate-700">绑定知识库（可多选）</div>
+                  {knowledgeBases.filter(kb => kb.status !== 'inactive').map(kb => <label key={kb.id} className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={form.knowledgeBaseIds.includes(kb.id)} onChange={e => set({ knowledgeBaseIds: e.target.checked ? [...form.knowledgeBaseIds, kb.id] : form.knowledgeBaseIds.filter(id => id !== kb.id) })} />{kb.name}<span className="text-xs text-slate-400">{kb.readyDocumentCount || 0} 个文档</span></label>)}
+                  {!knowledgeBases.length && <div className="text-xs text-amber-600">请先到“知识库”页面创建并上传文档。</div>}
+                  <div className="grid grid-cols-2 gap-3"><Field label="召回条数"><input type="number" min="1" max="20" value={form.ragTopK} onChange={e => set({ ragTopK: Number(e.target.value) })} className={inputCls} /></Field><Field label="相似度阈值"><input type="number" min="0" max="1" step="0.05" value={form.ragThreshold} onChange={e => set({ ragThreshold: Number(e.target.value) })} className={inputCls} /></Field></div>
+                </div>}
               </div>
             )}
 
