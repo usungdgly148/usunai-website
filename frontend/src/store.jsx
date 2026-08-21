@@ -946,8 +946,9 @@ export function StoreProvider({ children }) {
     } catch (e) { /* 网络错误忽略，下次 focus / 打开菜单时再拉 */ }
   }, [user]);
 
+  const currentUserId = user?.id;
   const refreshCurrentUserCompute = useCallback(async () => {
-    if (!user || !user.id) return;
+    if (!currentUserId) return;
     try {
       const listResponse = await apiFetch('/api/data/list-keys');
       if (!listResponse.ok) return;
@@ -967,7 +968,7 @@ export function StoreProvider({ children }) {
       }
       setComputeRecords(items);
     } catch { /* 下次进入算力记录页或窗口聚焦时再刷新 */ }
-  }, [user]);
+  }, [currentUserId]);
 
   // 用 ref 持有最新 refreshCurrentUser，避免 focus/visibility 监听闭包到过期版本
   const refreshCurrentUserRef = useRef(refreshCurrentUser);
@@ -2117,7 +2118,7 @@ export function StoreProvider({ children }) {
     announcements, setAnnouncements, addAnnouncement, updateAnnouncement, deleteAnnouncement,
     rechargeInfo, setRechargeInfo, saveRechargeInfo,
     legalAgreements, saveLegalAgreements,
-    rechargeModalOpen, openRechargeModal, closeRechargeModal, rechargeExpiryDate, rechargeHideExpiry, getUserPlanStatus, refreshCurrentUser,
+    rechargeModalOpen, openRechargeModal, closeRechargeModal, rechargeExpiryDate, rechargeHideExpiry, getUserPlanStatus, refreshCurrentUser, refreshCurrentUserCompute,
     // admin 子页面 mount 时拉最新 adminUsers（2026-08-04 修复「点用户管理只看到新用户」）
     refreshAdminUsersFromServer,
     // admin/frontend 页面 mount 时拉最新列表/配置（2026-08-04 全面修复「侧边栏切模块看不到最新数据」）

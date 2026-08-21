@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store.jsx';
 import { Search, Zap, ArrowUpRight, ArrowDownRight, Clock } from 'lucide-react';
 import UserPagination from '../components/UserPagination.jsx';
@@ -17,11 +17,17 @@ const TYPE_STYLE = {
 };
 
 export default function ComputeRecords() {
-  const { user, computeRecords } = useStore();
+  const { user, computeRecords, refreshCurrentUserCompute } = useStore();
   const [type, setType] = useState('all');
   const [task, setTask] = useState('all');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    setPage(1);
+    refreshCurrentUserCompute();
+  }, [user?.id, refreshCurrentUserCompute]);
 
   if (!user) return <div className="text-center text-slate-500 py-20">请先登录</div>;
 
