@@ -3401,7 +3401,8 @@ const server = http.createServer(async (req, res) => {
       if (!fp.startsWith(uploadRoot + path.sep)) {
         res.statusCode = 403; res.end(JSON.stringify({ ok: false, msg: 'forbidden path' })); return;
       }
-      const maxUploadBytes = 25 * 1024 * 1024;
+      const contentType = String(req.headers['content-type'] || '').toLowerCase();
+      const maxUploadBytes = contentType.startsWith('image/') ? 5 * 1024 * 1024 : 25 * 1024 * 1024;
       const declaredSize = Number(req.headers['content-length'] || 0);
       if (declaredSize > maxUploadBytes) {
         res.statusCode = 413; res.end(JSON.stringify({ ok: false, msg: 'file too large' })); return;

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { tryUploadToBlob } from './blobUpload.js';
-import { compressImage } from './imageCompress.js';
+import { compressImage, formatImageBytes } from './imageCompress.js';
 import {
   LayoutDashboard, Box, Tag, Users, Zap, Receipt, Settings, Sparkles, Grid3X3, Upload, FileText, X,
   Video, Radio, BookOpen, Target, Handshake, Mic, Crown, UserCircle, Lightbulb,
@@ -285,16 +285,22 @@ export function renderIcon(name, size = 18, className = '') {
 
 // 图标选择器：上传图标 + 30 内置图标
 export function AdminIconPicker({ icon, avatar, onIconChange, onAvatarChange, color = 'bg-blue-600' }) {
+  const [uploadInfo, setUploadInfo] = useState('');
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
+    const processed = await compressImage(file, { maxWidth: 512, maxHeight: 512, quality: 0.82 });
+    setUploadInfo(processed === file
+      ? `已保留原格式 · ${formatImageBytes(file.size)}`
+      : `已优化 ${formatImageBytes(file.size)} → ${formatImageBytes(processed.size)} · WebP`);
     try {
-      const blobUrl = await tryUploadToBlob(file, { admin: true });
+      const blobUrl = await tryUploadToBlob(processed, { admin: true });
       if (blobUrl) { onAvatarChange(blobUrl); return; }
     } catch (err) { /* fallthrough to base64 */ }
     const reader = new FileReader();
     reader.onload = () => onAvatarChange(reader.result);
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(processed);
   };
   return (
     <div className="space-y-3">
@@ -310,6 +316,7 @@ export function AdminIconPicker({ icon, avatar, onIconChange, onAvatarChange, co
           {avatar && (
             <button type="button" onClick={() => onAvatarChange('')} className="block text-xs text-slate-400 hover:text-slate-600">清除图标</button>
           )}
+          {uploadInfo && <div className="text-xs text-emerald-600">{uploadInfo}</div>}
         </div>
       </div>
       <div>
@@ -335,6 +342,7 @@ export function AdminIconPicker({ icon, avatar, onIconChange, onAvatarChange, co
 // 智能体 / 工作流共用的新手教程配置。仅保存图片地址、跳转地址和标题。
 export function TutorialSettings({ image, url, title, onChange }) {
   const [uploading, setUploading] = useState(false);
+  const [uploadInfo, setUploadInfo] = useState('');
 
   const handleFile = async (event) => {
     const file = event.target.files?.[0];
@@ -343,7 +351,10 @@ export function TutorialSettings({ image, url, title, onChange }) {
     setUploading(true);
     try {
       let processed = file;
-      try { processed = await compressImage(file); } catch { /* 压缩失败时保留原图 */ }
+      try { processed = await compressImage(file, { maxWidth: 1680, maxHeight: 720, quality: 0.8 }); } catch { /* 压缩失败时保留原图 */ }
+      setUploadInfo(processed === file
+        ? `已保留原格式 · ${formatImageBytes(file.size)}`
+        : `已优化 ${formatImageBytes(file.size)} → ${formatImageBytes(processed.size)} · WebP`);
       let nextImage = await tryUploadToBlob(processed, { admin: true });
       if (!nextImage) {
         nextImage = await new Promise((resolve, reject) => {
@@ -376,6 +387,9 @@ export function TutorialSettings({ image, url, title, onChange }) {
         </label>
         {image && <button type="button" onClick={() => onChange({ tutorialImage: '' })} className="text-xs text-slate-400 hover:text-rose-500">清除图片</button>}
       </div>
+      <p className={`text-xs ${uploadInfo ? 'text-emerald-600' : 'text-slate-400'}`}>
+        {uploadInfo || '上传时自动压缩为不超过 1680 × 720 的 WebP 图片'}
+      </p>
       <input value={title || ''} onChange={e => onChange({ tutorialTitle: e.target.value })} placeholder="标题，如：3 分钟快速上手" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" />
       <input value={url || ''} onChange={e => onChange({ tutorialUrl: e.target.value })} placeholder="跳转链接，如：https://..." className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" />
       <p className="text-xs leading-5 text-slate-400">前台仅在图片和有效链接都已填写时显示，点击后在新窗口打开。</p>

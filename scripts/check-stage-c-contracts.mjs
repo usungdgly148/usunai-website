@@ -5,7 +5,9 @@ const root = path.resolve(import.meta.dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const checks = [
   ['frontend/src/store.jsx', ["tutorialTitle: '新手使用教程'", "tutorialImage: ''", "tutorialUrl: ''"]],
-  ['frontend/src/adminUI.jsx', ['export function TutorialSettings', 'aspect-[21/9]', 'tryUploadToBlob(processed, { admin: true })']],
+  ['frontend/src/adminUI.jsx', ['export function TutorialSettings', 'aspect-[21/9]', 'maxWidth: 512', 'maxWidth: 1680', 'formatImageBytes', 'tryUploadToBlob(processed, { admin: true })']],
+  ['frontend/src/imageCompress.js', ["canvas.toBlob(resolve, 'image/webp', quality)", "file.type === 'image/gif' || file.type === 'image/svg+xml'", 'maxHeight / img.height']],
+  ['server/index.mjs', ["contentType.startsWith('image/') ? 5 * 1024 * 1024 : 25 * 1024 * 1024"]],
   ['frontend/src/blobUpload.js', ['adminFetch', 'const authenticatedFetch = admin ? adminFetch : apiFetch', 'authenticatedFetch(data.url']],
   ['frontend/src/store.jsx', ['const onUserUnauthorized', 'const onAdminUnauthorized', "addEventListener('usun:unauthorized', onUserUnauthorized)", "addEventListener('usun:admin-unauthorized', onAdminUnauthorized)"]],
   ['frontend/src/innerUI.jsx', ["aspectRatio: '21 / 9'", 'mobileActionTitle', 'SlidersHorizontal']],
