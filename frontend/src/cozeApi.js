@@ -196,10 +196,10 @@ export async function revealAgentToken(id) {
  * ============================================================ */
 
 // 列出当前授权账号下可访问的工作空间（GET /v1/workspaces）
-// cfg = { baseUrl, authType, apiKey, clientId, keyId, privateKey }
+// cfg = { authProviderId, baseUrl }
 export async function listCozeWorkspaces(cfg) {
   try {
-    const res = await apiFetch('/api/coze/workspaces', {
+    const res = await adminFetch('/api/coze/workspaces', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cfg || {}),
@@ -215,7 +215,7 @@ export async function listCozeWorkspaces(cfg) {
 // 返回 { ok, items: [...], has_more }
 export async function listCozeWorkflows(cfg) {
   try {
-    const res = await apiFetch('/api/coze/workflow-list', {
+    const res = await adminFetch('/api/coze/workflow-list', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cfg || {}),
@@ -231,7 +231,7 @@ export async function listCozeWorkflows(cfg) {
 // 返回 { ok, workflow: {workflow_id, workflow_name, description}, inputs: [...], outputs: [...] }
 export async function getCozeWorkflowInfo(cfg) {
   try {
-    const res = await apiFetch('/api/coze/workflow-info', {
+    const res = await adminFetch('/api/coze/workflow-info', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cfg || {}),
@@ -325,7 +325,7 @@ export async function runWorkflow({ parameters, cfg, signal, onChunk }) {
 // 列出授权中心已开通的授权（供"选择授权凭证"下拉）
 export async function listAuthProviders() {
   try {
-    const res = await apiFetch('/api/admin/auth-providers', { method: 'GET' });
+    const res = await adminFetch('/api/admin/auth-providers', { method: 'GET' });
     return await res.json();
   } catch (e) {
     return { ok: false, error: '网络错误：' + String(e.message || e) };
@@ -335,7 +335,7 @@ export async function listAuthProviders() {
 // 按授权凭证解析真实 token（供"测试连接"等使用）
 export async function getCozeConnectInfo(authProviderId) {
   try {
-    const res = await apiFetch('/api/coze/connect-info', {
+    const res = await adminFetch('/api/coze/connect-info', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ authProviderId }),
@@ -351,7 +351,7 @@ export async function getCozeConnectInfo(authProviderId) {
 // 不带 workspaceId → 返回 { ok, workspaces:[...] }；带 workspaceId → 返回 { ok, bots:[...], has_more }
 export async function listCozeBots(cfg) {
   try {
-    const res = await apiFetch('/api/coze/bots', {
+    const res = await adminFetch('/api/coze/bots', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cfg || {}),
@@ -367,7 +367,7 @@ export async function listCozeBots(cfg) {
 // 返回 { ok, bot: { bot_id, bot_name, description, icon_url, opening_dialog, suggested_questions } }
 export async function getCozeBotDetail(cfg) {
   try {
-    const res = await apiFetch('/api/coze/bot-detail', {
+    const res = await adminFetch('/api/coze/bot-detail', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cfg || {}),

@@ -131,11 +131,7 @@ function WorkflowListPicker({ open, onClose, auth, onPick }) {
 
   const buildCfg = () => {
     if (!auth) return null;
-    const base = { baseUrl: auth.baseUrl, authType: auth.type === 'oauth' ? 'oauth' : 'pat' };
-    if (auth.type === 'oauth') {
-      return { ...base, clientId: auth.clientId, keyId: auth.keyId, privateKey: auth.privateKey };
-    }
-    return { ...base, apiKey: auth.apiKey };
+    return { authProviderId: auth.id, baseUrl: auth.baseUrl };
   };
 
   const loadWorkspaces = async () => {
@@ -729,17 +725,10 @@ export default function AdminWorkflowEdit({ isNew: isNewProp }) {
     setFetchResult(null);
     try {
       const cfg = {
+        authProviderId: auth.id,
         baseUrl: auth.baseUrl,
-        authType: auth.type === 'oauth' ? 'oauth' : 'pat',
         workflowId: wfId,
       };
-      if (auth.type === 'oauth') {
-        cfg.clientId = auth.clientId;
-        cfg.keyId = auth.keyId;
-        cfg.privateKey = auth.privateKey;
-      } else {
-        cfg.apiKey = auth.apiKey;
-      }
       const r = await getCozeWorkflowInfo(cfg);
       if (!r.ok) {
         setFetchResult({ ok: false, msg: r.error || '获取失败' });
