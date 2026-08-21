@@ -25,12 +25,21 @@ function parseSSE(buffer, onEvent) {
 
 // 通过后端（EdgeOne 函数）发起扣子对话（SSE 流式）。
 // 无状态函数环境无持久存储，前端随请求携带智能体的连接配置，函数只做转发（带 Token 调扣子）。
-export async function chatWithAgent({ agentId, message, sessionId, onDelta, onReasoning, onUsage, signal, cfg }) {
+export async function chatWithAgent({ agentId, message, attachments, sessionId, onDelta, onReasoning, onUsage, signal, cfg }) {
   const body = {
     agentId,
     sessionId: sessionId || `s-${Date.now()}`,
     message,
   };
+  if (Array.isArray(attachments) && attachments.length) {
+    body.attachments = attachments.map((item) => ({
+      kind: item.kind || 'image',
+      name: item.name || '',
+      url: item.url || '',
+      mimeType: item.mimeType || '',
+      size: Number(item.size) || 0,
+    }));
+  }
   // 携带连接配置（前端从 localStorage 读取），函数据此转发扣子
   if (cfg) {
     body.baseUrl = cfg.baseUrl || '';

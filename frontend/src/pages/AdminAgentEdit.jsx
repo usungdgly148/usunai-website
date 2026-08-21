@@ -630,6 +630,9 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
                     <option value="deepseek-v4-pro">deepseek-v4-pro</option>
                   </select>
                 </Field>
+                <p className="text-xs text-slate-600 bg-violet-50 border border-violet-100 rounded-lg px-3 py-2">
+                  纯文字对话使用所选模型；用户上传图片时，服务端会自动切换到 DeepSeek 官方视觉模型 deepseek-v4-flash-vision-exp。
+                </p>
                 <label className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2.5">
                   <span className="text-sm font-medium text-slate-700">展示思考过程</span>
                   <input type="checkbox" checked={form.thinkingEnabled} onChange={e => set({ thinkingEnabled: e.target.checked })} />

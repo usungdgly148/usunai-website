@@ -10,6 +10,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { extractResultMedia, classifyAsset, ASSET_TYPE_NAMES, SOURCE_TYPE_NAMES } from '../assetUtils.js';
 import { copyText } from '../clipboard.js';
+import { compressImage } from '../imageCompress.js';
 
 function AutoResizeTextarea({ value, onChange, placeholder, className, onKeyDown }) {
   const ref = useRef(null);
@@ -226,18 +227,19 @@ function Composer({ input, setInput, onSubmit, streaming, attachments, setAttach
     if (!files.length) return;
     const results = await Promise.all(files.map(async (f) => {
       const isImg = f.type.startsWith('image/');
-      let url = await tryUploadToBlob(f);
+      const uploadFile = isImg ? await compressImage(f, { maxWidth: 2048, maxHeight: 2048, quality: 0.82 }) : f;
+      let url = await tryUploadToBlob(uploadFile);
       if (!url) {
         // 本地/未配置 Blob 时降级为 base64 内联，保证功能可用
         url = await new Promise((res) => {
           const r = new FileReader();
           r.onload = (e) => res(e.target.result);
           r.onerror = () => res('');
-          r.readAsDataURL(f);
+          r.readAsDataURL(uploadFile);
         });
       }
       if (!url) return null;
-      return { name: f.name, url, kind: isImg ? 'image' : 'file', size: f.size };
+      return { name: uploadFile.name, url, kind: isImg ? 'image' : 'file', mimeType: uploadFile.type || '', size: uploadFile.size };
     }));
     const valid = results.filter(Boolean);
     if (valid.length) setAttachments((prev) => [...prev, ...valid]);
@@ -384,7 +386,14 @@ export default function Chat() {
   const loadHistory = (h) => {
     const storedMessages = (Array.isArray(h.messages) ? h.messages : [])
       .filter(m => (m?.role === 'user' || m?.role === 'assistant') && typeof m.content === 'string')
-      .map(m => ({ role: m.role, content: m.content, ...(m.usage ? { usage: m.usage } : {}), ...(m.reasoning ? { reasoning: m.reasoning } : {}) }));
+      .map(m => ({
+        role: m.role,
+        content: m.content,
+        ...(Array.isArray(m.images) && m.images.length ? { images: m.images } : {}),
+        ...(Array.isArray(m.files) && m.files.length ? { files: m.files } : {}),
+        ...(m.usage ? { usage: m.usage } : {}),
+        ...(m.reasoning ? { reasoning: m.reasoning } : {}),
+      }));
     // 新记录恢复完整多轮 transcript；旧记录没有 messages 时继续兼容原先的一问一答结构。
     setMessages(storedMessages.length ? storedMessages : [
       { role: 'user', content: h.userPrompt || h.title || '' },
@@ -419,8 +428,22 @@ export default function Chat() {
       .map(m => ({
         role: m.role,
         content: String(m.content ?? ''),
+        ...(Array.isArray(m.images) && m.images.length ? { images: m.images } : {}),
+        ...(Array.isArray(m.files) && m.files.length ? { files: m.files } : {}),
         ...(m.usage ? { usage: m.usage } : {}),
       }));
+    const attImages = atts.filter(a => a.kind === 'image');
+    const attFiles = atts.filter(a => a.kind === 'file');
+    if (agent.platform === 'deepseek-native') {
+      if (attFiles.length) {
+        window.alert('DeepSeek 原生智能体当前支持上传 JPEG、PNG、GIF、WebP 图片，暂不支持其他附件。');
+        return;
+      }
+      if (attImages.length > 4) {
+        window.alert('DeepSeek 原生智能体每次最多上传 4 张图片。');
+        return;
+      }
+    }
     const system = agent.platform === 'deepseek-native'
       ? String(agent.instructions || '')
       : [agent.instructions, agent.opening].filter(Boolean).join('\n');
@@ -429,7 +452,7 @@ export default function Chat() {
     // —— 之前只是合计 504 token，主人误以为系统提示词没算进去（实际它占了 460+ token）
     const systemTokens = system ? estimateTokens(system) + BILLING.messageOverhead : 0;
     const historyTokens = historyMsgs.reduce((s, m) => s + (m.content ? estimateTokens(m.content) + BILLING.messageOverhead : 0), 0);
-    const userTokens = estimateTokens(text) + BILLING.messageOverhead;
+    const userTokens = estimateTokens(text) + BILLING.messageOverhead + (agent.platform === 'deepseek-native' ? attImages.length * 384 : 0);
     let prePoints = 1;
     try {
       const pre = await fetchEstimate({ system, history: historyMsgs, message: text, answer: '', priceRate: agent.priceRate });
@@ -454,10 +477,10 @@ export default function Chat() {
     }
 
     // 组装附件引用：图片以 markdown 内联、文件以链接形式追加到发给智能体的文本里
-    const attImages = atts.filter(a => a.kind === 'image').map(a => a.url);
-    const attFiles = atts.filter(a => a.kind === 'file').map(a => ({ name: a.name, url: a.url }));
+    const displayImages = attImages.map(a => a.url);
+    const displayFiles = attFiles.map(a => ({ name: a.name, url: a.url }));
     let messageText = text;
-    if (atts.length) {
+    if (atts.length && agent.platform !== 'deepseek-native') {
       const refs = atts.map(a => a.kind === 'image' ? `![图片](${a.url})` : `[附件](${a.url})`).join('\n');
       messageText = (text ? text + '\n' : '') + refs;
     }
@@ -468,7 +491,7 @@ export default function Chat() {
     // 后端每推一个 onDelta 就把它累积到 acc，下方的打字机按固定节奏推 displayed,
     // 把 messages 数组最后一条 assistant 的 content 渲染为 acc.substring(0, displayed)。
     // 这样无论后端 SSE 是 chunk-by-chunk 流还是一次性到，主人看到的效果都一样：逐字出现。
-    setMessages((prev) => [...prev, { role: 'user', content: text, images: attImages, files: attFiles }, { role: 'assistant', content: '' }]);
+    setMessages((prev) => [...prev, { role: 'user', content: text, images: displayImages, files: displayFiles }, { role: 'assistant', content: '' }]);
     setStreaming(true);
     setResult('');
     startTimeRef.current = Date.now();
@@ -512,6 +535,7 @@ export default function Chat() {
       await chatWithAgent({
         agentId: agent.id,
         message: messageText,
+        attachments: agent.platform === 'deepseek-native' ? attImages : undefined,
         sessionId,
         cfg: {
           platform: agent.platform,
@@ -571,11 +595,17 @@ export default function Chat() {
       const existingHistory = history.find(h => String(h.id) === String(historyItemId));
       const firstPrompt = conversationBefore.find(m => m.role === 'user' && m.content.trim())?.content
         || existingHistory?.userPrompt
-        || text;
+        || text
+        || '图片对话';
       const now = new Date().toISOString();
+      const persistableConversation = conversationBefore.map((item) => {
+        const images = Array.isArray(item.images) ? item.images.filter(url => typeof url === 'string' && !url.startsWith('data:')) : [];
+        return { ...item, ...(images.length ? { images } : { images: undefined }) };
+      });
+      const persistableImages = displayImages.filter(url => typeof url === 'string' && !url.startsWith('data:'));
       const conversationMessages = [
-        ...conversationBefore,
-        { role: 'user', content: text },
+        ...persistableConversation,
+        { role: 'user', content: text, ...(persistableImages.length ? { images: persistableImages } : {}), ...(displayFiles.length ? { files: displayFiles } : {}) },
         { role: 'assistant', content: finalContent, reasoning: reasoningAcc || undefined, usage: est },
       ];
       const historyItem = {
@@ -601,7 +631,7 @@ export default function Chat() {
         sourceName: agent.name,
         name: agent.name,
         content: acc,
-        inputs: { prompt: text },
+        inputs: { prompt: text, ...(persistableImages.length ? { images: persistableImages } : {}) },
         cost: est.points,
         tokens: est.totalTokens,
         duration,
