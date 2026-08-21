@@ -429,28 +429,30 @@ export function StoreProvider({ children }) {
   // 启动时：若本地没有 token，却残留旧版 localStorage 的 user/adminUser，立即清空，
   // 避免「页面显示已登录，实际请求不带 token」的 401 陷阱。
   useEffect(() => {
-    if (!getToken() && (user || adminUser)) {
+    if (!getToken() && user) {
       setUser(null);
-      setAdminUser(null);
       setPoints(0);
     }
+    if (!getAdminToken() && adminUser) setAdminUser(null);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  // 任意请求收到 401 时统一清状态（apiFetch 会触发 usun:unauthorized 事件）
+  // 前台与后台会话严格隔离：任一侧收到 401 时，只清理该侧登录状态。
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const onUnauthorized = () => {
+    const onUserUnauthorized = () => {
       clearToken();
-      clearAdminToken();
       setTokenState('');
       setUser(null);
-      setAdminUser(null);
       setPoints(0);
     };
-    window.addEventListener('usun:unauthorized', onUnauthorized);
-    window.addEventListener('usun:admin-unauthorized', onUnauthorized);
+    const onAdminUnauthorized = () => {
+      clearAdminToken();
+      setAdminUser(null);
+    };
+    window.addEventListener('usun:unauthorized', onUserUnauthorized);
+    window.addEventListener('usun:admin-unauthorized', onAdminUnauthorized);
     return () => {
-      window.removeEventListener('usun:unauthorized', onUnauthorized);
-      window.removeEventListener('usun:admin-unauthorized', onUnauthorized);
+      window.removeEventListener('usun:unauthorized', onUserUnauthorized);
+      window.removeEventListener('usun:admin-unauthorized', onAdminUnauthorized);
     };
   }, []);
   // 前台「算力充值」弹窗：提升到 App 顶层由 store 全局控制（Header/Chat/Workflow 都可触发）

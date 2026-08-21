@@ -143,7 +143,7 @@ export default function AdminLanding() {
                         const file = e.target.files?.[0];
                         if (!file) return;
                         try {
-                          const blobUrl = await tryUploadToBlob(file);
+                          const blobUrl = await tryUploadToBlob(file, { admin: true });
                           if (blobUrl) { updateLandingFeature(i, { image: blobUrl }); }
                           else { const dataUrl = await fileToCompressedDataUrl(file); updateLandingFeature(i, { image: dataUrl }); }
                         } catch (err) {
@@ -336,7 +336,7 @@ export default function AdminLanding() {
                     const file = e.target.files?.[0];
                     if (!file) return;
                     try {
-                      const blobUrl = await tryUploadToBlob(file);
+                      const blobUrl = await tryUploadToBlob(file, { admin: true });
                       if (blobUrl) { updateCustomerService({ qr: blobUrl }); }
                       else { const dataUrl = await fileToCompressedDataUrl(file); updateCustomerService({ qr: dataUrl }); }
                     } catch (err) {

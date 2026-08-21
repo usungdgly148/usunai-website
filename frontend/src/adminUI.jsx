@@ -289,7 +289,7 @@ export function AdminIconPicker({ icon, avatar, onIconChange, onAvatarChange, co
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const blobUrl = await tryUploadToBlob(file);
+      const blobUrl = await tryUploadToBlob(file, { admin: true });
       if (blobUrl) { onAvatarChange(blobUrl); return; }
     } catch (err) { /* fallthrough to base64 */ }
     const reader = new FileReader();
@@ -344,7 +344,7 @@ export function TutorialSettings({ image, url, title, onChange }) {
     try {
       let processed = file;
       try { processed = await compressImage(file); } catch { /* 压缩失败时保留原图 */ }
-      let nextImage = await tryUploadToBlob(processed);
+      let nextImage = await tryUploadToBlob(processed, { admin: true });
       if (!nextImage) {
         nextImage = await new Promise((resolve, reject) => {
           const reader = new FileReader();

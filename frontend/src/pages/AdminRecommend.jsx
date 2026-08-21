@@ -68,7 +68,7 @@ export default function AdminRecommend() {
     let processed = file;
     try { processed = await compressImage(file); } catch { /* 压缩失败用原图 */ }
     try {
-      const blobUrl = await tryUploadToBlob(processed);
+      const blobUrl = await tryUploadToBlob(processed, { admin: true });
       if (blobUrl) { setForm(prev => ({ ...prev, image: blobUrl })); return; }
     } catch (err) { /* fallthrough to base64 */ }
     const reader = new FileReader();

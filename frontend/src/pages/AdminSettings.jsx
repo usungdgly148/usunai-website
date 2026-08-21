@@ -33,7 +33,7 @@ export default function AdminSettings() {
     if (!file) return;
     if (!file.type.startsWith('image/')) { window.alert('请上传图片文件'); return; }
     try {
-      const blobUrl = await tryUploadToBlob(file);
+      const blobUrl = await tryUploadToBlob(file, { admin: true });
       if (blobUrl) { setLogo(blobUrl); persistAdminKey('logo', blobUrl); return; }
     } catch (err) { /* fallthrough to base64 */ }
     const reader = new FileReader();
