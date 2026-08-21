@@ -1,5 +1,5 @@
 import { Routes, Route, useLocation, Link, Navigate } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -9,33 +9,45 @@ import { getToken, getAdminToken } from './authFetch.js';
 import { ADMIN_NAV, findNavMeta } from './adminUI.jsx';
 import { Sparkles, Menu, ArrowLeft, Building2, KeyRound, X, Check, MessageCircle, AtSign, Music, QrCode, AlertTriangle } from 'lucide-react';
 import Home from './pages/Home.jsx';
-import AgentList from './pages/AgentList.jsx';
-import Chat from './pages/Chat.jsx';
-import Workflow from './pages/Workflow.jsx';
-import History from './pages/History.jsx';
-import Profile from './pages/Profile.jsx';
-import Assets from './pages/Assets.jsx';
-import Orders from './pages/Orders.jsx';
-import ComputeRecords from './pages/ComputeRecords.jsx';
-import AdminLogin from './pages/AdminLogin.jsx';
-import AdminDashboard from './pages/AdminDashboard.jsx';
-import AdminAgents from './pages/AdminAgents.jsx';
-import AdminAgentEdit from './pages/AdminAgentEdit.jsx';
-import ResetPassword from './pages/ResetPassword.jsx';
-import AdminWorkflowEdit from './pages/AdminWorkflowEdit.jsx';
-import AdminCategories from './pages/AdminCategories.jsx';
-import AdminUsers from './pages/AdminUsers.jsx';
-import AdminAssets from './pages/AdminAssets.jsx';
-import AdminCompute from './pages/AdminCompute.jsx';
-import AdminOrders from './pages/AdminOrders.jsx';
-import AdminSettings from './pages/AdminSettings.jsx';
-import AdminRecommend from './pages/AdminRecommend.jsx';
-import AdminLanding from './pages/AdminLanding.jsx';
-import AdminAuthProviders from './pages/AdminAuthProviders.jsx';
-import AdminAnnouncements from './pages/AdminAnnouncements.jsx';
-import AdminLegalAgreements from './pages/AdminLegalAgreements.jsx';
-import AdminKnowledgeBases from './pages/AdminKnowledgeBases.jsx';
 import CustomerService from './CustomerService.jsx';
+
+const AgentList = lazy(() => import('./pages/AgentList.jsx'));
+const Chat = lazy(() => import('./pages/Chat.jsx'));
+const Workflow = lazy(() => import('./pages/Workflow.jsx'));
+const History = lazy(() => import('./pages/History.jsx'));
+const Profile = lazy(() => import('./pages/Profile.jsx'));
+const Assets = lazy(() => import('./pages/Assets.jsx'));
+const Orders = lazy(() => import('./pages/Orders.jsx'));
+const ComputeRecords = lazy(() => import('./pages/ComputeRecords.jsx'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword.jsx'));
+const AdminLogin = lazy(() => import('./pages/AdminLogin.jsx'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard.jsx'));
+const AdminAgents = lazy(() => import('./pages/AdminAgents.jsx'));
+const AdminAgentEdit = lazy(() => import('./pages/AdminAgentEdit.jsx'));
+const AdminWorkflowEdit = lazy(() => import('./pages/AdminWorkflowEdit.jsx'));
+const AdminCategories = lazy(() => import('./pages/AdminCategories.jsx'));
+const AdminUsers = lazy(() => import('./pages/AdminUsers.jsx'));
+const AdminAssets = lazy(() => import('./pages/AdminAssets.jsx'));
+const AdminCompute = lazy(() => import('./pages/AdminCompute.jsx'));
+const AdminOrders = lazy(() => import('./pages/AdminOrders.jsx'));
+const AdminSettings = lazy(() => import('./pages/AdminSettings.jsx'));
+const AdminRecommend = lazy(() => import('./pages/AdminRecommend.jsx'));
+const AdminLanding = lazy(() => import('./pages/AdminLanding.jsx'));
+const AdminAuthProviders = lazy(() => import('./pages/AdminAuthProviders.jsx'));
+const AdminAnnouncements = lazy(() => import('./pages/AdminAnnouncements.jsx'));
+const AdminLegalAgreements = lazy(() => import('./pages/AdminLegalAgreements.jsx'));
+const AdminKnowledgeBases = lazy(() => import('./pages/AdminKnowledgeBases.jsx'));
+
+function RouteLoading() {
+  return (
+    <div className="min-h-[12rem] flex items-center justify-center" role="status" aria-live="polite">
+      <div className="flex items-center gap-2 text-sm text-slate-400">
+        <span className="w-4 h-4 rounded-full border-2 border-slate-200 border-t-blue-500 animate-spin" />
+        页面加载中…
+      </div>
+    </div>
+  );
+}
 
 function FrontLayout() {
   const location = useLocation();
@@ -50,19 +62,21 @@ function FrontLayout() {
       <div className={`min-h-screen flex flex-col ${isInternal ? '' : 'ml-0 md:ml-[25%]'}`}>
         <Header />
         <main className={`flex-1 ${isInternal ? '' : 'px-4 sm:px-6 md:px-8 py-6'}`}>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/agents" element={<AgentList />} />
-            <Route path="/workflows" element={<AgentList mode="workflow" />} />
-            <Route path="/chat/:id" element={<Chat />} />
-            <Route path="/workflow/:id" element={<Workflow />} />
-            <Route path="/history" element={<History />} />
-            <Route path="/profile" element={<Profile />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
-            <Route path="/assets" element={<Assets />} />
-            <Route path="/orders" element={<Orders />} />
-            <Route path="/compute-records" element={<ComputeRecords />} />
-          </Routes>
+          <Suspense fallback={<RouteLoading />}>
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/agents" element={<AgentList />} />
+              <Route path="/workflows" element={<AgentList mode="workflow" />} />
+              <Route path="/chat/:id" element={<Chat />} />
+              <Route path="/workflow/:id" element={<Workflow />} />
+              <Route path="/history" element={<History />} />
+              <Route path="/profile" element={<Profile />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
+              <Route path="/assets" element={<Assets />} />
+              <Route path="/orders" element={<Orders />} />
+              <Route path="/compute-records" element={<ComputeRecords />} />
+            </Routes>
+          </Suspense>
         </main>
         {!isInternal && <Footer />}
         <CustomerService />
@@ -85,7 +99,7 @@ function AdminLayout() {
   const [pwdMsg, setPwdMsg] = useState(null);
   if (!location.pathname.startsWith('/admin')) return null;
   if (location.pathname === '/admin/login') {
-    return <Routes><Route path="/admin/login" element={<AdminLogin />} /></Routes>;
+    return <Suspense fallback={<RouteLoading />}><Routes><Route path="/admin/login" element={<AdminLogin />} /></Routes></Suspense>;
   }
   // 登录守卫：未登录/无有效 token 的超级管理员一律跳转到登录页
   // 2026-08-04：admin token 已独立为 clone_admin_token，必须用 getAdminToken() 检查。
@@ -177,26 +191,28 @@ function AdminLayout() {
         </header>
 
         <main className="flex-1 p-4 md:p-8">
-          <Routes>
-            <Route path="/admin" element={<AdminDashboard />} />
-            <Route path="/admin/agents" element={<AdminAgents />} />
-            <Route path="/admin/agents/new" element={<AdminAgentEdit isNew />} />
-            <Route path="/admin/agents/:id" element={<AdminAgentEdit />} />
-            <Route path="/admin/auth-providers" element={<AdminAuthProviders />} />
-            <Route path="/admin/knowledge-bases" element={<AdminKnowledgeBases />} />
-            <Route path="/admin/workflows/new" element={<AdminWorkflowEdit isNew />} />
-            <Route path="/admin/workflows/:id" element={<AdminWorkflowEdit />} />
-            <Route path="/admin/categories" element={<AdminCategories />} />
-            <Route path="/admin/recommend" element={<AdminRecommend />} />
-            <Route path="/admin/landing" element={<AdminLanding />} />
-            <Route path="/admin/announcements" element={<AdminAnnouncements />} />
-            <Route path="/admin/legal-agreements" element={<AdminLegalAgreements />} />
-            <Route path="/admin/users" element={<AdminUsers />} />
-            <Route path="/admin/assets" element={<AdminAssets />} />
-            <Route path="/admin/compute" element={<AdminCompute />} />
-            <Route path="/admin/orders" element={<AdminOrders />} />
-            <Route path="/admin/settings" element={<AdminSettings />} />
-          </Routes>
+          <Suspense fallback={<RouteLoading />}>
+            <Routes>
+              <Route path="/admin" element={<AdminDashboard />} />
+              <Route path="/admin/agents" element={<AdminAgents />} />
+              <Route path="/admin/agents/new" element={<AdminAgentEdit isNew />} />
+              <Route path="/admin/agents/:id" element={<AdminAgentEdit />} />
+              <Route path="/admin/auth-providers" element={<AdminAuthProviders />} />
+              <Route path="/admin/knowledge-bases" element={<AdminKnowledgeBases />} />
+              <Route path="/admin/workflows/new" element={<AdminWorkflowEdit isNew />} />
+              <Route path="/admin/workflows/:id" element={<AdminWorkflowEdit />} />
+              <Route path="/admin/categories" element={<AdminCategories />} />
+              <Route path="/admin/recommend" element={<AdminRecommend />} />
+              <Route path="/admin/landing" element={<AdminLanding />} />
+              <Route path="/admin/announcements" element={<AdminAnnouncements />} />
+              <Route path="/admin/legal-agreements" element={<AdminLegalAgreements />} />
+              <Route path="/admin/users" element={<AdminUsers />} />
+              <Route path="/admin/assets" element={<AdminAssets />} />
+              <Route path="/admin/compute" element={<AdminCompute />} />
+              <Route path="/admin/orders" element={<AdminOrders />} />
+              <Route path="/admin/settings" element={<AdminSettings />} />
+            </Routes>
+          </Suspense>
         </main>
       </div>
 
