@@ -85,7 +85,7 @@ export default function ComputeRecords() {
           </select>
           <div className="relative flex-1 lg:max-w-sm lg:ml-auto">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-            <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} placeholder="搜索流水号 / 备注..." className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition text-sm" />
+            <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} placeholder="搜索流水号 / 任务..." className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition text-sm" />
           </div>
         </div>
 
@@ -98,7 +98,6 @@ export default function ComputeRecords() {
                 <th className="text-left px-5 py-3.5 font-medium">任务</th>
                 <th className="text-left px-5 py-3.5 font-medium">变动</th>
                 <th className="text-left px-5 py-3.5 font-medium">剩余</th>
-                <th className="text-left px-5 py-3.5 font-medium">备注</th>
                 <th className="text-left px-5 py-3.5 font-medium">时间</th>
               </tr>
             </thead>
@@ -117,12 +116,11 @@ export default function ComputeRecords() {
                     {r.type === 'consume' ? '-' : '+'}{fmt(r.amount)}
                   </td>
                   <td className="px-5 py-4 text-slate-700 tabular-nums">{fmt(r.remaining)}</td>
-                  <td className="px-5 py-4 text-slate-500 text-xs max-w-xs truncate">{r.reason || r.title || '-'}{r.meta?.totalTokens != null ? ` · ${r.meta.totalTokens} token（估）` : ''}</td>
                   <td className="px-5 py-4 text-slate-500 text-xs whitespace-nowrap">{new Date(r.createdAt).toLocaleString('zh-CN')}</td>
                 </tr>
               ))}
               {filtered.length === 0 && (
-                <tr><td colSpan={7} className="px-5 py-16 text-center text-slate-400 text-sm">暂无算力记录</td></tr>
+                <tr><td colSpan={6} className="px-5 py-16 text-center text-slate-400 text-sm">暂无算力记录</td></tr>
               )}
             </tbody>
           </table>
