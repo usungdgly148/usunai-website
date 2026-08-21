@@ -111,9 +111,10 @@ export default function AdminUsers() {
   const userAssets = (userId) => allAssets.filter(a => a.userId === userId);
   const userHistory = (userId) => history.filter(h => h.userId === userId);
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
-    deleteUser(deleteTarget.id, adminUser?.name);
+    const result = await deleteUser(deleteTarget.id, adminUser?.name);
+    if (!result?.ok) return;
     setDeleteTarget(null);
     // 若正在查看该用户详情，关闭抽屉
     setSelected(prev => (prev && prev.id === deleteTarget.id ? null : prev));

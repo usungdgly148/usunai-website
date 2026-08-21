@@ -7,8 +7,9 @@ import { apiFetch, adminFetch } from './authFetch.js';
 export async function tryUploadToBlob(file, { admin = false } = {}) {
   if (!file) return null;
   const authenticatedFetch = admin ? adminFetch : apiFetch;
+  const uploadBase = admin ? '/api/admin/blob' : '/api/blob';
   try {
-    const resp = await authenticatedFetch('/api/blob/upload-url', {
+    const resp = await authenticatedFetch(`${uploadBase}/upload-url`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: file.name, contentType: file.type || 'image/png' }),

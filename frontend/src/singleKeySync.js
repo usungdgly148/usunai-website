@@ -7,7 +7,7 @@
 //       所以必须分别走不同端点，写到不同命名空间。
 // 2026-08-03 商用安全：所有请求经 apiFetch 携带登录会话 token；服务端校验
 //   「普通用户只能写/删自己的记录」——游客写请求会被 401 拒绝，杜绝伪造。
-import { apiFetch } from './authFetch.js';
+import { apiFetch, adminFetch } from './authFetch.js';
 
 const ENDPOINTS = {
   user:    { put: '/api/single-key/users/put',    del: '/api/single-key/users/delete' },
@@ -16,6 +16,8 @@ const ENDPOINTS = {
   compute: { put: '/api/single-key/computes/put', del: '/api/single-key/computes/delete' },
   history: { put: '/api/single-key/history/put',  del: '/api/single-key/history/delete' },
 };
+
+const adminEndpoint = (url) => url.replace('/api/single-key/', '/api/admin/single-key/');
 
 const _post = (url, body) =>
   apiFetch(url, {
@@ -34,4 +36,27 @@ export async function tryDeleteSingleKey(kind, id, extra) {
   const ep = ENDPOINTS[kind];
   if (!ep || !id) return;
   await _post(ep.del, { id, ...(extra || {}) });
+}
+
+async function adminPost(url, body) {
+  const response = await adminFetch(adminEndpoint(url), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) throw new Error(data.msg || `HTTP ${response.status}`);
+  return data;
+}
+
+export async function writeAdminSingleKey(kind, record) {
+  const ep = ENDPOINTS[kind];
+  if (!ep || !record || !record.id) throw new Error('缺少管理员写入参数');
+  return adminPost(ep.put, { record });
+}
+
+export async function deleteAdminSingleKey(kind, id, extra) {
+  const ep = ENDPOINTS[kind];
+  if (!ep || !id) throw new Error('缺少管理员删除参数');
+  return adminPost(ep.del, { id, ...(extra || {}) });
 }

@@ -52,7 +52,13 @@ export default function AdminAuthProviders() {
     setBusy('save');
     try {
       const payload = { ...form, name: form.name.trim(), baseUrl: form.baseUrl.trim() };
-      const savedId = editingId ? (await updateAuthProvider(editingId, payload), editingId) : await addAuthProvider(payload);
+      let savedId;
+      if (editingId) {
+        const ok = await updateAuthProvider(editingId, payload);
+        savedId = ok ? editingId : '';
+      } else {
+        savedId = await addAuthProvider(payload);
+      }
       if (!savedId) throw new Error('保存失败');
       setOpen(false); setResult(null); await refreshAllAdminLists();
     } catch (error) { setResult({ ok: false, text: error.message }); }
@@ -77,7 +83,11 @@ export default function AdminAuthProviders() {
   };
   const remove = async id => {
     if (!window.confirm('确认删除该授权凭证吗？')) return;
-    try { await deleteAuthProvider(id); await refreshAllAdminLists(); }
+    try {
+      const ok = await deleteAuthProvider(id);
+      if (!ok) throw new Error('删除失败');
+      await refreshAllAdminLists();
+    }
     catch (error) { setResult({ ok: false, text: error.message }); }
   };
 

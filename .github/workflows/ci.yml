@@ -31,7 +31,7 @@ jobs:
         run: npm ci --prefix server
 
       - name: Run isolated backend integration checks
-        run: npm run check:stage-d:integration
+        run: npm run check:stage-d:integration && npm run check:session-isolation:integration
 
       - name: Install recovered frontend dependencies
         run: npm ci --prefix frontend

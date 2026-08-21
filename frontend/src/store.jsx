@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { MOCK_AGENTS, MOCK_WORKFLOWS, MOCK_CATEGORIES, MOCK_CATEGORY_GROUPS, MOCK_ORDERS, MOCK_COMPUTES, MOCK_ADMIN_USERS, MOCK_COMPUTE_PACKAGES, MOCK_ADMIN_ACCOUNTS, MOCK_OPERATION_LOGS, MOCK_BANNERS, MOCK_RECOMMENDED, MOCK_ASSETS } from './mock.js';
-import { tryWriteSingleKey, tryDeleteSingleKey } from './singleKeySync.js';
+import { tryWriteSingleKey, tryDeleteSingleKey, writeAdminSingleKey, deleteAdminSingleKey } from './singleKeySync.js';
 import { apiFetch, adminFetch, getToken, setToken, clearToken, getAdminToken, setAdminToken, clearAdminToken } from './authFetch.js';
 
 // ===== 算力套餐有效期 =====
@@ -379,7 +379,8 @@ export function StoreProvider({ children }) {
   const [operationLogs, setOperationLogs] = useState(MOCK_OPERATION_LOGS);
   // AI 授权管理：后台统一配置的 Coze 授权（PAT / OAuth JWT）
   const [authProviders, setAuthProviders] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('clone_auth_providers')) || []; } catch { return []; }
+    try { localStorage.removeItem('clone_auth_providers'); } catch { /* ignore */ }
+    return [];
   });
   // 推荐配置：首页 Banner 轮播 + 首页推荐位（有序智能体/工作流 id）
   const [banners, setBanners] = useState(() => {
@@ -410,7 +411,7 @@ export function StoreProvider({ children }) {
       try {
         const r = await apiFetch('/api/auth/me');
         if (!r.ok) {
-          if (!cancelled) { saveToken(''); setUser(null); setAdminUser(null); setPoints(0); }
+          if (!cancelled) { saveToken(''); setUser(null); setPoints(0); }
           return;
         }
         const data = await r.json();
@@ -601,8 +602,6 @@ export function StoreProvider({ children }) {
     if (latest.membership !== undefined) patch.membership = latest.membership;
     if (Object.keys(patch).length > 0) setUser(prev => prev ? { ...prev, ...patch } : prev);
   }, [adminUsers]);
-  useEffect(() => { localStorage.setItem('clone_auth_providers', JSON.stringify(authProviders)); }, [authProviders]);
-
   const [history, setHistory] = useState(() => {
     try { return collapseHistoryById(JSON.parse(localStorage.getItem('clone_history')) || []); } catch { return []; }
   });
@@ -653,6 +652,7 @@ export function StoreProvider({ children }) {
     };
     const PREFIX_RE = /^(user_|reg_|order_|compute_|hist_)/;
     const fetcher = useAdminToken ? adminFetch : apiFetch;
+    const recordsUrl = useAdminToken ? '/api/admin/data/get-records' : '/api/data/get-records';
     for (const [stateKey, type] of Object.entries(MAP)) {
       const rawKeys = lists[type] || [];   // 用 API 名（type）不是 stateKey
       if (!Array.isArray(rawKeys) || rawKeys.length === 0) continue;
@@ -664,7 +664,7 @@ export function StoreProvider({ children }) {
         const items = [];
         // 后端单次最多接收 200 个 id；分批读取全部 key，分页总数不再受旧 80 条上限影响。
         for (let offset = 0; offset < ids.length; offset += 200) {
-          const r = await fetcher('/api/data/get-records', {
+          const r = await fetcher(recordsUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type, ids: ids.slice(offset, offset + 200) }),
@@ -688,7 +688,7 @@ export function StoreProvider({ children }) {
   // ⚠️ 用 adminFetch 拿全量用户；普通 apiFetch 受用户权限过滤只返回自己的 user_*。
   const refreshAdminUsersFromServer = useCallback(async () => {
     try {
-      const r = await adminFetch('/api/data/list-keys');
+      const r = await adminFetch('/api/admin/data/list-keys');
       if (!r.ok) return { ok: false };
       const j = await r.json();
       const userKeys = (j && j.keys && j.keys.users) || [];
@@ -701,7 +701,7 @@ export function StoreProvider({ children }) {
       if (ids.length === 0) return { ok: true };
       const items = [];
       for (let offset = 0; offset < ids.length; offset += 200) {
-        const r2 = await adminFetch('/api/data/get-records', {
+        const r2 = await adminFetch('/api/admin/data/get-records', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'users', ids: ids.slice(offset, offset + 200) }),
@@ -725,7 +725,7 @@ export function StoreProvider({ children }) {
   // adminLogin 已修复为写到独立 clone_admin_token，所以这里 adminFetch 能拿到正确的 admin token。
   const refreshAllAdminLists = useCallback(async () => {
     try {
-      const r = await adminFetch('/api/data/list-keys');
+      const r = await adminFetch('/api/admin/data/list-keys');
       if (!r.ok) return { ok: false };
       const j = await r.json();
       if (j && j.keys) await hydrateListsFromSingleKeys(j.keys, /* useAdminToken */ true);
@@ -744,10 +744,13 @@ export function StoreProvider({ children }) {
     'agents', 'workflows', 'authProviders', 'categories', 'categoryGroups',
     'banners', 'recommended', 'announcements', 'computePackages',
   ]);
-  const refreshAllConfig = useCallback(async () => {
+  const refreshAllConfig = useCallback(async (options = {}) => {
     try {
-      // get-config 是公开接口（不需要 admin 权限），用 apiFetch 让 Home/AgentList 等公开页面也能拉。
-      const r = await apiFetch('/api/data/get-config');
+      const adminRequest = options.admin === true
+        || (options.admin !== false && typeof window !== 'undefined' && window.location.pathname.startsWith('/admin'));
+      const fetcher = adminRequest ? adminFetch : apiFetch;
+      const configUrl = adminRequest ? '/api/admin/data/get-config' : '/api/data/get-config';
+      const r = await fetcher(configUrl);
       if (!r.ok) return { ok: false };
       const j = await r.json();
       const data = (j && j.data) || {};
@@ -784,31 +787,10 @@ export function StoreProvider({ children }) {
   // 返回 { ok: bool, msg?: string }。失败时设置 persistError，App 顶层 Toast 提示用户，不静默吞错。
   // 2026-08-05 修复：admin 后台 CONFIG 写入必须用 adminFetch（clone_admin_token）。
   // 根因：put-config 服务端 isAdminSession(s) 校验，携带普通用户 token 会 401。
-  // 2026-08-05：用户级 CONFIG 写入（如 assets 运行记录）走 apiFetch（用户 token）；
-  // 后台管理员 CONFIG 写入（agents/landing/banners/.../announcements）走 adminFetch（admin token）。
-  // 8/4 token 拆分后，两者必须严格分离，否则前台用户操作会 401 并被清登录态。
-  const persistKey = useCallback(async (key, value) => {
-    try {
-      const r = await apiFetch('/api/data/put-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key, value }),
-      });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      const j = await r.json();
-      if (!j || !j.ok) throw new Error((j && j.msg) || '服务端返回失败');
-      return { ok: true };
-    } catch (e) {
-      console.error('[persist] failed for key=' + key, e);
-      const msg = '保存「' + key + '」到服务端失败：' + (e.message || e) + '。请刷新页面后重试。';
-      setPersistError({ key, msg, ts: Date.now() });
-      return { ok: false, msg };
-    }
-  }, []);
-
+  // 后台配置写入只允许使用独立管理员会话；用户数据通过各自的专用用户端点保存。
   const persistAdminKey = useCallback(async (key, value) => {
     try {
-      const r = await adminFetch('/api/data/put-config', {
+      const r = await adminFetch('/api/admin/data/put-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, value }),
@@ -1070,9 +1052,11 @@ export function StoreProvider({ children }) {
     setAdminUsers(prev => prev.map(u => u.id === targetId ? { ...u, points: (u.points || 0) + amt } : u));
     const record = { id: Date.now() + Math.random(), type: 'recharge', amount: amt, reason: '管理员充值', createdAt: new Date().toISOString(), userId: targetId };
     setComputeRecords(prev => [record, ...prev]);
-    tryWriteSingleKey('compute', record);
+    writeAdminSingleKey('compute', record).catch((error) => {
+      setPersistError({ key: 'compute', msg: error.message || '算力记录保存失败', ts: Date.now() });
+    });
     // 服务端原子增加（充值；根除并发充值丢失），用权威余额校准
-    apiFetch('/api/compute/recharge', {
+    adminFetch('/api/admin/compute/recharge', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId: targetId, amount: amt }),
@@ -1193,10 +1177,8 @@ export function StoreProvider({ children }) {
     // 2026-08-03 商用安全：登出同时吊销服务端会话
     try { apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => null); } catch (e) { /* ignore */ }
     clearToken();
-    clearAdminToken(); // 2026-08-04：admin 也登出
     setTokenState('');
-    // 2026-08-04：登出时同时清空 adminUsers / registeredUsers，避免下一个账号登入时残留前一个账号的脏数据
-    setUser(null); setAdminUser(null); setAdminUsers([]); setRegisteredUsers([]); setPoints(0);
+    setUser(null); setPoints(0);
   };
 
   // 管理员登录（2026-08-03 服务端化：校验服务端 adminPassword，签发 admin 会话 token）
@@ -1423,7 +1405,7 @@ export function StoreProvider({ children }) {
   // 管理员重置任意用户密码
   const adminResetUserPassword = async (userId, newPassword) => {
     try {
-      const r = await apiFetch('/api/auth/admin-reset-password', {
+      const r = await adminFetch('/api/auth/admin-reset-password', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId, newPassword }),
       });
@@ -1496,7 +1478,7 @@ export function StoreProvider({ children }) {
   // 后台：管理员拉全量资产（AdminAssets / AdminUsers 挂载时调用）
   const refreshAllAssets = useCallback(async () => {
     try {
-      const r = await adminFetch('/api/data/assets');
+      const r = await adminFetch('/api/admin/data/assets');
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
       const items = Array.isArray(j && j.items) ? j.items : [];
@@ -1511,7 +1493,7 @@ export function StoreProvider({ children }) {
   // 后台：删除某用户的某条资产（admin），或整用户清空（assetId 为空 → 级联删除用）
   const deleteAssetAdmin = useCallback(async (targetUserId, assetId) => {
     try {
-      const r = await adminFetch('/api/data/assets/delete', {
+      const r = await adminFetch('/api/admin/assets/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: targetUserId, assetId: assetId || '' }),
@@ -1601,15 +1583,42 @@ export function StoreProvider({ children }) {
     }
   };
 
-  const toggleUserStatus = (userId) => {
-    setAdminUsers(prev => prev.map(u => u.id === userId ? { ...u, status: u.status === 'active' ? 'banned' : 'active' } : u));
-    const updated = adminUsers.find(u => u.id === userId);
-    if (updated) tryWriteSingleKey('user', { ...updated, status: updated.status === 'active' ? 'banned' : 'active' });
+  const toggleUserStatus = async (userId) => {
+    const current = adminUsers.find(u => u.id === userId);
+    if (!current) return { ok: false, msg: '用户不存在' };
+    const updated = { ...current, status: current.status === 'active' ? 'banned' : 'active' };
+    try {
+      await writeAdminSingleKey('user', updated);
+      setAdminUsers(prev => prev.map(u => u.id === userId ? updated : u));
+      return { ok: true };
+    } catch (error) {
+      const msg = error.message || '更新用户状态失败';
+      setPersistError({ key: 'adminUsers', msg, ts: Date.now() });
+      return { ok: false, msg };
+    }
   };
 
   // 删除用户：级联删除该用户所有关联数据（算力记录、订单、对话历史、资产库），并释放注册记录
-  const deleteUser = (userId, adminName) => {
-    if (!userId) return;
+  const deleteUser = async (userId, adminName) => {
+    if (!userId) return { ok: false, msg: '缺少用户 ID' };
+    const compIds = computeRecords.filter(r => r.userId === userId).map(r => r.id);
+    const ordIds = orders.filter(o => o.userId === userId).map(o => o.id);
+    const histIds = history.filter(h => h.userId === userId).map(h => h.id);
+    try {
+      const assetResult = await deleteAssetAdmin(userId, null);
+      if (!assetResult.ok) throw new Error(assetResult.msg || '删除用户资产失败');
+      await Promise.all([
+        deleteAdminSingleKey('user', userId),
+        deleteAdminSingleKey('reg', userId),
+        ...compIds.map(id => deleteAdminSingleKey('compute', id)),
+        ...ordIds.map(id => deleteAdminSingleKey('order', id)),
+        ...histIds.map(id => deleteAdminSingleKey('history', id, { userId })),
+      ]);
+    } catch (error) {
+      const msg = error.message || '删除用户失败';
+      setPersistError({ key: 'adminUsers', msg, ts: Date.now() });
+      return { ok: false, msg };
+    }
     setAdminUsers(prev => prev.filter(u => u.id !== userId));
     setRegisteredUsers(prev => prev.filter(u => u.id !== userId));
     setComputeRecords(prev => prev.filter(r => r.userId !== userId));
@@ -1617,26 +1626,25 @@ export function StoreProvider({ children }) {
     setHistory(prev => prev.filter(h => h.userId !== userId));
     setAllAssets(prev => prev.filter(a => a.userId !== userId));
     // 2026-08-05 拆表后：资产按 assets_<userId> 整把存储，管理员级联删除只需删那一条 key
-    deleteAssetAdmin(userId, null);
     // 若被删除的正是当前登录用户，则强制退出
     if (user && user.id === userId) { setUser(null); setPoints(0); }
     addLog(adminName || '系统', '删除用户', `已删除用户 ${userId} 及其全部关联数据（算力记录/订单/对话历史/资产库）`);
-    // 单条 key 级联删除（fail-silent）
-    tryDeleteSingleKey('user', userId);
-    // 算力/订单/历史 都按 userId 索引，需要服务端按 user 批量清；当前端点只支持单条，
-    // 所以遍历发送（量大时可能稍慢，但 deleteUser 是低频操作——管理员手动删除）
-    const compIds = computeRecords.filter(r => r.userId === userId).map(r => r.id);
-    compIds.forEach(id => tryDeleteSingleKey('compute', id));
-    const ordIds = orders.filter(o => o.userId === userId).map(o => o.id);
-    ordIds.forEach(id => tryDeleteSingleKey('order', id));
-    const histIds = history.filter(h => h.userId === userId).map(h => h.id);
-    histIds.forEach(id => tryDeleteSingleKey('history', id, { userId }));
+    return { ok: true };
   };
 
-  const updateOrderStatus = (orderId, status) => {
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
-    const updated = orders.find(o => o.id === orderId);
-    if (updated) tryWriteSingleKey('order', { ...updated, status });
+  const updateOrderStatus = async (orderId, status) => {
+    const current = orders.find(o => o.id === orderId);
+    if (!current) return { ok: false, msg: '订单不存在' };
+    const updated = { ...current, status };
+    try {
+      await writeAdminSingleKey('order', updated);
+      setOrders(prev => prev.map(o => o.id === orderId ? updated : o));
+      return { ok: true };
+    } catch (error) {
+      const msg = error.message || '更新订单状态失败';
+      setPersistError({ key: 'orders', msg, ts: Date.now() });
+      return { ok: false, msg };
+    }
   };
 
   // 算力套餐管理（全部改为显式 persistKey 写回，替代旧 debounce 全表 PUT）
@@ -1677,27 +1685,24 @@ export function StoreProvider({ children }) {
   // AI 授权管理 CRUD（显式 persistKey 写回）
   const addAuthProvider = async (p) => {
     const id = 'auth' + Date.now();
-    const previous = authProviders;
-    const next = [...previous, { ...p, id, status: p.status || 'active', createdAt: new Date().toISOString() }];
-    setAuthProviders(next);
+    const next = [...authProviders, { ...p, id, status: p.status || 'active', createdAt: new Date().toISOString() }];
     const result = await persistAdminKey('authProviders', next);
-    if (!result.ok) { setAuthProviders(previous); return null; }
+    if (!result.ok) return null;
+    await refreshAllConfig({ admin: true });
     return id;
   };
   const updateAuthProvider = async (id, patch) => {
-    const previous = authProviders;
-    const next = previous.map(a => a.id === id ? { ...a, ...patch } : a);
-    setAuthProviders(next);
+    const next = authProviders.map(a => a.id === id ? { ...a, ...patch } : a);
     const result = await persistAdminKey('authProviders', next);
-    if (!result.ok) { setAuthProviders(previous); return false; }
+    if (!result.ok) return false;
+    await refreshAllConfig({ admin: true });
     return true;
   };
   const deleteAuthProvider = async (id) => {
-    const previous = authProviders;
-    const next = previous.filter(a => a.id !== id);
-    setAuthProviders(next);
+    const next = authProviders.filter(a => a.id !== id);
     const result = await persistAdminKey('authProviders', next);
-    if (!result.ok) { setAuthProviders(previous); return false; }
+    if (!result.ok) return false;
+    await refreshAllConfig({ admin: true });
     return true;
   };
 

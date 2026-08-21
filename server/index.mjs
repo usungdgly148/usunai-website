@@ -472,6 +472,21 @@ function requireAdmin(req, res) {
   res.end(JSON.stringify({ ok: false, error: 'admin authentication required' }));
   return false;
 }
+function requireUser(req, res, message = 'user authentication required') {
+  const session = getSession(req);
+  res.setHeader('Content-Type', 'application/json');
+  if (!session) {
+    res.statusCode = 401;
+    res.end(JSON.stringify({ ok: false, error: message }));
+    return null;
+  }
+  if (isAdminSession(session)) {
+    res.statusCode = 403;
+    res.end(JSON.stringify({ ok: false, error: 'user authentication required' }));
+    return null;
+  }
+  return session;
+}
 const SENSITIVE_CONFIG_FIELDS = new Set([
   'apikey', 'apikeyencrypted', 'privatekey', 'clientsecret', 'password', 'token', 'accesstoken', 'refreshtoken', 'authorization'
 ]);
@@ -485,7 +500,7 @@ function redactSensitiveConfig(value) {
   }
   return out;
 }
-const CONFIG_SECRET_FIELDS = ['apiKey', 'apiKeyEncrypted', 'privateKey', 'clientSecret', 'accessToken', 'refreshToken', 'authProviderId'];
+const CONFIG_SECRET_FIELDS = ['apiKey', 'apiKeyEncrypted', 'privateKey', 'clientSecret', 'accessToken', 'refreshToken', 'token', 'authProviderId'];
 function isEmptyOrMaskedSecret(value) {
   const text = String(value == null ? '' : value).trim();
   return !text || text === '***' || /^●+$/.test(text);
@@ -532,14 +547,18 @@ function prepareAuthProvidersForStorage(incoming, existing) {
 }
 function authProvidersForClient(value) {
   const convert = (provider) => {
-    if (!provider || typeof provider !== 'object' || !['deepseek', BAILIAN_EMBEDDING_TYPE].includes(provider.type)) return provider;
-    const { apiKey, apiKeyEncrypted, ...safe } = provider;
+    if (!provider || typeof provider !== 'object') return provider;
+    const safe = redactSensitiveConfig(provider);
     return {
       ...safe,
-      baseUrl: provider.type === 'deepseek' ? DEEPSEEK_BASE_URL : String(provider.baseUrl || BAILIAN_DEFAULT_BASE_URL).replace(/\/+$/, ''),
+      ...(provider.type === 'deepseek' ? { baseUrl: DEEPSEEK_BASE_URL } : {}),
+      ...(provider.type === BAILIAN_EMBEDDING_TYPE ? { baseUrl: String(provider.baseUrl || BAILIAN_DEFAULT_BASE_URL).replace(/\/+$/, '') } : {}),
       ...(provider.type === BAILIAN_EMBEDDING_TYPE ? { model: BAILIAN_EMBEDDING_MODEL, dimensions: BAILIAN_EMBEDDING_DIMENSIONS } : {}),
-      hasApiKey: !!apiKeyEncrypted,
+      hasApiKey: !!(provider.apiKeyEncrypted || provider.apiKey || provider.token || provider.hasApiKey),
+      hasPrivateKey: !!(provider.privateKey || provider.hasPrivateKey),
+      hasClientSecret: !!(provider.clientSecret || provider.hasClientSecret),
       apiKey: '',
+      privateKey: '',
     };
   };
   return Array.isArray(value)
@@ -1980,13 +1999,8 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/coze/chat') {
       // DeepSeek 多模态在 Blob 上传失败时允许受控 data URL 兜底；仍受单图、总大小及格式校验约束。
       // 2026-08-03 商用安全：对话消耗 AI 算力，必须登录（前端 requireLogin 已拦截，这里后端兜底）
-      const session = getSession(req);
-      if (!session) {
-        res.statusCode = 401;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ error: '未登录，无法使用智能体' }));
-        return;
-      }
+      const session = requireUser(req, res, '未登录，无法使用智能体');
+      if (!session) return;
       const body = await readBody(req, 35 * 1024 * 1024);
       const cfg = agents[body.agentId];
       if (!cfg) {
@@ -2567,8 +2581,8 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (p === '/api/coze/file-upload') {
-      const session = getSession(req);
-      if (!session) { res.statusCode = 401; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: false, error: 'authentication required' })); return; }
+      const session = requireUser(req, res);
+      if (!session) return;
       const body = await readBody(req, 35 * 1024 * 1024);
       const providerId = String(body.id || body.authProviderId || '');
       const providersStored = await KV.kvGet('authProviders');
@@ -2633,13 +2647,8 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/coze/workflow-run') {
       const body = await readBody(req);
       // 2026-08-03 商用安全：工作流运行消耗 AI 算力，必须登录
-      const session = getSession(req);
-      if (!session) {
-        res.statusCode = 401;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ error: '未登录，无法运行工作流' }));
-        return;
-      }
+      const session = requireUser(req, res, '未登录，无法运行工作流');
+      if (!session) return;
       const runtime = await resolveWorkflowRuntime(body);
       if (!runtime) { res.statusCode = 404; emitSSEError(res, '工作流不存在或未发布。'); return; }
       const workflowCost = Math.max(1, Number(runtime.priceRate) || 1);
@@ -3071,8 +3080,8 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/auth/change-password' && req.method === 'POST') {
       const { oldPassword, newPassword } = await readBody(req);
       res.setHeader('Content-Type', 'application/json');
-      const s = getSession(req);
-      if (!s) { res.statusCode = 401; res.end(JSON.stringify({ ok: false, msg: '未登录' })); return; }
+      const s = requireUser(req, res, '未登录');
+      if (!s) return;
       if (!newPassword || String(newPassword).length < 6) {
         res.end(JSON.stringify({ ok: false, msg: '新密码至少 6 位' }));
         return;
@@ -3243,8 +3252,8 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/auth/bind-phone' && req.method === 'POST') {
       const { phone, code } = await readBody(req);
       res.setHeader('Content-Type', 'application/json');
-      const s = getSession(req);
-      if (!s) { res.statusCode = 401; res.end(JSON.stringify({ ok: false, msg: '未登录' })); return; }
+      const s = requireUser(req, res, '未登录');
+      if (!s) return;
       if (!/^1[3-9]\d{9}$/.test(phone || '')) {
         res.end(JSON.stringify({ ok: false, msg: '请输入有效的手机号' }));
         return;
@@ -3511,25 +3520,27 @@ const server = http.createServer(async (req, res) => {
     // ============ 文件上传（本地 Blob 替代 EdgeOne Blob）============
     // upload-url：返回本站可 PUT 的上传端点；浏览器直传，不经过 Node 解析大 body
     // 2026-08-03 商用安全：上传需要登录会话（防匿名滥用存储）
-    if (p === '/api/blob/upload-url' && req.method === 'POST') {
+    if ((p === '/api/blob/upload-url' || p === '/api/admin/blob/upload-url') && req.method === 'POST') {
+      const adminRoute = p.startsWith('/api/admin/');
+      if (adminRoute) {
+        if (!requireAdmin(req, res)) return;
+      } else if (!requireUser(req, res, '未登录，无法上传文件')) return;
       const body = await readBody(req);
-      if (!getSession(req)) {
-        res.statusCode = 401;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ ok: false, msg: '未登录，无法上传文件' }));
-        return;
-      }
       const ct = body.contentType || 'application/octet-stream';
       const safeName = String(body.name || 'file').replace(/[^\w.\-]+/g, '_').slice(-60);
       const key = `uploads/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ok: true, url: '/api/blob/upload?key=' + encodeURIComponent(key), key }));
+      const uploadPath = adminRoute ? '/api/admin/blob/upload' : '/api/blob/upload';
+      res.end(JSON.stringify({ ok: true, url: uploadPath + '?key=' + encodeURIComponent(key), key }));
       return;
     }
-    if (p === '/api/blob/upload' && req.method === 'PUT') {
+    if ((p === '/api/blob/upload' || p === '/api/admin/blob/upload') && req.method === 'PUT') {
+      const adminRoute = p.startsWith('/api/admin/');
       const key = u.searchParams.get('key');
       res.setHeader('Content-Type', 'application/json');
-      if (!getSession(req)) { res.statusCode = 401; res.end(JSON.stringify({ ok: false, msg: 'authentication required' })); return; }
+      if (adminRoute) {
+        if (!requireAdmin(req, res)) return;
+      } else if (!requireUser(req, res)) return;
       if (!key) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, msg: 'missing key' })); return; }
       if (!/^uploads\/[A-Za-z0-9._-]{1,160}$/.test(key)) {
         res.statusCode = 400; res.end(JSON.stringify({ ok: false, msg: 'invalid upload key' })); return;
@@ -3610,8 +3621,21 @@ const server = http.createServer(async (req, res) => {
     const ALLOWED_CONFIG = new Set(CONFIG_KEYS);
     const sanitizeId = (s) => String(s == null ? '' : s).replace(/[^a-zA-Z0-9_]/g, '_');
 
-    if (p === '/api/data/list-keys' && req.method === 'GET') {
-      const s = getSession(req);
+    if ((p === '/api/data/list-keys' || p === '/api/admin/data/list-keys') && req.method === 'GET') {
+      const adminRoute = p.startsWith('/api/admin/');
+      let s;
+      if (adminRoute) {
+        if (!requireAdmin(req, res)) return;
+        s = getSession(req);
+      } else {
+        s = getSession(req);
+        if (isAdminSession(s)) {
+          res.statusCode = 403;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ ok: false, error: 'user authentication required' }));
+          return;
+        }
+      }
       const keys = {};
       const sortRecordKeysNewestFirst = async (recordKeys) => {
         const withCreatedAt = await Promise.all(recordKeys.map(async (key) => {
@@ -3636,7 +3660,7 @@ const server = http.createServer(async (req, res) => {
           const all = await KV.kvList(prefix, 5000);
           if (!s) { keys[name] = []; continue; }
           const recordList = name === 'orders' || name === 'computes' || name === 'history';
-          if (isAdminSession(s)) {
+          if (adminRoute) {
             keys[name] = recordList ? await sortRecordKeysNewestFirst(all) : all;
             continue;
           }
@@ -3660,23 +3684,31 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ ok: true, kv: true, keys }));
       return;
     }
-    if (p === '/api/data/get-config' && req.method === 'GET') {
+    if ((p === '/api/data/get-config' || p === '/api/admin/data/get-config') && req.method === 'GET') {
+      const adminRoute = p.startsWith('/api/admin/');
+      if (adminRoute) {
+        if (!requireAdmin(req, res)) return;
+      } else if (isAdminSession(getSession(req))) {
+        res.statusCode = 403;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ ok: false, error: 'public configuration endpoint does not accept admin sessions' }));
+        return;
+      }
       const data = {};
-      const admin = isAdminSession(getSession(req));
       for (const k of CONFIG_KEYS) {
         // 2026-08-03 商用安全：adminPassword 绝不下发前端（管理员密码仅由 /api/auth/admin-login 服务端校验）
         if (k === 'adminPassword') continue;
         const v = await KV.kvGet(k);
         if (v !== null && v !== undefined) {
-          if (k === 'authProviders') data[k] = admin ? authProvidersForClient(v) : redactSensitiveConfig(authProvidersForClient(v));
-          else data[k] = admin ? v : redactSensitiveConfig(v);
+          if (k === 'authProviders') data[k] = adminRoute ? authProvidersForClient(v) : redactSensitiveConfig(authProvidersForClient(v));
+          else data[k] = adminRoute ? v : redactSensitiveConfig(v);
         }
       }
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ ok: true, kv: true, data }));
       return;
     }
-    if (p === '/api/data/put-config' && req.method === 'POST') {
+    if (p === '/api/admin/data/put-config' && req.method === 'POST') {
       try {
         const body = await readBody(req);
         const key = body && body.key;
@@ -3750,27 +3782,39 @@ const server = http.createServer(async (req, res) => {
         return;
       }
     }
-    if (p === '/api/data/get-records' && req.method === 'POST') {
+    if ((p === '/api/data/get-records' || p === '/api/admin/data/get-records') && req.method === 'POST') {
+      const adminRoute = p.startsWith('/api/admin/');
+      let s;
+      if (adminRoute) {
+        if (!requireAdmin(req, res)) return;
+        s = getSession(req);
+      } else {
+        s = getSession(req);
+        if (isAdminSession(s)) {
+          res.statusCode = 403;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ ok: false, error: 'user authentication required' }));
+          return;
+        }
+      }
       const body = await readBody(req);
       const prefix = LIST_PREFIXES[body && body.type];
       res.setHeader('Content-Type', 'application/json');
       if (!prefix) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, msg: 'type 非法' })); return; }
       const ids = Array.isArray(body && body.ids) ? body.ids.slice(0, 200) : [];
+      if (!s) { res.end(JSON.stringify({ ok: true, kv: true, items: [] })); return; }
       if (ids.length === 0) { res.end(JSON.stringify({ ok: true, kv: true, items: [] })); return; }
       // 2026-08-03 商用安全：按登录态收敛——
       //   未登录：一律返回空（杜绝访客拉取任意用户/订单/流水）
       //   普通用户：只能拉自己的记录（users/regs 仅限自己 id；orders/computes/history 校验记录内 userId）
       //   管理员：可拉全部
-      const s = getSession(req);
-      if (!s) { res.end(JSON.stringify({ ok: true, kv: true, items: [] })); return; }
-      const admin = isAdminSession(s);
       const items = [];
       for (const id of ids) {
         const key = prefix + sanitizeId(id);
         let v = await KV.kvGet(key);
         if (v === null || v === undefined) continue;
         // 普通用户权限过滤：记录内 userId 必须等于自己（users/regs 无 userId 字段时用 key 尾段 == 自己 id）
-        if (!admin) {
+        if (!adminRoute) {
           const recUserId = v && (v.userId || v.id);
           const keyTail = String(id);
           const mine = keyTail === s.userId || (recUserId && recUserId === s.userId);
@@ -3908,12 +3952,14 @@ const server = http.createServer(async (req, res) => {
         return;
       }
     }
-    if (p === '/api/data/assets' && req.method === 'GET') {
+    if ((p === '/api/data/assets' || p === '/api/admin/data/assets') && req.method === 'GET') {
       res.setHeader('Content-Type', 'application/json');
       try {
-        const s = getSession(req);
-        if (!s) { res.end(JSON.stringify({ ok: true, items: [] })); return; }
-        if (isAdminSession(s)) {
+        const adminRoute = p.startsWith('/api/admin/');
+        let s;
+        if (adminRoute) {
+          if (!requireAdmin(req, res)) return;
+          s = getSession(req);
           const keys = await KV.kvList(ASSETS_PREFIX, 5000);
           const items = [];
           for (const k of keys) {
@@ -3923,6 +3969,13 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ ok: true, items, scope: 'all' }));
           return;
         }
+        s = getSession(req);
+        if (isAdminSession(s)) {
+          res.statusCode = 403;
+          res.end(JSON.stringify({ ok: false, error: 'user authentication required' }));
+          return;
+        }
+        if (!s) { res.end(JSON.stringify({ ok: true, items: [], scope: 'self' })); return; }
         const mine = await KV.kvGet(assetsKeyOf(s.userId));
         res.end(JSON.stringify({ ok: true, items: Array.isArray(mine) ? mine : [], scope: 'self' }));
         return;
@@ -3936,12 +3989,11 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/data/assets' && req.method === 'POST') {
       res.setHeader('Content-Type', 'application/json');
       try {
-        const s = getSession(req);
-        if (!s || !s.userId) { res.statusCode = 401; res.end(JSON.stringify({ ok: false, msg: '未登录' })); return; }
+        const s = requireUser(req, res, '未登录');
+        if (!s) return;
         // 单条资产可能包含较长文本或少量内联媒体；保留有界上限，同时避免沿用全局 1MB 限制误伤正常结果。
         const body = await readBody(req, 8 * 1024 * 1024);
-        const admin = isAdminSession(s);
-        const uid = admin && body && body.userId ? String(body.userId) : String(s.userId);
+        const uid = String(s.userId);
 
         // 新版前端只提交本次新增/更新的一条资产，服务端按 id 幂等合并。
         // 这样历史资产不再被每次整包重复上传，长对话和工作流结果也不会随使用次数放大请求体。
@@ -3987,21 +4039,26 @@ const server = http.createServer(async (req, res) => {
         return;
       }
     }
-    if (p === '/api/data/assets/delete' && req.method === 'POST') {
+    if ((p === '/api/data/assets/delete' || p === '/api/admin/assets/delete') && req.method === 'POST') {
       res.setHeader('Content-Type', 'application/json');
       try {
-        const s = getSession(req);
-        if (!s) { res.statusCode = 401; res.end(JSON.stringify({ ok: false, msg: '未登录' })); return; }
+        const adminRoute = p.startsWith('/api/admin/');
+        let s;
+        if (adminRoute) {
+          if (!requireAdmin(req, res)) return;
+          s = getSession(req);
+        } else {
+          s = requireUser(req, res, '未登录');
+          if (!s) return;
+        }
         const body = await readBody(req);
-        const admin = isAdminSession(s);
         const assetId = body && body.assetId ? String(body.assetId) : '';
-        // 普通用户：永远只能操作自己那把 key；管理员：可指定 userId
-        const targetUid = admin && body && body.userId ? String(body.userId) : String(s.userId || '');
+        const targetUid = adminRoute && body && body.userId ? String(body.userId) : String(s.userId || '');
         if (!targetUid) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, msg: '缺少 userId' })); return; }
         const key = assetsKeyOf(targetUid);
         // 管理员未指定 assetId → 整把删除（用于删除用户时级联清理该用户全部资产）
         if (!assetId) {
-          if (!admin) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, msg: '缺少 assetId' })); return; }
+          if (!adminRoute) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, msg: '缺少 assetId' })); return; }
           const ok = await KV.kvDelete(key);
           res.end(JSON.stringify({ ok, key, removed: 'all' }));
           return;
@@ -4022,23 +4079,29 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ============ 单条 key 写入/删除（拆表持久化）============
-    const skMatch = p.match(/^\/api\/single-key\/([a-z]+)\/(put|delete)$/);
+    const skMatch = p.match(/^\/api\/(admin\/)?single-key\/([a-z]+)\/(put|delete)$/);
     if (skMatch && req.method === 'POST') {
-      const type = skMatch[1];
-      const op = skMatch[2];
+      const adminRoute = !!skMatch[1];
+      const type = skMatch[2];
+      const op = skMatch[3];
       const prefix = LIST_PREFIXES[type];
       res.setHeader('Content-Type', 'application/json');
       if (!prefix) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, msg: 'type 非法' })); return; }
       // 2026-08-03 商用安全：写用户/注册/订单/流水/历史必须登录会话；且普通用户只能写/删自己的记录
-      const s = getSession(req);
-      if (!s) { res.statusCode = 401; res.end(JSON.stringify({ ok: false, msg: '未登录' })); return; }
-      const admin = isAdminSession(s);
+      let s;
+      if (adminRoute) {
+        if (!requireAdmin(req, res)) return;
+        s = getSession(req);
+      } else {
+        s = requireUser(req, res, '未登录');
+        if (!s) return;
+      }
       const body = await readBody(req);
       if (op === 'put') {
         let record = body && body.record;
         if (!record || !record.id) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, msg: '缺少 record.id' })); return; }
         // 普通用户：只能写自己的记录（user/reg 按 record.id；order/compute/history 按 record.userId）
-        if (!admin) {
+        if (!adminRoute) {
           const recUid = record.userId || (type === 'users' || type === 'regs' ? record.id : '');
           if (String(recUid) !== String(s.userId)) {
             res.statusCode = 403;
@@ -4063,7 +4126,7 @@ const server = http.createServer(async (req, res) => {
         const id = body && body.id;
         if (!id) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, msg: '缺少 id' })); return; }
         // 普通用户：只能删自己的记录（users/regs 按 id；其余类型读记录校验 userId）
-        if (!admin) {
+        if (!adminRoute) {
           if (type === 'users' || type === 'regs') {
             if (String(id) !== String(s.userId)) {
               res.statusCode = 403;
@@ -4253,7 +4316,12 @@ const server = http.createServer(async (req, res) => {
       // 2026-08-03 商用安全：扣减必须登录；普通用户只能扣自己的余额
       const s = getSession(req);
       if (!s) { res.statusCode = 401; res.end(JSON.stringify({ ok: false, msg: '未登录' })); return; }
-      if (!isAdminSession(s) && userId !== sanitizeId(s.userId)) {
+      if (isAdminSession(s)) {
+        res.statusCode = 403;
+        res.end(JSON.stringify({ ok: false, msg: 'user authentication required' }));
+        return;
+      }
+      if (userId !== sanitizeId(s.userId)) {
         res.statusCode = 403;
         res.end(JSON.stringify({ ok: false, msg: '无权操作他人余额' }));
         return;
@@ -4263,21 +4331,11 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ ok: false, msg: '参数非法' }));
         return;
       }
-      if (!isAdminSession(s)) {
-        const points = await getUserPoints(s.userId);
-        res.end(JSON.stringify({ ok: true, points, userId: sanitizeId(s.userId), serverBilled: true }));
-        return;
-      }
-      const r = await KV.kvDeductPoints('user_' + userId, amount);
-      if (!r.ok) {
-        res.statusCode = r.reason === 'insufficient' ? 402 : 400;
-        res.end(JSON.stringify({ ok: false, reason: r.reason, points: r.points ?? 0 }));
-        return;
-      }
-      res.end(JSON.stringify({ ok: true, points: r.points, userId }));
+      const points = await getUserPoints(s.userId);
+      res.end(JSON.stringify({ ok: true, points, userId: sanitizeId(s.userId), serverBilled: true }));
       return;
     }
-    if (p === '/api/compute/recharge' && req.method === 'POST') {
+    if (p === '/api/admin/compute/recharge' && req.method === 'POST') {
       const body = await readBody(req);
       const userId = sanitizeId(body && body.userId);
       const amount = Number(body && body.amount);
