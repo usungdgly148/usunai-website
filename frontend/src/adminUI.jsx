@@ -351,7 +351,7 @@ export function TutorialSettings({ image, url, title, onChange }) {
     setUploading(true);
     try {
       let processed = file;
-      try { processed = await compressImage(file, { maxWidth: 1680, maxHeight: 720, quality: 0.8 }); } catch { /* 压缩失败时保留原图 */ }
+      try { processed = await compressImage(file, { maxWidth: 840, maxHeight: 360, quality: 0.8 }); } catch { /* 压缩失败时保留原图 */ }
       setUploadInfo(processed === file
         ? `已保留原格式 · ${formatImageBytes(file.size)}`
         : `已优化 ${formatImageBytes(file.size)} → ${formatImageBytes(processed.size)} · WebP`);
@@ -388,7 +388,7 @@ export function TutorialSettings({ image, url, title, onChange }) {
         {image && <button type="button" onClick={() => onChange({ tutorialImage: '' })} className="text-xs text-slate-400 hover:text-rose-500">清除图片</button>}
       </div>
       <p className={`text-xs ${uploadInfo ? 'text-emerald-600' : 'text-slate-400'}`}>
-        {uploadInfo || '上传时自动压缩为不超过 1680 × 720 的 WebP 图片'}
+        {uploadInfo || '上传时自动压缩为不超过 840 × 360 的 WebP 图片'}
       </p>
       <input value={title || ''} onChange={e => onChange({ tutorialTitle: e.target.value })} placeholder="标题，如：3 分钟快速上手" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" />
       <input value={url || ''} onChange={e => onChange({ tutorialUrl: e.target.value })} placeholder="跳转链接，如：https://..." className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" />

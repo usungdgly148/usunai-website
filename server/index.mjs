@@ -47,11 +47,13 @@ const BAILIAN_EMBEDDING_DIMENSIONS = 1024;
 const BAILIAN_DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 
 // 上传原图仍会保留；前台展示时只返回压缩后的 WebP 副本。
-// 文件名包含原文件状态，上传替换后会自动使用新副本。
-async function getImageVariant(sourcePath, key) {
+// 文件名包含原文件状态和目标尺寸，上传替换或不同展示位会自动使用新副本。
+async function getImageVariant(sourcePath, key, { width = 1920, height = 1920 } = {}) {
   const stat = fs.statSync(sourcePath);
+  const targetWidth = Math.max(64, Math.min(1920, Math.floor(Number(width) || 1920)));
+  const targetHeight = Math.max(64, Math.min(1920, Math.floor(Number(height) || 1920)));
   const hash = crypto.createHash('sha256')
-    .update(`${key}:${stat.size}:${stat.mtimeMs}`)
+    .update(`${key}:${stat.size}:${stat.mtimeMs}:${targetWidth}x${targetHeight}`)
     .digest('hex');
   const targetPath = path.join(IMAGE_VARIANT_DIR, `${hash}.webp`);
   if (fs.existsSync(targetPath)) return targetPath;
@@ -60,7 +62,7 @@ async function getImageVariant(sourcePath, key) {
   const tmpPath = `${targetPath}.${process.pid}.${crypto.randomUUID()}.tmp`;
   await sharp(sourcePath, { animated: false })
     .rotate()
-    .resize({ width: 1920, height: 1920, fit: 'inside', withoutEnlargement: true })
+    .resize({ width: targetWidth, height: targetHeight, fit: 'inside', withoutEnlargement: true })
     .webp({ quality: 82, effort: 4 })
     .toFile(tmpPath);
   fs.renameSync(tmpPath, targetPath);
@@ -3581,7 +3583,12 @@ const server = http.createServer(async (req, res) => {
       const acceptsWebp = String(req.headers.accept || '').includes('image/webp');
       if (OPTIMIZABLE_IMAGE_EXTENSIONS.has(ext) && acceptsWebp) {
         try {
-          const variantPath = await getImageVariant(fp, String(key));
+          const requestedWidth = Number.parseInt(u.searchParams.get('w') || '', 10);
+          const requestedHeight = Number.parseInt(u.searchParams.get('h') || '', 10);
+          const variantPath = await getImageVariant(fp, String(key), {
+            width: Number.isFinite(requestedWidth) ? requestedWidth : 1920,
+            height: Number.isFinite(requestedHeight) ? requestedHeight : 1920,
+          });
           res.setHeader('Content-Type', 'image/webp');
           res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
           res.end(fs.readFileSync(variantPath));

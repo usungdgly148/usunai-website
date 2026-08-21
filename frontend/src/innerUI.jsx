@@ -84,8 +84,21 @@ export function HistoryPanel({ label, items, activeId, onSelect, onNew, emptyHin
 
 /* ---------- right info card (shared by chat & workflow) ---------- */
 
+function getTutorialDisplayImage(image) {
+  if (!image || !image.startsWith('/api/blob/serve?')) return image;
+  try {
+    const url = new URL(image, window.location.origin);
+    url.searchParams.set('w', '672');
+    url.searchParams.set('h', '288');
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return image;
+  }
+}
+
 export function InfoCard({ entity, type }) {
   const tutorialImage = String(entity.tutorialImage || '').trim();
+  const tutorialDisplayImage = getTutorialDisplayImage(tutorialImage);
   const tutorialUrl = String(entity.tutorialUrl || '').trim();
   const tutorialUrlValid = /^(https?:\/\/|\/(?!\/))/i.test(tutorialUrl);
 
@@ -130,7 +143,7 @@ export function InfoCard({ entity, type }) {
         {tutorialImage && tutorialUrlValid ? (
           <a href={tutorialUrl} target="_blank" rel="noopener noreferrer" className="group block overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="overflow-hidden bg-slate-100" style={{ aspectRatio: '21 / 9' }}>
-              <img src={tutorialImage} alt={`${entity.name}新手使用教程`} loading="lazy" decoding="async" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]" />
+              <img src={tutorialDisplayImage} alt={`${entity.name}新手使用教程`} width="672" height="288" loading="eager" fetchPriority="low" decoding="async" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]" />
             </div>
             <div className="px-3 py-2 text-center text-sm font-medium text-slate-700 group-hover:text-blue-600">
               {String(entity.tutorialTitle || '').trim() || '新手使用教程'}

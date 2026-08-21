@@ -12,6 +12,7 @@ const viteCli = path.join(frontendDir, 'node_modules', 'vite', 'bin', 'vite.js')
 const releaseFiles = [
   'server/billing.js',
   'server/index.mjs',
+  'server/migrate-tutorial-images.mjs',
   'server/kv-local.js',
   'server/package.json',
   'server/package-lock.json',
