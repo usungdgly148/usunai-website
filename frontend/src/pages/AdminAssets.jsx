@@ -7,6 +7,7 @@ import {
 import { AdminPageHeader, AdminPagination, Card } from '../adminUI.jsx';
 import { ASSET_TYPE_LABELS } from '../mock.js';
 import { SOURCE_TYPE_NAMES, formatDuration, formatCost } from '../assetUtils.js';
+import { adminFetch } from '../authFetch.js';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -116,35 +117,93 @@ function Detail({ asset, onClose }) {
 }
 
 export default function AdminAssets() {
-  const { allAssets, adminUsers, deleteAssetAdmin, refreshAllAdminLists, refreshAllConfig, refreshAllAssets } = useStore();
-  useEffect(() => { refreshAllAdminLists(); refreshAllConfig(); }, [refreshAllAdminLists, refreshAllConfig]);
-  // 2026-08-05 拆表后：后台用专用接口拉全量（admin 会话），不再走 get-config 整表
-  useEffect(() => { refreshAllAssets(); }, [refreshAllAssets]);
+  const { deleteAssetAdmin } = useStore();
   const [tab, setTab] = useState('all');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selected, setSelected] = useState(null);
   const [page, setPage] = useState(1);
-
-  const filtered = allAssets
-    .filter((a) => tab === 'all' || a.type === tab || (tab === 'copy' && a.type === 'soft'))
-    .filter((a) => {
-      if (!search.trim()) return true;
-      const q = search.trim().toLowerCase();
-      const user = adminUsers.find((u) => u.id === a.userId);
-      return (a.name || '').toLowerCase().includes(q)
-        || (a.content || '').toLowerCase().includes(q)
-        || (a.sourceName || '').toLowerCase().includes(q)
-        || (a.userId || '').toLowerCase().includes(q)
-        || (user?.name || '').toLowerCase().includes(q)
-        || (user?.email || '').toLowerCase().includes(q)
-        || (user?.phone || '').toLowerCase().includes(q);
-    })
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const [assets, setAssets] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [loadingDetailId, setLoadingDetailId] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const pageSize = 10;
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const pagedAssets = filtered.slice((page - 1) * pageSize, page * pageSize);
-  useEffect(() => { setPage(1); }, [tab, search]);
-  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setPage(1);
+      setDebouncedSearch(search.trim());
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      setLoadError('');
+      try {
+        const params = new URLSearchParams({
+          page: String(page),
+          pageSize: String(pageSize),
+          type: tab,
+          search: debouncedSearch,
+        });
+        const response = await adminFetch(`/api/admin/assets?${params.toString()}`);
+        const result = await response.json().catch(() => null);
+        if (!response.ok || !result || !result.ok) {
+          throw new Error((result && result.msg) || `HTTP ${response.status}`);
+        }
+        if (cancelled) return;
+        setAssets(Array.isArray(result.items) ? result.items : []);
+        setTotal(Number(result.total) || 0);
+      } catch (error) {
+        if (cancelled) return;
+        setAssets([]);
+        setTotal(0);
+        setLoadError((error && error.message) || '资产列表加载失败');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [page, tab, debouncedSearch, refreshVersion]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  const openDetail = async (asset) => {
+    setLoadingDetailId(String(asset.id));
+    try {
+      const params = new URLSearchParams({ userId: String(asset.userId || ''), assetId: String(asset.id || '') });
+      const response = await adminFetch(`/api/admin/assets/detail?${params.toString()}`);
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result || !result.ok || !result.item) {
+        throw new Error((result && result.msg) || `HTTP ${response.status}`);
+      }
+      setSelected(result.item);
+    } catch (error) {
+      window.alert(`资产详情加载失败：${(error && error.message) || '请稍后重试'}`);
+    } finally {
+      setLoadingDetailId('');
+    }
+  };
+
+  const removeAsset = async (asset) => {
+    if (!window.confirm('确定删除该资产？')) return;
+    const result = await deleteAssetAdmin(asset.userId, asset.id);
+    if (!result || !result.ok) {
+      window.alert(`删除失败：${(result && result.msg) || '请稍后重试'}`);
+      return;
+    }
+    setSelected(null);
+    setRefreshVersion(value => value + 1);
+  };
 
   return (
     <div className="space-y-6">
@@ -156,7 +215,7 @@ export default function AdminAssets() {
             {TABS.map((t) => (
               <button
                 key={t.key}
-                onClick={() => setTab(t.key)}
+                onClick={() => { setTab(t.key); setPage(1); }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${tab === t.key ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
               >
                 {t.label}
@@ -181,8 +240,7 @@ export default function AdminAssets() {
             </tr>
           </thead>
           <tbody>
-            {pagedAssets.map((a) => {
-              const user = adminUsers.find((u) => u.id === a.userId);
+            {assets.map((a) => {
               const Icon = TYPE_ICON[a.type] || FileText;
               return (
                 <tr key={a.id} className="border-t border-slate-100 hover:bg-slate-50">
@@ -191,8 +249,8 @@ export default function AdminAssets() {
                     <div className="text-xs text-slate-400 font-mono truncate max-w-[220px]">{a.sourceName}</div>
                   </td>
                   <td className="px-5 py-3 text-slate-600">
-                    <div>{user?.name || a.userId}</div>
-                    {user?.email && <div className="text-xs text-slate-400">{user.email}</div>}
+                    <div>{a.userName || a.userId}</div>
+                    {a.userEmail && <div className="text-xs text-slate-400">{a.userEmail}</div>}
                   </td>
                   <td className="px-5 py-3">
                     <span className="inline-flex items-center gap-1 text-slate-600"><Icon size={14} /> {ASSET_TYPE_LABELS[a.type] || a.type}</span>
@@ -206,17 +264,19 @@ export default function AdminAssets() {
                   <td className="px-5 py-3 text-slate-500 text-xs">{formatTime(a.createdAt)}</td>
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-1">
-                      <button onClick={() => setSelected(a)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-blue-600" title="查看"><Eye size={15} /></button>
-                      <button onClick={() => { if (window.confirm('确定删除该资产？')) deleteAssetAdmin(a.userId, a.id); }} className="p-1.5 rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="删除"><Trash2 size={15} /></button>
+                      <button disabled={loadingDetailId === String(a.id)} onClick={() => openDetail(a)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-blue-600 disabled:opacity-40" title="查看"><Eye size={15} /></button>
+                      <button onClick={() => removeAsset(a)} className="p-1.5 rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="删除"><Trash2 size={15} /></button>
                     </div>
                   </td>
                 </tr>
               );
             })}
-            {filtered.length === 0 && <tr><td colSpan={7} className="px-5 py-12 text-center text-slate-400 text-sm">暂无资产</td></tr>}
+            {loading && <tr><td colSpan={7} className="px-5 py-12 text-center text-slate-400 text-sm">正在加载资产...</td></tr>}
+            {!loading && loadError && <tr><td colSpan={7} className="px-5 py-12 text-center text-rose-500 text-sm">加载失败：{loadError}</td></tr>}
+            {!loading && !loadError && assets.length === 0 && <tr><td colSpan={7} className="px-5 py-12 text-center text-slate-400 text-sm">暂无资产</td></tr>}
           </tbody>
         </table>
-        <AdminPagination page={page} total={filtered.length} pageSize={pageSize} onPageChange={setPage} />
+        <AdminPagination page={page} total={total} pageSize={pageSize} onPageChange={setPage} />
       </Card>
 
       {selected && <Detail asset={selected} onClose={() => setSelected(null)} />}

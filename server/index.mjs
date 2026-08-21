@@ -3650,6 +3650,120 @@ const server = http.createServer(async (req, res) => {
     // 读：未登录 → 空；普通用户 → 只有自己的；管理员 → 全量（后台资产管理/用户详情用）。
     const ASSETS_PREFIX = 'assets_';
     const assetsKeyOf = (uid) => ASSETS_PREFIX + sanitizeId(uid);
+    if (p === '/api/admin/assets' && req.method === 'GET') {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Cache-Control', 'no-store');
+      try {
+        const s = getSession(req);
+        if (!isAdminSession(s)) {
+          res.statusCode = 401;
+          res.end(JSON.stringify({ ok: false, msg: 'admin authentication required' }));
+          return;
+        }
+
+        const page = Math.max(1, Number.parseInt(u.searchParams.get('page') || '1', 10) || 1);
+        const pageSize = Math.min(100, Math.max(1, Number.parseInt(u.searchParams.get('pageSize') || '10', 10) || 10));
+        const type = String(u.searchParams.get('type') || 'all').trim();
+        const search = String(u.searchParams.get('search') || '').trim().toLowerCase().slice(0, 200);
+        const keys = await KV.kvList(ASSETS_PREFIX, 5000);
+        const groups = await Promise.all(keys.map(async (key) => ({ key, value: await KV.kvGet(key) })));
+        const assets = [];
+        for (const group of groups) {
+          if (!Array.isArray(group.value)) continue;
+          const ownerId = String(group.key).slice(ASSETS_PREFIX.length);
+          for (const item of group.value) {
+            if (!item || typeof item !== 'object') continue;
+            assets.push({ ...item, userId: item.userId || ownerId });
+          }
+        }
+
+        const userIds = [...new Set(assets.map(item => String(item.userId || '')).filter(Boolean))];
+        const userEntries = await Promise.all(userIds.map(async (userId) => {
+          const record = await KV.kvGet('user_' + sanitizeId(userId));
+          return [userId, record && typeof record === 'object' ? {
+            name: String(record.name || record.nickname || ''),
+            email: String(record.email || ''),
+            phone: String(record.phone || ''),
+          } : { name: '', email: '', phone: '' }];
+        }));
+        const users = new Map(userEntries);
+        const matchesType = (item) => type === 'all'
+          || item.type === type
+          || (type === 'copy' && item.type === 'soft');
+        const matchesSearch = (item) => {
+          if (!search) return true;
+          const user = users.get(String(item.userId || '')) || {};
+          return [item.name, item.content, item.sourceName, item.userId, user.name, user.email, user.phone]
+            .some(value => String(value || '').toLowerCase().includes(search));
+        };
+        const filtered = assets
+          .filter(matchesType)
+          .filter(matchesSearch)
+          .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+        const total = filtered.length;
+        const start = (page - 1) * pageSize;
+        const items = filtered.slice(start, start + pageSize).map(item => {
+          const user = users.get(String(item.userId || '')) || {};
+          return {
+            id: item.id,
+            userId: item.userId,
+            name: item.name,
+            type: item.type,
+            status: item.status,
+            cost: item.cost,
+            tokens: item.tokens,
+            sourceType: item.sourceType,
+            sourceName: item.sourceName,
+            duration: item.duration,
+            createdAt: item.createdAt,
+            userName: user.name,
+            userEmail: user.email,
+          };
+        });
+        res.end(JSON.stringify({ ok: true, items, total, page, pageSize }));
+        return;
+      } catch (e) {
+        console.error('[admin-assets:list] CRASH err=' + (e && (e.stack || e.message || e)));
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, msg: 'admin assets list failed' }));
+        return;
+      }
+    }
+    if (p === '/api/admin/assets/detail' && req.method === 'GET') {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Cache-Control', 'no-store');
+      try {
+        const s = getSession(req);
+        if (!isAdminSession(s)) {
+          res.statusCode = 401;
+          res.end(JSON.stringify({ ok: false, msg: 'admin authentication required' }));
+          return;
+        }
+        const userId = String(u.searchParams.get('userId') || '');
+        const assetId = String(u.searchParams.get('assetId') || '');
+        if (!userId || !assetId) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ ok: false, msg: '缺少 userId 或 assetId' }));
+          return;
+        }
+        const group = await KV.kvGet(assetsKeyOf(userId));
+        const item = Array.isArray(group)
+          ? group.find(asset => asset && String(asset.id) === assetId)
+          : null;
+        if (!item) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ ok: false, msg: '资产不存在' }));
+          return;
+        }
+        res.end(JSON.stringify({ ok: true, item: { ...item, userId: item.userId || userId } }));
+        return;
+      } catch (e) {
+        console.error('[admin-assets:detail] CRASH err=' + (e && (e.stack || e.message || e)));
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, msg: 'admin asset detail failed' }));
+        return;
+      }
+    }
     if (p === '/api/data/assets' && req.method === 'GET') {
       res.setHeader('Content-Type', 'application/json');
       try {
