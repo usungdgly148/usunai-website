@@ -13,8 +13,9 @@
     "check:stage-d:integration": "node scripts/check-stage-d-integration.mjs",
     "check:stage-e": "node scripts/check-stage-e-contracts.mjs",
     "check:stage-g": "node scripts/check-stage-g-contracts.mjs",
+    "check:session-isolation": "node scripts/check-session-isolation-contract.mjs",
     "candidate:build": "node scripts/build-candidate.mjs",
     "candidate:verify": "node scripts/verify-candidate.mjs",
-    "verify": "npm run check:secrets && npm run check:baseline && npm run check:stage-a && npm run check:stage-b && npm run check:stage-c && npm run check:stage-d && npm run check:stage-e && npm run check:stage-g"
+    "verify": "npm run check:secrets && npm run check:baseline && npm run check:stage-a && npm run check:stage-b && npm run check:stage-c && npm run check:stage-d && npm run check:stage-e && npm run check:stage-g && npm run check:session-isolation"
   }
 }

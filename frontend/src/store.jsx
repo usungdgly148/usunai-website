@@ -1202,16 +1202,16 @@ export function StoreProvider({ children }) {
   // 管理员登录（2026-08-03 服务端化：校验服务端 adminPassword，签发 admin 会话 token）
   const adminLogin = async (data) => {
     try {
-      const r = await apiFetch('/api/auth/admin-login', {
+      // 管理后台登录是独立会话：这里不能走 apiFetch。
+      // apiFetch 遇到后台登录失败的 401 会误清前台 clone_token，导致用户回到前台发送消息时被登出。
+      const r = await fetch('/api/auth/admin-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: data.password || '' }),
       });
       const j = await r.json();
       if (!j || !j.ok) return { ok: false, msg: (j && j.msg) || '登录失败' };
-      // 2026-08-04：admin token 独立存 clone_admin_token，不污染 clone_token。
-      // 同时清空 clone_token：之前可能存了手机用户 token，避免 admin 界面误带用户 token。
-      setToken('');
+      // admin token 与前台用户 token 分开保存，登录任一侧都不影响另一侧会话。
       setAdminToken(j.token || '');
       setAdminUser({ id: 'admin', name: '超级管理员', role: 'super', tenant: 'my-shop' });
       return { ok: true };
@@ -1223,7 +1223,7 @@ export function StoreProvider({ children }) {
   // 管理员改密（2026-08-03 服务端化）
   const changeAdminPassword = async (oldPwd, newPwd) => {
     try {
-      const r = await apiFetch('/api/auth/admin-change-password', {
+      const r = await adminFetch('/api/auth/admin-change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd }),
@@ -1236,9 +1236,8 @@ export function StoreProvider({ children }) {
   };
 
   const adminLogout = () => {
-    try { apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => null); } catch (e) { /* ignore */ }
-    clearToken();
-    setTokenState('');
+    try { adminFetch('/api/auth/logout', { method: 'POST' }).catch(() => null); } catch (e) { /* ignore */ }
+    clearAdminToken();
     setAdminUser(null);
   };
 

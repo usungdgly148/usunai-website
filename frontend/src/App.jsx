@@ -102,8 +102,8 @@ function AdminLayout() {
     return <Suspense fallback={<RouteLoading />}><Routes><Route path="/admin/login" element={<AdminLogin />} /></Routes></Suspense>;
   }
   // 登录守卫：未登录/无有效 token 的超级管理员一律跳转到登录页
-  // 2026-08-04：admin token 已独立为 clone_admin_token，必须用 getAdminToken() 检查。
-  // 因为 admin 登录后 clone_token 被清空（避免污染手机用户 token），getToken() 永远返回空。
+  // admin token 独立为 clone_admin_token，必须用 getAdminToken() 检查；
+  // 后台登录和退出不得清理前台用户会话。
   if (!adminUser || !getAdminToken()) {
     return <Navigate to="/admin/login" replace />;
   }
