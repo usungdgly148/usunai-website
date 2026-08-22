@@ -16,6 +16,7 @@ import { BILLING, estimateUsage, estimateTokens, computeExactCost } from './bill
 import * as KV from './kv-local.js';
 import nodemailer from 'nodemailer';
 import sharp from 'sharp';
+import { resolveMaxPlanValidity } from './plan-validity.mjs';
 import {
   configureKnowledgeService,
   handleKnowledgeAdminRoute,
@@ -4217,26 +4218,16 @@ const server = http.createServer(async (req, res) => {
       } : {};
       const hasValidityChange = positive && Object.prototype.hasOwnProperty.call(packageInfo, 'validDays');
       const userPatch = {};
+      let validityWinner = 'preserve';
       if (hasValidityChange) {
-        const days = Math.max(0, Number(packageInfo.validDays) || 0);
-        const requestedStart = String(packageInfo.validFrom || new Date().toISOString().slice(0, 10));
-        if (days === 0) {
-          userPatch.planValidFrom = requestedStart;
-          userPatch.planValidDays = 0;
-        } else if (existingUser && Number(existingUser.planValidDays) === 0 && existingUser.planValidFrom) {
-          userPatch.planValidFrom = existingUser.planValidFrom;
-          userPatch.planValidDays = 0;
-        } else {
-          let startMs = new Date(requestedStart).getTime();
-          const oldStartMs = existingUser && existingUser.planValidFrom ? new Date(existingUser.planValidFrom).getTime() : NaN;
-          const oldDays = existingUser ? Number(existingUser.planValidDays) : NaN;
-          const oldExpiryMs = Number.isFinite(oldStartMs) && Number.isFinite(oldDays) && oldDays > 0
-            ? oldStartMs + oldDays * 86400000
-            : NaN;
-          if (Number.isFinite(oldExpiryMs) && oldExpiryMs > Date.now() && oldExpiryMs > startMs) startMs = oldExpiryMs;
-          userPatch.planValidFrom = new Date(startMs).toISOString().slice(0, 10);
-          userPatch.planValidDays = days;
-        }
+        const resolvedValidity = resolveMaxPlanValidity(existingUser, {
+          validFrom: packageInfo.validFrom,
+          validDays: packageInfo.validDays,
+          fallbackStart: now.slice(0, 10),
+        });
+        userPatch.planValidFrom = resolvedValidity.planValidFrom;
+        userPatch.planValidDays = resolvedValidity.planValidDays;
+        validityWinner = resolvedValidity.winner;
       }
       const validityAfter = {
         planValidFrom: Object.prototype.hasOwnProperty.call(userPatch, 'planValidFrom') ? userPatch.planValidFrom : validityBefore.planValidFrom,
@@ -4245,7 +4236,9 @@ const server = http.createServer(async (req, res) => {
       const adjustmentSnapshot = {
         mode: adjustmentMode,
         pointsDelta: amount,
-        validityMode: hasValidityChange ? (Number(userPatch.planValidDays) === 0 ? 'permanent' : 'extend') : 'preserve',
+        validityMode: hasValidityChange
+          ? (Number(userPatch.planValidDays) === 0 ? 'permanent' : `max-expiry-${validityWinner}`)
+          : 'preserve',
         validityBefore,
         validityAfter,
       };
@@ -4294,7 +4287,7 @@ const server = http.createServer(async (req, res) => {
           planValidDays: validityAfter.planValidDays,
         } : { points: amount },
       };
-      if (positive && packageName && userPatch.planValidFrom && Object.prototype.hasOwnProperty.call(userPatch, 'planValidDays')) {
+      if (positive && packageName && validityWinner === 'incoming' && userPatch.planValidFrom && Object.prototype.hasOwnProperty.call(userPatch, 'planValidDays')) {
         const days = Number(userPatch.planValidDays);
         const startMs = new Date(userPatch.planValidFrom).getTime();
         const expireAt = days === 0

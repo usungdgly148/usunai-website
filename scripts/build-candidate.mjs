@@ -13,6 +13,7 @@ const releaseFiles = [
   'server/billing.js',
   'server/index.mjs',
   'server/migrate-tutorial-images.mjs',
+  'server/plan-validity.mjs',
   'server/kv-local.js',
   'server/package.json',
   'server/package-lock.json',

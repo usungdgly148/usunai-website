@@ -51,6 +51,7 @@ for (const file of listed.keys()) if (!actual.has(file)) errors.push(`manifest l
 const required = [
   'dist/index.html',
   'server/index.mjs',
+  'server/plan-validity.mjs',
   'server/package.json',
   'server/package-lock.json',
   'deploy/usun.service',

@@ -357,7 +357,7 @@ export default function AdminUsers() {
               </select>
               {adjustPackageId && (
                 <p className="mt-2 text-xs text-slate-500">
-                  本次增加 {Number(computePackages.find(p => p.id === adjustPackageId)?.points || 0).toLocaleString()} 点；有效期由套餐配置自动顺延。
+                  本次增加 {Number(computePackages.find(p => p.id === adjustPackageId)?.points || 0).toLocaleString()} 点；有效期按套餐配置计算，并与现有截止日取较晚者。
                 </p>
               )}
             </div>
