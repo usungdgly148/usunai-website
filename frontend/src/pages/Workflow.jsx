@@ -429,6 +429,51 @@ const DOC_META = {
   file:  { name: 'FILE',   color: 'bg-slate-100 text-slate-500' },
 };
 
+function MediaPreviewList({ children }) {
+  return <div className="flex flex-wrap gap-3">{children}</div>;
+}
+
+function ImageThumbnail({ src, alt }) {
+  return (
+    <a
+      href={src}
+      target="_blank"
+      rel="noreferrer"
+      title="点击查看原图"
+      className="group block w-44 max-w-full sm:w-52 lg:w-60 aspect-[4/3] rounded-xl overflow-hidden border border-slate-200 bg-slate-50 shadow-soft hover:border-blue-300 hover:shadow-pop transition"
+    >
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        decoding="async"
+        className="w-full h-full object-contain group-hover:scale-[1.02] transition-transform"
+        onError={(e) => { e.target.style.display = 'none'; }}
+      />
+    </a>
+  );
+}
+
+function VideoThumbnail({ src, label }) {
+  return (
+    <a
+      href={src}
+      target="_blank"
+      rel="noreferrer"
+      title="点击查看原视频"
+      aria-label={label}
+      className="group relative block w-52 max-w-full sm:w-60 lg:w-72 aspect-video rounded-xl overflow-hidden border border-slate-200 bg-slate-900 shadow-soft hover:border-blue-300 hover:shadow-pop transition"
+    >
+      <video src={src} preload="metadata" muted playsInline className="w-full h-full object-contain pointer-events-none" />
+      <span className="absolute inset-0 flex items-center justify-center bg-slate-950/15 group-hover:bg-slate-950/25 transition">
+        <span className="w-11 h-11 rounded-full bg-white/90 text-blue-600 flex items-center justify-center shadow-pop">
+          <Play size={20} fill="currentColor" />
+        </span>
+      </span>
+    </a>
+  );
+}
+
 // 从 result.data 中按 outputFields 定义逐字段渲染（"标记"驱动）
 // 命中规则：result.data 是对象 + outputFields 存在 + 至少一个字段有非空 tag
 function FieldByTag({ field, value }) {
@@ -441,13 +486,11 @@ function FieldByTag({ field, value }) {
       return (
         <div className="space-y-1.5">
           <div className="text-xs font-semibold text-slate-700">{name}</div>
-          <div className={`grid gap-3 ${value.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+          <MediaPreviewList>
             {value.map((src, i) => (
-              <a key={i} href={src} target="_blank" rel="noreferrer" className="block rounded-xl overflow-hidden border border-slate-200 shadow-soft hover:shadow-pop transition">
-                <img src={src} alt={`${name}-${i}`} className="w-full h-auto object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
-              </a>
+              <ImageThumbnail key={i} src={src} alt={`${name}-${i}`} />
             ))}
-          </div>
+          </MediaPreviewList>
         </div>
       );
     }
@@ -455,9 +498,9 @@ function FieldByTag({ field, value }) {
       return (
         <div className="space-y-1.5">
           <div className="text-xs font-semibold text-slate-700">{name}</div>
-          <div className="space-y-3">
-            {value.map((src, i) => <video key={i} src={src} controls className="w-full rounded-lg border border-slate-200" />)}
-          </div>
+          <MediaPreviewList>
+            {value.map((src, i) => <VideoThumbnail key={i} src={src} label={`${name}-${i + 1}`} />)}
+          </MediaPreviewList>
         </div>
       );
     }
@@ -508,9 +551,7 @@ function FieldByTag({ field, value }) {
       return (
         <div className="space-y-1.5">
           <div className="text-xs font-semibold text-slate-700">{name}</div>
-          <a href={value} target="_blank" rel="noreferrer" className="block rounded-xl overflow-hidden border border-slate-200 shadow-soft hover:shadow-pop transition">
-            <img src={value} alt={name} className="w-full h-auto object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
-          </a>
+          <MediaPreviewList><ImageThumbnail src={value} alt={name} /></MediaPreviewList>
         </div>
       );
     }
@@ -518,7 +559,7 @@ function FieldByTag({ field, value }) {
       return (
         <div className="space-y-1.5">
           <div className="text-xs font-semibold text-slate-700">{name}</div>
-          <video src={value} controls className="w-full rounded-lg border border-slate-200" />
+          <MediaPreviewList><VideoThumbnail src={value} label={name} /></MediaPreviewList>
         </div>
       );
     }
@@ -618,13 +659,11 @@ function ResultContent({ result, kind, outputFields }) {
     return (
       <div className="space-y-3">
         {images.length > 0 ? (
-          <div className={`grid gap-3 ${images.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+          <MediaPreviewList>
             {images.map((src, i) => (
-              <a key={i} href={src} target="_blank" rel="noreferrer" className="block rounded-xl overflow-hidden border border-slate-200 shadow-soft hover:shadow-pop transition">
-                <img src={src} alt={`result-${i}`} className="w-full h-auto object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
-              </a>
+              <ImageThumbnail key={i} src={src} alt={`result-${i}`} />
             ))}
-          </div>
+          </MediaPreviewList>
         ) : (
           <pre className="whitespace-pre-wrap text-sm leading-relaxed font-mono text-slate-700 bg-slate-50 rounded-xl p-4 border border-slate-100">{text || '未识别到图片 URL'}</pre>
         )}
@@ -634,13 +673,11 @@ function ResultContent({ result, kind, outputFields }) {
   if (effective === 'mixed' && images.length) {
     return (
       <div className="space-y-3">
-        <div className={`grid gap-2 ${images.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+        <MediaPreviewList>
           {images.map((src, i) => (
-            <a key={i} href={src} target="_blank" rel="noreferrer" className="block rounded-lg overflow-hidden border border-slate-200">
-              <img src={src} alt={`result-${i}`} className="w-full h-auto object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
-            </a>
+            <ImageThumbnail key={i} src={src} alt={`result-${i}`} />
           ))}
-        </div>
+        </MediaPreviewList>
         {text && <pre className="whitespace-pre-wrap text-sm leading-relaxed font-mono text-slate-700 bg-slate-50 rounded-xl p-4 border border-slate-100">{text}</pre>}
       </div>
     );
@@ -648,9 +685,9 @@ function ResultContent({ result, kind, outputFields }) {
   if (effective === 'video' || (effective === 'mixed' && videos.length)) {
     return (
       <div className="space-y-3">
-        {videos.map((src, i) => (
-          <video key={i} src={src} controls className="w-full rounded-lg border border-slate-200" />
-        ))}
+        <MediaPreviewList>
+          {videos.map((src, i) => <VideoThumbnail key={i} src={src} label={`视频 ${i + 1}`} />)}
+        </MediaPreviewList>
         {text && effective === 'mixed' && <pre className="whitespace-pre-wrap text-sm leading-relaxed font-mono text-slate-700 bg-slate-50 rounded-xl p-4 border border-slate-100">{text}</pre>}
       </div>
     );
