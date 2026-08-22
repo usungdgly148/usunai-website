@@ -19,7 +19,7 @@ export default function CozeBotPicker({ open, onClose, authProviderId, onPick })
   const [manualWsId, setManualWsId] = useState('');
   const [showManual, setShowManual] = useState(false);
   const [useMock, setUseMock] = useState(authProviderId === MOCK_PROVIDER_ID);
-  const pageSize = 8;
+  const pageSize = 12;
 
   const loadWorkspaces = async (mockOverride) => {
     const mock = mockOverride !== undefined ? mockOverride : useMock;

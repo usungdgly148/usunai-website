@@ -127,7 +127,7 @@ function WorkflowListPicker({ open, onClose, auth, onPick }) {
   const [selected, setSelected] = useState(null);
   const [manualWsId, setManualWsId] = useState('');
   const [showManual, setShowManual] = useState(false);
-  const pageSize = 5;
+  const pageSize = 12;
 
   const buildCfg = () => {
     if (!auth) return null;
