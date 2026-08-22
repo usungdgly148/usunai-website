@@ -470,6 +470,7 @@ function VideoThumbnail({ src, label, onPreview }) {
   const hostRef = useRef(null);
   const videoRef = useRef(null);
   const [loadFrame, setLoadFrame] = useState(false);
+  const [frameReady, setFrameReady] = useState(false);
 
   useEffect(() => {
     const node = hostRef.current;
@@ -478,26 +479,42 @@ function VideoThumbnail({ src, label, onPreview }) {
       return undefined;
     }
 
-    const observer = new IntersectionObserver(
-      ([entry]) => setLoadFrame(entry.isIntersecting),
-      { threshold: 0.05 }
-    );
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return;
+      // Once a cover has been requested, keep it mounted. Unmounting the video
+      // when it leaves the viewport makes mobile browsers discard the decoded
+      // frame and show the grey placeholder again when the user scrolls back.
+      setLoadFrame(true);
+      observer.disconnect();
+    }, { threshold: 0.05 });
     observer.observe(node);
     return () => observer.disconnect();
   }, []);
 
-  const revealFirstFrame = () => {
+  const requestCoverFrame = () => {
     const video = videoRef.current;
     if (!video) return;
-    video.pause();
-    if (Number.isFinite(video.duration) && video.duration > 0.1) {
-      // Avoid the often-black opening frame. Five percent into the video (at most
-      // one second) is much more likely to be a useful cover while remaining cheap.
-      const coverTime = Math.min(1, Math.max(0.1, video.duration * 0.05));
-      if (Math.abs(video.currentTime - coverTime) > 0.05) {
-        try { video.currentTime = coverTime; } catch { /* the loaded frame is still usable */ }
-      }
+    const coverTime = Number.isFinite(video.duration) && video.duration > 0.1
+      ? Math.min(1, Math.max(0.1, video.duration * 0.05))
+      : 0.1;
+    if (Math.abs(video.currentTime - coverTime) > 0.05) {
+      try { video.currentTime = coverTime; } catch { /* wait for canplay */ }
     }
+
+    // Safari may not paint a paused remote video even after seeking. A short,
+    // muted inline play forces one real frame to be decoded; freezeCoverFrame
+    // pauses it immediately after that frame becomes available.
+    const playPromise = video.play();
+    playPromise?.catch(() => {
+      if (video.readyState >= 2) setFrameReady(true);
+    });
+  };
+
+  const freezeCoverFrame = () => {
+    const video = videoRef.current;
+    if (!video || video.readyState < 2) return;
+    video.pause();
+    setFrameReady(true);
   };
 
   return (
@@ -509,19 +526,22 @@ function VideoThumbnail({ src, label, onPreview }) {
       aria-label={label}
       className="group relative block w-52 max-w-full sm:w-60 lg:w-72 aspect-video rounded-xl overflow-hidden border border-slate-200 bg-slate-100 shadow-soft hover:border-blue-300 hover:shadow-pop transition"
     >
-      <span className="absolute inset-0 bg-gradient-to-br from-slate-100 to-slate-200" />
+      <span className={`absolute inset-0 bg-gradient-to-br from-slate-100 to-slate-200 transition-opacity ${frameReady ? 'opacity-0' : 'opacity-100'}`} />
       {loadFrame && (
         <video
           ref={videoRef}
-          src={src}
+          src={src.includes('#') ? src : `${src}#t=0.1`}
           muted
           playsInline
           preload="auto"
           tabIndex={-1}
           aria-hidden="true"
-          onLoadedMetadata={revealFirstFrame}
-          onLoadedData={revealFirstFrame}
-          className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+          onLoadedMetadata={requestCoverFrame}
+          onCanPlay={requestCoverFrame}
+          onSeeked={freezeCoverFrame}
+          onTimeUpdate={freezeCoverFrame}
+          onError={() => setFrameReady(false)}
+          className={`pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity ${frameReady ? 'opacity-100' : 'opacity-0'}`}
         />
       )}
       <span className="absolute inset-0 flex items-center justify-center bg-slate-950/10 group-hover:bg-slate-950/20 transition">
