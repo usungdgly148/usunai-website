@@ -3,6 +3,23 @@ import { MOCK_AGENTS, MOCK_WORKFLOWS, MOCK_CATEGORIES, MOCK_CATEGORY_GROUPS, MOC
 import { tryWriteSingleKey, tryDeleteSingleKey, writeAdminSingleKey, deleteAdminSingleKey } from './singleKeySync.js';
 import { apiFetch, adminFetch, getToken, setToken, clearToken, getAdminToken, setAdminToken, clearAdminToken } from './authFetch.js';
 
+function safeLocalStorageSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeLocalStorageRemove(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // Safari private browsing and storage quota failures must not break rendering.
+  }
+}
+
 // ===== 算力套餐有效期 =====
 const DAY_MS = 86400000;
 // 日期/Date → YYYY-MM-DD（仅日期，忽略时分秒与时区误差）
@@ -543,18 +560,18 @@ export function StoreProvider({ children }) {
     } catch { return 0; }
   });
 
-  useEffect(() => { localStorage.setItem('clone_categories', JSON.stringify(categories)); }, [categories]);
-  useEffect(() => { localStorage.setItem('clone_category_groups', JSON.stringify(categoryGroups)); }, [categoryGroups]);
-  useEffect(() => { localStorage.setItem('clone_agents', JSON.stringify(agents)); }, [agents]);
-  useEffect(() => { localStorage.setItem('clone_workflows', JSON.stringify(workflows)); }, [workflows]);
-  useEffect(() => { localStorage.setItem('clone_banners', JSON.stringify(banners)); }, [banners]);
-  useEffect(() => { localStorage.setItem('clone_recommended', JSON.stringify(recommended)); }, [recommended]);
-  useEffect(() => { localStorage.setItem('clone_landing', JSON.stringify(landing)); }, [landing]);
-  useEffect(() => { if (user) localStorage.setItem('clone_user', JSON.stringify(user)); else localStorage.removeItem('clone_user'); }, [user]);
-  useEffect(() => { if (adminUser) localStorage.setItem('clone_admin', JSON.stringify(adminUser)); else localStorage.removeItem('clone_admin'); }, [adminUser]);
-  useEffect(() => { localStorage.setItem('clone_registered_users', JSON.stringify(registeredUsers)); }, [registeredUsers]);
-  useEffect(() => { localStorage.setItem('clone_points', String(points)); }, [points]);
-  useEffect(() => { if (logo) localStorage.setItem('clone_logo', logo); else localStorage.removeItem('clone_logo'); }, [logo]);
+  useEffect(() => { safeLocalStorageSet('clone_categories', JSON.stringify(categories)); }, [categories]);
+  useEffect(() => { safeLocalStorageSet('clone_category_groups', JSON.stringify(categoryGroups)); }, [categoryGroups]);
+  useEffect(() => { safeLocalStorageSet('clone_agents', JSON.stringify(agents)); }, [agents]);
+  useEffect(() => { safeLocalStorageSet('clone_workflows', JSON.stringify(workflows)); }, [workflows]);
+  useEffect(() => { safeLocalStorageSet('clone_banners', JSON.stringify(banners)); }, [banners]);
+  useEffect(() => { safeLocalStorageSet('clone_recommended', JSON.stringify(recommended)); }, [recommended]);
+  useEffect(() => { safeLocalStorageSet('clone_landing', JSON.stringify(landing)); }, [landing]);
+  useEffect(() => { if (user) safeLocalStorageSet('clone_user', JSON.stringify(user)); else safeLocalStorageRemove('clone_user'); }, [user]);
+  useEffect(() => { if (adminUser) safeLocalStorageSet('clone_admin', JSON.stringify(adminUser)); else safeLocalStorageRemove('clone_admin'); }, [adminUser]);
+  useEffect(() => { safeLocalStorageSet('clone_registered_users', JSON.stringify(registeredUsers)); }, [registeredUsers]);
+  useEffect(() => { safeLocalStorageSet('clone_points', String(points)); }, [points]);
+  useEffect(() => { if (logo) safeLocalStorageSet('clone_logo', logo); else safeLocalStorageRemove('clone_logo'); }, [logo]);
   // 同步浏览器 tab favicon：用户上传 logo 后，浏览器 tab 上的小图标也跟着换；
   // 上传前/被清空时回退到 index.html 内置的默认 "U" SVG favicon。
   useEffect(() => {
@@ -563,14 +580,14 @@ export function StoreProvider({ children }) {
     if (!link) return;
     if (logo) link.href = logo;
   }, [logo]);
-  useEffect(() => { localStorage.setItem('clone_site_config', JSON.stringify(siteConfig)); }, [siteConfig]);
-  useEffect(() => { localStorage.setItem('clone_customer_service', JSON.stringify(customerService)); }, [customerService]);
-  useEffect(() => { localStorage.setItem('clone_announcements', JSON.stringify(announcements)); }, [announcements]);
-  useEffect(() => { localStorage.setItem('clone_legal_agreements', JSON.stringify(legalAgreements)); }, [legalAgreements]);
-  useEffect(() => { localStorage.setItem('clone_orders', JSON.stringify(orders)); }, [orders]);
-  useEffect(() => { localStorage.setItem('clone_compute_records', JSON.stringify(computeRecords)); }, [computeRecords]);
-  useEffect(() => { localStorage.setItem('clone_assets', JSON.stringify(assets)); }, [assets]);
-  useEffect(() => { localStorage.setItem('clone_admin_users', JSON.stringify(adminUsers)); }, [adminUsers]);
+  useEffect(() => { safeLocalStorageSet('clone_site_config', JSON.stringify(siteConfig)); }, [siteConfig]);
+  useEffect(() => { safeLocalStorageSet('clone_customer_service', JSON.stringify(customerService)); }, [customerService]);
+  useEffect(() => { safeLocalStorageSet('clone_announcements', JSON.stringify(announcements)); }, [announcements]);
+  useEffect(() => { safeLocalStorageSet('clone_legal_agreements', JSON.stringify(legalAgreements)); }, [legalAgreements]);
+  useEffect(() => { safeLocalStorageSet('clone_orders', JSON.stringify(orders)); }, [orders]);
+  useEffect(() => { safeLocalStorageSet('clone_compute_records', JSON.stringify(computeRecords)); }, [computeRecords]);
+  useEffect(() => { safeLocalStorageSet('clone_assets', JSON.stringify(assets)); }, [assets]);
+  useEffect(() => { safeLocalStorageSet('clone_admin_users', JSON.stringify(adminUsers)); }, [adminUsers]);
   // 后台用户表的余额变化（管理员充值/扣减）后，自动同步到前台展示（user.points + 顶层 points），保证前后端一致
   useEffect(() => {
     if (!user) return;
@@ -605,7 +622,7 @@ export function StoreProvider({ children }) {
   const [history, setHistory] = useState(() => {
     try { return collapseHistoryById(JSON.parse(localStorage.getItem('clone_history')) || []); } catch { return []; }
   });
-  useEffect(() => { localStorage.setItem('clone_history', JSON.stringify(history)); }, [history]);
+  useEffect(() => { safeLocalStorageSet('clone_history', JSON.stringify(history)); }, [history]);
 
   // ---- 服务端持久化（EdgeOne Pages KV）----
   // 后台/全局配置写入服务端 KV：重新部署、换域名、换设备、多管理员共享同一份数据，永不再丢。
@@ -986,7 +1003,7 @@ export function StoreProvider({ children }) {
   // 修复：改成 admin 显式操作函数内部 await persistAdminKey(key, value)，按需单 key PUT。
   // localStorage 同步仍由各 useEffect 自动完成（行 408-462），删除 debounce 不影响本地缓存。
   // computePackages 同步落到 localStorage（防 KV 故障/延迟时本地缓存仍可用）
-  useEffect(() => { localStorage.setItem('clone_compute_packages', JSON.stringify(computePackages)); }, [computePackages]);
+  useEffect(() => { safeLocalStorageSet('clone_compute_packages', JSON.stringify(computePackages)); }, [computePackages]);
   // rechargeInfo 同步落到 localStorage
   useEffect(() => { try { localStorage.setItem('clone_recharge_info', rechargeInfo); } catch { /* ignore */ } }, [rechargeInfo]);
 

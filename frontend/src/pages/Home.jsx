@@ -182,6 +182,11 @@ export default function Home() {
     .slice()
     .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
   const slideCount = slides.length;
+  const activeSlide = slides[slide] || slides[0] || null;
+
+  useEffect(() => {
+    setSlide(current => (current < slideCount ? current : 0));
+  }, [slideCount]);
 
   // 自动轮播：每 3 秒切下一张；手动点击 / 悬停时重置或暂停计时器
   // 依赖只放 [slideCount, paused]，slide 通过 setSlide((s) => ...) 内部自增，
@@ -275,25 +280,25 @@ export default function Home() {
       <div className="page-noise" aria-hidden="true" />
 
       {/* Banner */}
-      {slideCount > 0 && activeCat === 'all' && (
+      {activeSlide && activeCat === 'all' && (
         <section
           className="relative rounded-3xl overflow-hidden aspect-[21/9] mb-8 group"
           onMouseEnter={() => setPaused(true)}
           onMouseLeave={() => setPaused(false)}
         >
-          <LinkOrDiv to={slides[slide].to}>
+          <LinkOrDiv to={activeSlide.to}>
             {/* 只渲染当前 slide 和下一 slide 的图片，避免一次加载 3 张 ~300KB 图卡顿首屏
                 （图片真实大小由后端 upload 时 compressImage 压缩到 ≤1600px + JPEG 82%） */}
             <img
-              key={slides[slide].id || slide}
-              src={slides[slide].image}
+              key={activeSlide.id || slide}
+              src={activeSlide.image}
               alt="banner"
               loading="eager"
               decoding="async"
-              fetchPriority="high"
+              fetchpriority="high"
               className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
             />
-            <div className={`absolute inset-0 bg-gradient-to-r ${slides[slide].color}`} style={{ opacity: (slides[slide].overlayOpacity ?? 80) / 100 }}></div>
+            <div className={`absolute inset-0 bg-gradient-to-r ${activeSlide.color}`} style={{ opacity: (activeSlide.overlayOpacity ?? 80) / 100 }}></div>
           </LinkOrDiv>
           <button onClick={prevSlide} className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/90 shadow flex items-center justify-center text-slate-600 hover:bg-white opacity-100 md:opacity-0 md:group-hover:opacity-100 transition">
             <ChevronLeft size={20} />

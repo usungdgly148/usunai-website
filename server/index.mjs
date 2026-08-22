@@ -1906,6 +1906,14 @@ function serveStatic(req, res, urlPath) {
     return;
   }
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+    // Hashed Vite assets must never fall back to index.html. Returning HTML for a
+    // missing JavaScript chunk makes an already-open mobile tab crash after a deploy.
+    if (normalized === 'assets' || normalized.startsWith(`assets${path.sep}`)) {
+      res.statusCode = 404;
+      res.setHeader('Cache-Control', 'no-store');
+      res.end('not found');
+      return;
+    }
     // SPA 回退只允许 index.html（仍在 DIST_DIR 内）
     const fallback = path.resolve(distRoot, 'index.html');
     if (!fallback.startsWith(distRoot + path.sep)) { res.statusCode = 403; res.end('forbidden'); return; }
@@ -1915,6 +1923,11 @@ function serveStatic(req, res, urlPath) {
   }
   const ext = path.extname(file);
   res.setHeader('Content-Type', MIME[ext] || 'application/octet-stream');
+  if (normalized === 'assets' || normalized.startsWith(`assets${path.sep}`)) {
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  } else if (ext === '.html') {
+    res.setHeader('Cache-Control', 'no-cache');
+  }
   res.end(fs.readFileSync(file));
 }
 

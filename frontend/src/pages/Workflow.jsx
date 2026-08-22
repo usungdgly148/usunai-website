@@ -467,21 +467,69 @@ function ImageThumbnail({ src, alt }) {
 }
 
 function VideoThumbnail({ src, label, onPreview }) {
+  const hostRef = useRef(null);
+  const videoRef = useRef(null);
+  const [loadFrame, setLoadFrame] = useState(false);
+
+  useEffect(() => {
+    const node = hostRef.current;
+    if (!node || typeof IntersectionObserver === 'undefined') {
+      setLoadFrame(true);
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => setLoadFrame(entry.isIntersecting),
+      { threshold: 0.05 }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  const revealFirstFrame = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.pause();
+    if (Number.isFinite(video.duration) && video.duration > 0.1) {
+      // Avoid the often-black opening frame. Five percent into the video (at most
+      // one second) is much more likely to be a useful cover while remaining cheap.
+      const coverTime = Math.min(1, Math.max(0.1, video.duration * 0.05));
+      if (Math.abs(video.currentTime - coverTime) > 0.05) {
+        try { video.currentTime = coverTime; } catch { /* the loaded frame is still usable */ }
+      }
+    }
+  };
+
   return (
     <button
+      ref={hostRef}
       type="button"
       onClick={() => onPreview?.(src)}
       title="点击播放视频"
       aria-label={label}
-      className="group relative block w-52 max-w-full sm:w-60 lg:w-72 aspect-video rounded-xl overflow-hidden border border-slate-200 bg-slate-900 shadow-soft hover:border-blue-300 hover:shadow-pop transition"
+      className="group relative block w-52 max-w-full sm:w-60 lg:w-72 aspect-video rounded-xl overflow-hidden border border-slate-200 bg-slate-100 shadow-soft hover:border-blue-300 hover:shadow-pop transition"
     >
-      <span className="absolute inset-0 bg-gradient-to-br from-slate-800 to-slate-950" />
-      <span className="absolute bottom-2 left-3 right-3 truncate text-left text-xs text-white/70">{label}</span>
-      <span className="absolute inset-0 flex items-center justify-center bg-slate-950/15 group-hover:bg-slate-950/25 transition">
+      <span className="absolute inset-0 bg-gradient-to-br from-slate-100 to-slate-200" />
+      {loadFrame && (
+        <video
+          ref={videoRef}
+          src={src}
+          muted
+          playsInline
+          preload="auto"
+          tabIndex={-1}
+          aria-hidden="true"
+          onLoadedMetadata={revealFirstFrame}
+          onLoadedData={revealFirstFrame}
+          className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+        />
+      )}
+      <span className="absolute inset-0 flex items-center justify-center bg-slate-950/10 group-hover:bg-slate-950/20 transition">
         <span className="w-11 h-11 rounded-full bg-white/90 text-blue-600 flex items-center justify-center shadow-pop">
           <Play size={20} fill="currentColor" />
         </span>
       </span>
+      <span className="absolute bottom-2 left-3 right-3 truncate text-left text-xs text-white drop-shadow">{label}</span>
     </button>
   );
 }

@@ -1,5 +1,24 @@
 import React from 'react';
 
+const STALE_ASSET_RELOAD_KEY = 'usun:stale-asset-reload';
+const STALE_ASSET_PATTERN = /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Loading chunk|Load failed/i;
+
+export function reloadAfterStaleAssetError(error) {
+  const message = String(error?.message || error || '');
+  if (!STALE_ASSET_PATTERN.test(message)) return false;
+
+  try {
+    const lastReload = Number(sessionStorage.getItem(STALE_ASSET_RELOAD_KEY) || 0);
+    if (Date.now() - lastReload < 30_000) return false;
+    sessionStorage.setItem(STALE_ASSET_RELOAD_KEY, String(Date.now()));
+  } catch {
+    return false;
+  }
+
+  window.location.reload();
+  return true;
+}
+
 export default class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -8,6 +27,10 @@ export default class ErrorBoundary extends React.Component {
 
   static getDerivedStateFromError() {
     return { failed: true };
+  }
+
+  componentDidCatch(error) {
+    reloadAfterStaleAssetError(error);
   }
 
   render() {
