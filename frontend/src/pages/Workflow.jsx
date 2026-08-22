@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
-import { Play, Upload, Bot, Clock, AlertCircle, Copy, RotateCcw, CheckCircle2, Image as ImageIcon, Video, FileText, Sparkles, PlusSquare, Download } from 'lucide-react';
+import { Play, Upload, Bot, Clock, AlertCircle, Copy, RotateCcw, CheckCircle2, Image as ImageIcon, Video, FileText, Sparkles, PlusSquare, Download, X } from 'lucide-react';
 import { useStore, getUserPlanStatus } from '../store.jsx';
 import { InfoCard, Drawer, SubHeader, RequireLoginModal, Toast, timeAgo } from '../innerUI.jsx';
 import { runWorkflow, uploadCozeFile } from '../cozeApi.js';
@@ -454,29 +454,80 @@ function ImageThumbnail({ src, alt }) {
   );
 }
 
-function VideoThumbnail({ src, label }) {
+function VideoThumbnail({ src, label, onPreview }) {
+  const previewRef = useRef(null);
+  const [loadPreview, setLoadPreview] = useState(false);
+
+  useEffect(() => {
+    const node = previewRef.current;
+    if (!node || typeof IntersectionObserver === 'undefined') {
+      setLoadPreview(true);
+      return undefined;
+    }
+    const observer = new IntersectionObserver(([entry]) => {
+      setLoadPreview(entry.isIntersecting);
+    }, { rootMargin: '160px 0px' });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [src]);
+
   return (
-    <a
-      href={src}
-      target="_blank"
-      rel="noreferrer"
-      title="点击查看原视频"
+    <button
+      ref={previewRef}
+      type="button"
+      onClick={() => onPreview?.(src)}
+      title="点击播放视频"
       aria-label={label}
       className="group relative block w-52 max-w-full sm:w-60 lg:w-72 aspect-video rounded-xl overflow-hidden border border-slate-200 bg-slate-900 shadow-soft hover:border-blue-300 hover:shadow-pop transition"
     >
-      <video src={src} preload="metadata" muted playsInline className="w-full h-full object-contain pointer-events-none" />
+      {loadPreview ? (
+        <video src={src} preload="metadata" muted playsInline className="w-full h-full object-contain pointer-events-none" />
+      ) : (
+        <span className="absolute inset-0 bg-slate-900" />
+      )}
       <span className="absolute inset-0 flex items-center justify-center bg-slate-950/15 group-hover:bg-slate-950/25 transition">
         <span className="w-11 h-11 rounded-full bg-white/90 text-blue-600 flex items-center justify-center shadow-pop">
           <Play size={20} fill="currentColor" />
         </span>
       </span>
-    </a>
+    </button>
+  );
+}
+
+function VideoPreviewModal({ src, onClose }) {
+  useEffect(() => {
+    if (!src) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [src, onClose]);
+
+  if (!src) return null;
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/80 p-3 sm:p-6" onClick={onClose}>
+      <div className="w-full max-w-5xl overflow-hidden rounded-2xl bg-black shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-white/10 bg-slate-950 px-4 py-3 text-white">
+          <span className="text-sm font-medium">视频预览</span>
+          <button type="button" onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-300 hover:bg-white/10 hover:text-white" aria-label="关闭视频预览">
+            <X size={20} />
+          </button>
+        </div>
+        <video key={src} src={src} controls autoPlay playsInline preload="metadata" className="max-h-[78svh] w-full bg-black object-contain" />
+        <div className="flex justify-end bg-slate-950 px-4 py-3">
+          <a href={src} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-2 text-xs font-medium text-white hover:bg-white/15">
+            <Download size={14} /> 下载原视频
+          </a>
+        </div>
+      </div>
+    </div>
   );
 }
 
 // 从 result.data 中按 outputFields 定义逐字段渲染（"标记"驱动）
 // 命中规则：result.data 是对象 + outputFields 存在 + 至少一个字段有非空 tag
-function FieldByTag({ field, value }) {
+function FieldByTag({ field, value, onPreviewVideo }) {
   const tag = field.tag || '';
   const name = field.name || field.key || '输出';
   // 数组场景
@@ -499,7 +550,7 @@ function FieldByTag({ field, value }) {
         <div className="space-y-1.5">
           <div className="text-xs font-semibold text-slate-700">{name}</div>
           <MediaPreviewList>
-            {value.map((src, i) => <VideoThumbnail key={i} src={src} label={`${name}-${i + 1}`} />)}
+            {value.map((src, i) => <VideoThumbnail key={i} src={src} label={`${name}-${i + 1}`} onPreview={onPreviewVideo} />)}
           </MediaPreviewList>
         </div>
       );
@@ -559,7 +610,7 @@ function FieldByTag({ field, value }) {
       return (
         <div className="space-y-1.5">
           <div className="text-xs font-semibold text-slate-700">{name}</div>
-          <MediaPreviewList><VideoThumbnail src={value} label={name} /></MediaPreviewList>
+          <MediaPreviewList><VideoThumbnail src={value} label={name} onPreview={onPreviewVideo} /></MediaPreviewList>
         </div>
       );
     }
@@ -609,7 +660,7 @@ function FieldByTag({ field, value }) {
 }
 
 // 按 outputFields 逐字段渲染（标记驱动的主分支）
-function TaggedFieldsView({ result, outputFields }) {
+function TaggedFieldsView({ result, outputFields, onPreviewVideo }) {
   if (!result || !outputFields || !outputFields.length) return null;
   const data = result.data;
   if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
@@ -624,7 +675,7 @@ function TaggedFieldsView({ result, outputFields }) {
       {outputFields.filter(f => f.enabled !== false && f.show !== false).map(f => {
         const v = data[f.key];
         if (v === undefined || v === null || v === '') return null;
-        return <FieldByTag key={f.key || f.name} field={f} value={v} />;
+        return <FieldByTag key={f.key || f.name} field={f} value={v} onPreviewVideo={onPreviewVideo} />;
       })}
       {extraEntries.length > 0 && (
         <div className="space-y-1.5">
@@ -638,14 +689,14 @@ function TaggedFieldsView({ result, outputFields }) {
   );
 }
 
-function ResultContent({ result, kind, outputFields }) {
+function ResultContent({ result, kind, outputFields, onPreviewVideo }) {
   if (!result) return null;
   // 优先走"标记驱动"渲染：result.data 是对象 + 至少一个 outputField 有 tag
   const hasTaggedFields = outputFields && outputFields.length
     && result.data && typeof result.data === 'object' && !Array.isArray(result.data)
     && outputFields.some(f => f.tag && f.enabled !== false);
   if (hasTaggedFields) {
-    return <TaggedFieldsView result={result} outputFields={outputFields} />;
+    return <TaggedFieldsView result={result} outputFields={outputFields} onPreviewVideo={onPreviewVideo} />;
   }
   // 兜底：旧的"按 kind 整体渲染"逻辑（保留兼容）
   const { text, images, videos } = extractMedia(result);
@@ -686,7 +737,7 @@ function ResultContent({ result, kind, outputFields }) {
     return (
       <div className="space-y-3">
         <MediaPreviewList>
-          {videos.map((src, i) => <VideoThumbnail key={i} src={src} label={`视频 ${i + 1}`} />)}
+          {videos.map((src, i) => <VideoThumbnail key={i} src={src} label={`视频 ${i + 1}`} onPreview={onPreviewVideo} />)}
         </MediaPreviewList>
         {text && effective === 'mixed' && <pre className="whitespace-pre-wrap text-sm leading-relaxed font-mono text-slate-700 bg-slate-50 rounded-xl p-4 border border-slate-100">{text}</pre>}
       </div>
@@ -700,7 +751,7 @@ function ResultContent({ result, kind, outputFields }) {
   );
 }
 
-function RunItem({ run, workflow, onAsset }) {
+function RunItem({ run, workflow, onAsset, onPreviewVideo }) {
   const inputs = formatInputs(run.inputs, workflow.formFields) || [];
   const result = run.result || { text: run.content, kind: 'text' };
   const kind = run.resultKind || workflow.resultKind || 'text';
@@ -754,7 +805,7 @@ function RunItem({ run, workflow, onAsset }) {
             </div>
           )}
 
-          <ResultContent result={result} kind={kind} outputFields={workflow.outputFields} />
+          <ResultContent result={result} kind={kind} outputFields={workflow.outputFields} onPreviewVideo={onPreviewVideo} />
 
           <div className="mt-3 flex items-center gap-2 flex-wrap">
             <button onClick={() => onAsset(run)} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition" title="加入资产库">
@@ -771,9 +822,9 @@ function RunItem({ run, workflow, onAsset }) {
               </a>
             ))}
             {meta.videos.map((src, i) => (
-              <a key={i} href={src} target="_blank" rel="noreferrer" className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition">
+              <button key={i} type="button" onClick={() => onPreviewVideo(src)} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition">
                 <Video size={13} /> 视频 {i + 1}
-              </a>
+              </button>
             ))}
           </div>
         </div>
@@ -809,7 +860,9 @@ export default function Workflow() {
   const [runErr, setRunErr] = useState('');
   const [showLogin, setShowLogin] = useState(false);
   const [mobileConfigView, setMobileConfigView] = useState(true);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [previewVideo, setPreviewVideo] = useState('');
   const [toast, setToast] = useState('');
   const scrollRef = useRef(null);
   const toastTimer = useRef(null);
@@ -823,9 +876,24 @@ export default function Workflow() {
     setRunErr('');
   }, [workflow]);
 
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 767px)');
+    const update = () => setIsMobile(media.matches);
+    update();
+    if (media.addEventListener) media.addEventListener('change', update);
+    else media.addListener?.(update);
+    return () => {
+      if (media.removeEventListener) media.removeEventListener('change', update);
+      else media.removeListener?.(update);
+    };
+  }, []);
+
   // 2026-07-31：workflowHistory 按 createdAt 升序（最早在上、最新在下），scroll 到底部 = 最新记录。
   useEffect(() => {
-    const frame = requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'auto' }));
+    const frame = requestAnimationFrame(() => {
+      const node = scrollRef.current;
+      if (node) node.scrollTop = node.scrollHeight;
+    });
     return () => cancelAnimationFrame(frame);
   }, [history, running, id, mobileConfigView]);
   useEffect(() => () => clearTimeout(toastTimer.current), []);
@@ -1017,23 +1085,25 @@ export default function Workflow() {
           </div>
         )}
 
-        <div ref={scrollRef} className={`flex-1 overflow-y-auto scrollbar-thin px-4 lg:px-6 py-6 ${mobileConfigView ? 'hidden md:block' : ''}`}>
-          <div className="max-w-3xl mx-auto">
-            {workflowHistory.length === 0 && !running ? (
-              <EmptyState />
-            ) : (
-              <>
-                {workflowHistory.map((h) => <RunItem key={h.id} run={h} workflow={workflow} onAsset={handleAddAsset} />)}
-                {running && (
-                  <div className="flex items-center justify-center gap-2 py-8 text-sm text-slate-400">
-                    <Clock size={16} className="animate-spin" />
-                    <span>AI 正在生成，请稍候…</span>
-                  </div>
-                )}
-              </>
-            )}
+        {(!isMobile || !mobileConfigView) && (
+          <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin px-4 lg:px-6 py-6">
+            <div className="max-w-3xl mx-auto">
+              {workflowHistory.length === 0 && !running ? (
+                <EmptyState />
+              ) : (
+                <>
+                  {workflowHistory.map((h) => <RunItem key={h.id} run={h} workflow={workflow} onAsset={handleAddAsset} onPreviewVideo={setPreviewVideo} />)}
+                  {running && (
+                    <div className="flex items-center justify-center gap-2 py-8 text-sm text-slate-400">
+                      <Clock size={16} className="animate-spin" />
+                      <span>AI 正在生成，请稍候…</span>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Right: info card (desktop) */}
@@ -1047,6 +1117,7 @@ export default function Workflow() {
 
       {toast && <Toast msg={toast} />}
       {showLogin && <RequireLoginModal onClose={() => setShowLogin(false)} />}
+      <VideoPreviewModal src={previewVideo} onClose={() => setPreviewVideo('')} />
     </div>
   );
 }

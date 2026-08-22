@@ -158,18 +158,15 @@ export function InfoCard({ entity, type }) {
 /* ---------- mobile drawer ---------- */
 
 export function Drawer({ open, onClose, side = 'left', title, children }) {
+  if (!open) return null;
   return (
     <>
       <div
-        className={`fixed inset-0 z-40 bg-slate-900/30 backdrop-blur-sm transition-opacity duration-300 ${
-          open ? 'opacity-100' : 'opacity-0 pointer-events-none'
-        }`}
+        className="fixed inset-0 z-40 bg-slate-900/30"
         onClick={onClose}
       />
       <aside
-        className={`fixed top-0 ${side === 'left' ? 'left-0' : 'right-0'} h-full w-[82%] max-w-[320px] bg-white z-50 shadow-pop transition-transform duration-300 ease-out ${
-          open ? 'translate-x-0' : side === 'left' ? '-translate-x-full' : 'translate-x-full'
-        }`}
+        className={`fixed top-0 ${side === 'left' ? 'left-0' : 'right-0'} h-full w-[82%] max-w-[320px] bg-white z-50 shadow-pop`}
       >
         <div className="h-14 flex items-center justify-between px-4 border-b border-slate-200/70">
           <span className="text-sm font-semibold text-slate-700">{title}</span>

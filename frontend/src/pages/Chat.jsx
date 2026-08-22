@@ -109,7 +109,7 @@ function UserBubble({ content, images, files }) {
           <div className="flex flex-wrap gap-2 mb-2">
             {images.map((src, i) => (
               <a key={i} href={src} target="_blank" rel="noreferrer">
-                <img src={src} alt="" className="h-20 w-20 object-cover rounded-lg border border-white/30" />
+                <img src={src} alt="" loading="lazy" decoding="async" className="h-20 w-20 object-cover rounded-lg border border-white/30" />
               </a>
             ))}
           </div>
@@ -160,6 +160,7 @@ const assistantMarkdownComponents = {
   td: ({ children }) => <td className="border border-slate-200 px-3 py-2 text-slate-700">{children}</td>,
   code: ({ className, children, ...props }) => <code className={className} {...props}>{children}</code>,
   pre: ({ children }) => <pre className="p-3 rounded-xl bg-slate-900 text-slate-100 text-sm font-mono overflow-x-auto mb-3">{children}</pre>,
+  img: ({ src, alt }) => <img src={src} alt={alt || ''} loading="lazy" decoding="async" className="max-w-full h-auto rounded-xl" />,
 };
 
 function AssistantBubble({ content, reasoning, agent, onCopy, onRegenerate, onAsset, usage }) {
