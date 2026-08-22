@@ -398,12 +398,12 @@ export function TutorialSettings({ image, url, title, onChange }) {
 }
 
 // 通用弹窗
-export function Modal({ open, onClose, title, children, footer }) {
+export function Modal({ open, onClose, title, children, footer, panelClassName = 'max-w-lg' }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 z-0 bg-slate-900/40 backdrop-blur-sm" onClick={onClose} />
-      <div role="dialog" aria-modal="true" className="relative z-10 bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <div role="dialog" aria-modal="true" className={`relative z-10 bg-white rounded-2xl shadow-xl w-full ${panelClassName} max-h-[90vh] overflow-y-auto`}>
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
           <h3 className="font-semibold text-slate-900">{title}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>

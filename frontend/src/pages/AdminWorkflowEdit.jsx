@@ -217,7 +217,7 @@ function WorkflowListPicker({ open, onClose, auth, onPick }) {
   const paged = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   return (
-    <Modal open={open} onClose={onClose} title="选择工作流" footer={null}>
+    <Modal open={open} onClose={onClose} title="选择工作流" footer={null} panelClassName="max-w-[1240px]">
       <div className="-mx-6 -my-6">
         <div className="flex items-center justify-between px-6 py-2.5 text-xs border-b border-slate-100 bg-slate-50/40">
           <span className="text-slate-500">空间列表 <b className="text-slate-700 font-semibold">{workspaces.length}</b></span>
@@ -278,7 +278,7 @@ function WorkflowListPicker({ open, onClose, auth, onPick }) {
               ) : loading ? (
                 <div className="h-full flex items-center justify-center text-sm text-slate-400"><Loader2 size={16} className="animate-spin mr-2" />加载工作流…</div>
               ) : (
-                <div className="grid grid-cols-1 gap-2.5">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5">
                   {paged.map(wf => {
                     const initial = (wf.workflow_name || '?').trim().charAt(0).toUpperCase();
                     return (
@@ -307,7 +307,7 @@ function WorkflowListPicker({ open, onClose, auth, onPick }) {
                     );
                   })}
                   {!loading && paged.length === 0 && (
-                    <div className="col-span-1 text-center text-sm text-slate-400 py-12">{keyword ? '没有匹配的工作流' : '该空间下没有工作流'}</div>
+                    <div className="col-span-full text-center text-sm text-slate-400 py-12">{keyword ? '没有匹配的工作流' : '该空间下没有工作流'}</div>
                   )}
                 </div>
               )}

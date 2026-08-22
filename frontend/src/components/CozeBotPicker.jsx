@@ -108,7 +108,7 @@ export default function CozeBotPicker({ open, onClose, authProviderId, onPick })
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="选择 Coze 智能体" footer={null}>
+    <Modal open={open} onClose={onClose} title="选择 Coze 智能体" footer={null} panelClassName="max-w-[1240px]">
       <div className="-mx-6 -my-6">
         {/* 顶部：演示数据开关 */}
         <div className="px-6 py-3 flex items-center justify-between border-b border-slate-100 bg-slate-50/60">
@@ -164,7 +164,7 @@ export default function CozeBotPicker({ open, onClose, authProviderId, onPick })
               ) : paged.length === 0 ? (
                 <div className="h-full flex items-center justify-center text-sm text-slate-400">该空间下暂无智能体</div>
               ) : (
-                <div className="space-y-2">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5">
                   {paged.map(b => {
                     const isSel = selected && selected.bot_id === b.bot_id;
                     return (
