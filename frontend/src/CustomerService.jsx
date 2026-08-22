@@ -15,18 +15,15 @@ export default function CustomerService() {
   const location = useLocation();
   const [open, setOpen] = useState(false);
 
-  if (!customerService?.enabled) return null;
-
-  // 智能体内页（/chat/*、/workflow/*）底部有信息输入框（含发送按钮），
-  // 手机端把悬浮球抬高到输入框上方，避免遮挡发送按钮（2026-08-03 bug 修复）
   const isInternal = location.pathname.startsWith('/chat/') || location.pathname.startsWith('/workflow/');
+  if (!customerService?.enabled || isInternal) return null;
 
   const [line1, line2, line3] = customerService.lines || [];
   const hasQr = Boolean(customerService.qr);
 
   return (
     <div
-      className={`fixed right-5 md:right-8 z-40 flex flex-col items-end pointer-events-none ${isInternal ? 'bottom-52 md:bottom-8' : 'bottom-5 md:bottom-8'}`}
+      className="fixed right-5 bottom-5 z-40 flex flex-col items-end pointer-events-none md:right-8 md:bottom-8"
     >
       <style>{`
         @keyframes cs-float {
