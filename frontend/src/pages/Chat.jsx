@@ -565,9 +565,8 @@ export default function Chat() {
       });
       // 流式完成：确保 displayed 追上 acc，停下打字机，把最后一条 message 标为完整 + usage
       if (typewriterRef) { clearInterval(typewriterRef); typewriterRef = null; }
-      const est = agent.platform === 'deepseek-native' && serverUsage
-        ? serverUsage
-        : await fetchEstimate({ system, history: historyMsgs, message: text, answer: acc, priceRate: agent.priceRate });
+      const est = serverUsage
+        || await fetchEstimate({ system, history: historyMsgs, message: text, answer: acc, priceRate: agent.priceRate });
       const finalContent = acc || '(智能体未返回内容，请检查该智能体的扣子配置是否正确，以及项目是否已在扣子后台发布为 API 服务)';
       displayed = finalContent.length;
       // 把 system / history / user 拆分写进 usage，底部展示用

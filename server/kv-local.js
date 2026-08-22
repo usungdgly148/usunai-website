@@ -104,9 +104,63 @@ export async function kvPutMany(entries) {
   return true;
 }
 
+// 智能体调用完成后的余额、算力流水在同一事务落库。
+// allowPartial 仅用于“上游已经成功返回，但实际费用超过当前余额”的收尾场景：
+// 扣完剩余余额并保留应计费用/差额，避免成功任务没有任何算力流水。
+export async function kvRecordAgentUsage({ userId, amount, computeRecord, requestId, allowPartial = false }) {
+  const uid = safeKey(userId);
+  const requestedPoints = Number(amount);
+  const rid = safeKey(requestId);
+  if (!uid || !rid || !Number.isFinite(requestedPoints) || requestedPoints <= 0 || !computeRecord) {
+    return { ok: false, reason: 'invalid' };
+  }
+  const userKey = 'user_' + uid;
+  const regKey = 'reg_' + uid;
+  const markerKey = 'agent_usage_' + rid;
+  const select = db.prepare('SELECT value FROM kv WHERE key = ?');
+  const put = db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)');
+  const run = db.transaction(() => {
+    const marker = select.get(markerKey);
+    if (marker) return { ...JSON.parse(marker.value), duplicate: true };
+    const userRow = select.get(userKey);
+    if (!userRow) return { ok: false, reason: 'notfound' };
+    const user = JSON.parse(userRow.value);
+    const current = Math.max(0, Number(user.points) || 0);
+    if (current <= 0 || (!allowPartial && current < requestedPoints)) {
+      return { ok: false, reason: 'insufficient', points: current };
+    }
+    const chargedPoints = allowPartial ? Math.min(current, requestedPoints) : requestedPoints;
+    const shortfallPoints = Math.max(0, requestedPoints - chargedPoints);
+    const next = current - chargedPoints;
+    put.run(userKey, JSON.stringify({ ...user, points: next }, null, 2));
+    const regRow = select.get(regKey);
+    if (regRow) {
+      const reg = JSON.parse(regRow.value);
+      put.run(regKey, JSON.stringify({ ...reg, points: next }, null, 2));
+    }
+    const savedCompute = {
+      ...computeRecord,
+      userId: uid,
+      amount: chargedPoints,
+      meta: {
+        ...(computeRecord.meta || {}),
+        billablePoints: requestedPoints,
+        chargedPoints,
+        shortfallPoints,
+        partialCharge: shortfallPoints > 0,
+      },
+    };
+    put.run('compute_' + uid + '_' + safeKey(savedCompute.id), JSON.stringify(savedCompute, null, 2));
+    const result = { ok: true, points: next, chargedPoints, requestedPoints, shortfallPoints, computeRecord: savedCompute };
+    put.run(markerKey, JSON.stringify(result));
+    return result;
+  });
+  try { return run(); } catch (error) { return { ok: false, reason: 'database', msg: error.message }; }
+}
+
 // 原生模型一次调用的余额扣减、算力流水与指标记录在同一事务落库。
 // requestId 是幂等键，避免浏览器或反向代理重试造成重复扣费。
-export async function kvRecordNativeUsage({ userId, amount, computeRecord, metricRecord, requestId }) {
+export async function kvRecordNativeUsage({ userId, amount, computeRecord, metricRecord, requestId, allowPartial = false }) {
   const uid = safeKey(userId);
   const points = Number(amount);
   const rid = safeKey(requestId);
@@ -125,19 +179,32 @@ export async function kvRecordNativeUsage({ userId, amount, computeRecord, metri
     if (!userRow) return { ok: false, reason: 'notfound' };
     const user = JSON.parse(userRow.value);
     const current = Math.max(0, Number(user.points) || 0);
-    if (current < points) return { ok: false, reason: 'insufficient', points: current };
-    const next = current - points;
+    if (current <= 0 || (!allowPartial && current < points)) return { ok: false, reason: 'insufficient', points: current };
+    const chargedPoints = allowPartial ? Math.min(current, points) : points;
+    const shortfallPoints = Math.max(0, points - chargedPoints);
+    const next = current - chargedPoints;
     put.run(userKey, JSON.stringify({ ...user, points: next }, null, 2));
     const regRow = select.get(regKey);
     if (regRow) {
       const reg = JSON.parse(regRow.value);
       put.run(regKey, JSON.stringify({ ...reg, points: next }, null, 2));
     }
-    const savedCompute = { ...computeRecord, userId: uid };
+    const savedCompute = {
+      ...computeRecord,
+      userId: uid,
+      amount: chargedPoints,
+      meta: {
+        ...(computeRecord.meta || {}),
+        billablePoints: points,
+        chargedPoints,
+        shortfallPoints,
+        partialCharge: shortfallPoints > 0,
+      },
+    };
     const savedMetric = { ...metricRecord, userId: uid };
     put.run('compute_' + safeKey(savedCompute.id), JSON.stringify(savedCompute, null, 2));
     put.run('ai_metric_' + safeKey(savedMetric.id), JSON.stringify(savedMetric, null, 2));
-    const result = { ok: true, points: next, computeRecord: savedCompute, metricRecord: savedMetric };
+    const result = { ok: true, points: next, chargedPoints, requestedPoints: points, shortfallPoints, computeRecord: savedCompute, metricRecord: savedMetric };
     put.run(markerKey, JSON.stringify(result));
     return result;
   });

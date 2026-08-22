@@ -591,16 +591,19 @@ async function getUserPoints(userId) {
   const user = await KV.kvGet('user_' + sanitizeIdSafe(userId));
   return Math.max(0, Number(user && user.points) || 0);
 }
-async function recordServerCharge(userId, amount, reason, meta) {
+async function recordServerCharge(userId, amount, reason, meta, { allowPartial = false, requestId = crypto.randomUUID(), createdAt = new Date().toISOString() } = {}) {
   const safeUserId = sanitizeIdSafe(userId);
-  const result = await KV.kvDeductPoints('user_' + safeUserId, amount);
-  if (!result.ok) return result;
   const id = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
-  await KV.kvPut(`compute_${safeUserId}_${id}`, {
-    id, userId: safeUserId, type: 'consume', amount, reason,
-    meta: meta || null, createdAt: new Date().toISOString(), source: 'server'
+  return KV.kvRecordAgentUsage({
+    userId: safeUserId,
+    amount,
+    requestId,
+    allowPartial,
+    computeRecord: {
+      id, userId: safeUserId, type: 'consume', amount, reason,
+      meta: meta || null, createdAt, source: 'server'
+    },
   });
-  return result;
 }
 
 function getPlanValidity(user) {
@@ -925,6 +928,7 @@ async function handleDeepseekNative(res, session, cfg, body) {
   const metricId = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
   const charge = await KV.kvRecordNativeUsage({
     userId: session.userId, amount: exact.points, requestId,
+    allowPartial: true,
     computeRecord: { id: computeId, type: 'consume', amount: exact.points, reason: `使用智能体：${cfg.name || cfg.id}`, meta: { agentId: cfg.id, model, inputTokens: exact.inputTokens, outputTokens: exact.outputTokens, totalTokens: exact.totalTokens, reasoningTokens: Number(usage?.completion_tokens_details?.reasoning_tokens) || 0, apiCostCny: apiCost.cny, pricingVersion: apiCost.pricingVersion, ragHitCount: retrieval.hits.length }, createdAt: completedAt, source: 'server-native' },
     metricRecord: { id: metricId, requestId, agentId: cfg.id, providerId: cfg.authProviderId, model, thinkingEnabled, ok: true, reasoningFirstTokenMs, answerFirstTokenMs, totalMs: Date.now() - startedAt, retrievalMs: retrieval.retrievalMs, ragHitCount: retrieval.hits.length, ragBestScore: retrieval.hits[0]?.score || null, knowledgeBaseIds: [...new Set(retrieval.hits.map((item) => item.kbId))], ragChunkIds: retrieval.hits.map((item) => item.chunkId), usage, apiCostCny: apiCost.cny, pricingVersion: apiCost.pricingVersion, createdAt: completedAt },
   });
@@ -938,7 +942,7 @@ async function handleDeepseekNative(res, session, cfg, body) {
       { role: 'assistant', content: answer },
     ], cfg.contextMaxTokens);
     await KV.kvPut(key, { agentId: cfg.id, userId: session.userId, sessionId, messages: nextMessages, updatedAt: completedAt });
-    emit('usage', { ...exact, points: exact.points, balance: charge.points, reasoningTokens: Number(usage?.completion_tokens_details?.reasoning_tokens) || 0 });
+    emit('usage', { ...exact, points: charge.chargedPoints, billablePoints: exact.points, shortfallPoints: charge.shortfallPoints, partialCharge: charge.shortfallPoints > 0, balance: charge.points, reasoningTokens: Number(usage?.completion_tokens_details?.reasoning_tokens) || 0 });
   }
   if (!res.writableEnded && !res.destroyed) res.end();
 }
@@ -960,6 +964,7 @@ function attachAgentBilling(res, session, cfg, body) {
   const originalEnd = res.end.bind(res);
   const chunks = [];
   let bytes = 0;
+  const requestId = crypto.randomUUID();
   res.write = (chunk, ...args) => {
     if (chunk && bytes < 2 * 1024 * 1024) {
       const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
@@ -984,7 +989,7 @@ function attachAgentBilling(res, session, cfg, body) {
       : [];
     const message = typeof body.billingMessage === 'string' ? body.billingMessage : (body.message || '');
     const usage = estimateUsage({ system, history, message, answer, priceRate: Number(cfg.priceRate) || 6 });
-    await recordServerCharge(session.userId, Math.max(1, usage.points), `使用智能体：${cfg.name || body.agentId}`, {
+    const charge = await recordServerCharge(session.userId, Math.max(1, usage.points), `使用智能体：${cfg.name || body.agentId}`, {
       agentId: body.agentId,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
@@ -992,7 +997,12 @@ function attachAgentBilling(res, session, cfg, body) {
       bufferedTokens: usage.bufferedTokens,
       bufferCoef: usage.bufferCoef,
       priceRate: Number(cfg.priceRate) || 6
-    }).catch((e) => console.error('[billing] agent charge failed:', e.message || e));
+    }, { allowPartial: true, requestId }).catch((e) => ({ ok: false, reason: 'database', msg: e.message || String(e) }));
+    if (!charge.ok) {
+      originalWrite(`event: message\ndata: ${JSON.stringify({ type: 'error', content: { error: charge.reason === 'insufficient' ? '算力不足，本次结果未计入记录，请充值后再试' : '计费记录写入失败，请稍后重试' } })}\n\n`);
+      return originalEnd(chunk, ...args);
+    }
+    originalWrite(`event: message\ndata: ${JSON.stringify({ type: 'usage', content: { usage: { ...usage, points: charge.chargedPoints, billablePoints: usage.points, shortfallPoints: charge.shortfallPoints, partialCharge: charge.shortfallPoints > 0, balance: charge.points } } })}\n\n`);
     return originalEnd(chunk, ...args);
   };
 }
