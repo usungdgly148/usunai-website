@@ -434,57 +434,49 @@ function MediaPreviewList({ children }) {
 }
 
 function ImageThumbnail({ src, alt }) {
+  const [previewOpen, setPreviewOpen] = useState(false);
   return (
-    <a
-      href={src}
-      target="_blank"
-      rel="noreferrer"
-      title="点击查看原图"
-      className="group block w-44 max-w-full sm:w-52 lg:w-60 aspect-[4/3] rounded-xl overflow-hidden border border-slate-200 bg-slate-50 shadow-soft hover:border-blue-300 hover:shadow-pop transition"
-    >
-      <img
-        src={src}
-        alt={alt}
-        loading="lazy"
-        decoding="async"
-        className="w-full h-full object-contain group-hover:scale-[1.02] transition-transform"
-        onError={(e) => { e.target.style.display = 'none'; }}
-      />
-    </a>
+    <>
+      <button
+        type="button"
+        onClick={() => setPreviewOpen(true)}
+        title="点击查看原图"
+        className="group block w-44 max-w-full sm:w-52 lg:w-60 aspect-[4/3] rounded-xl overflow-hidden border border-slate-200 bg-slate-50 shadow-soft hover:border-blue-300 hover:shadow-pop transition"
+      >
+        <img
+          src={src}
+          alt={alt}
+          loading="lazy"
+          decoding="async"
+          className="w-full h-full object-contain group-hover:scale-[1.02] transition-transform"
+          onError={(e) => { e.target.style.display = 'none'; }}
+        />
+      </button>
+      {previewOpen && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/85 p-3 sm:p-6" onClick={() => setPreviewOpen(false)}>
+          <div className="relative flex max-h-[88svh] max-w-5xl items-center justify-center" onClick={(event) => event.stopPropagation()}>
+            <img src={src} alt={alt} className="max-h-[88svh] max-w-full rounded-xl bg-white object-contain shadow-2xl" />
+            <button type="button" onClick={() => setPreviewOpen(false)} className="absolute right-2 top-2 flex h-10 w-10 items-center justify-center rounded-full bg-slate-950/70 text-white" aria-label="关闭图片预览">
+              <X size={20} />
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
 function VideoThumbnail({ src, label, onPreview }) {
-  const previewRef = useRef(null);
-  const [loadPreview, setLoadPreview] = useState(false);
-
-  useEffect(() => {
-    const node = previewRef.current;
-    if (!node || typeof IntersectionObserver === 'undefined') {
-      setLoadPreview(true);
-      return undefined;
-    }
-    const observer = new IntersectionObserver(([entry]) => {
-      setLoadPreview(entry.isIntersecting);
-    }, { rootMargin: '160px 0px' });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [src]);
-
   return (
     <button
-      ref={previewRef}
       type="button"
       onClick={() => onPreview?.(src)}
       title="点击播放视频"
       aria-label={label}
       className="group relative block w-52 max-w-full sm:w-60 lg:w-72 aspect-video rounded-xl overflow-hidden border border-slate-200 bg-slate-900 shadow-soft hover:border-blue-300 hover:shadow-pop transition"
     >
-      {loadPreview ? (
-        <video src={src} preload="metadata" muted playsInline className="w-full h-full object-contain pointer-events-none" />
-      ) : (
-        <span className="absolute inset-0 bg-slate-900" />
-      )}
+      <span className="absolute inset-0 bg-gradient-to-br from-slate-800 to-slate-950" />
+      <span className="absolute bottom-2 left-3 right-3 truncate text-left text-xs text-white/70">{label}</span>
       <span className="absolute inset-0 flex items-center justify-center bg-slate-950/15 group-hover:bg-slate-950/25 transition">
         <span className="w-11 h-11 rounded-full bg-white/90 text-blue-600 flex items-center justify-center shadow-pop">
           <Play size={20} fill="currentColor" />
@@ -514,7 +506,7 @@ function VideoPreviewModal({ src, onClose }) {
             <X size={20} />
           </button>
         </div>
-        <video key={src} src={src} controls autoPlay playsInline preload="metadata" className="max-h-[78svh] w-full bg-black object-contain" />
+        <video key={src} src={src} controls playsInline preload="metadata" className="max-h-[78svh] w-full bg-black object-contain" />
         <div className="flex justify-end bg-slate-950 px-4 py-3">
           <a href={src} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-2 text-xs font-medium text-white hover:bg-white/15">
             <Download size={14} /> 下载原视频
@@ -1053,7 +1045,7 @@ export default function Workflow() {
   if (!workflow) return <div className="p-10 text-center text-slate-500">工作流不存在</div>;
 
   return (
-    <div className="h-[calc(100vh-64px)] flex bg-[#f0f4f9] overflow-hidden" style={{ height: 'calc(100dvh - 64px)' }}>
+    <div className="inner-page-shell flex bg-[#f0f4f9] overflow-hidden">
       {/* Left: config panel (desktop) */}
       <aside className="hidden md:flex w-80 lg:w-96 bg-white/55 backdrop-blur border-r border-slate-200/50 flex-col shrink-0 rounded-t-2xl">
         <ConfigPanel workflow={workflow} formData={formData} onChange={handleChange} onRun={handleRun} running={running} errMsg={runErr} auth={auth} />

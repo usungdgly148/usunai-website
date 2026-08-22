@@ -669,7 +669,7 @@ export default function Chat() {
   );
 
   return (
-    <div className="h-[calc(100vh-64px)] flex bg-[#f0f4f9] overflow-hidden" style={{ height: 'calc(100dvh - 64px)' }}>
+    <div className="inner-page-shell flex bg-[#f0f4f9] overflow-hidden">
       {/* Left: history (desktop) */}
       <aside className="hidden md:flex w-72 lg:w-80 bg-white/55 backdrop-blur border-r border-slate-200/50 flex-col shrink-0 rounded-t-2xl">
         <HistoryPanel

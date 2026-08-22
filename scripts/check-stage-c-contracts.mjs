@@ -13,8 +13,9 @@ const checks = [
   ['frontend/src/innerUI.jsx', ["aspectRatio: '21 / 9'", 'mobileActionTitle', 'SlidersHorizontal']],
   ['frontend/src/components.jsx', ['(item.tags || []).slice(0, 3)', 'md:left-4 md:top-auto', 'formatCount(item.uses)']],
   ['frontend/src/pages/Home.jsx', ['[refreshAllConfig, activeCat]', 'snap-x snap-mandatory', 'min-w-[82vw]']],
-  ['frontend/src/pages/Workflow.jsx', ["useState(true)", "mobileActionTitle={mobileConfigView ? '历史记录' : '配置参数'}", "calc(100dvh - 64px)"]],
-  ['frontend/src/pages/Chat.jsx', ["matchMedia('(max-width: 767px)')", '添加附件或图片', "calc(100dvh - 64px)"]],
+  ['frontend/src/pages/Workflow.jsx', ["useState(true)", "mobileActionTitle={mobileConfigView ? '历史记录' : '配置参数'}", 'inner-page-shell']],
+  ['frontend/src/pages/Chat.jsx', ["matchMedia('(max-width: 767px)')", '添加附件或图片', 'inner-page-shell']],
+  ['frontend/src/index.css', ['@supports (height: 100svh)', '@media (min-width: 768px)', 'calc(100dvh - 64px)']],
   ['frontend/src/pages/AgentList.jsx', ['[refreshAllConfig, activeCat]']],
 ];
 

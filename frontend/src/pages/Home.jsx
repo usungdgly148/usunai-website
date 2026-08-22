@@ -194,13 +194,6 @@ export default function Home() {
 
   // 预加载下一张，避免首次自动切换时的空白闪烁
   // 浏览器对 <img loading="lazy"> + decode async 已自动接管预加载；这里只对 data: base64（不上传 blob 的）才需要手动预热。
-  const nextUrl = slideCount > 1 ? slides[(slide + 1) % slideCount]?.image : null;
-  useEffect(() => {
-    if (!nextUrl || nextUrl.startsWith('data:')) return;
-    const img = new Image();
-    img.src = nextUrl;
-  }, [nextUrl]);
-
   const sidebarCatIds = new Set(
     sortedCategories
       .filter(c => c.id !== 'all' && c.published && c.showInSidebar)
@@ -291,19 +284,15 @@ export default function Home() {
           <LinkOrDiv to={slides[slide].to}>
             {/* 只渲染当前 slide 和下一 slide 的图片，避免一次加载 3 张 ~300KB 图卡顿首屏
                 （图片真实大小由后端 upload 时 compressImage 压缩到 ≤1600px + JPEG 82%） */}
-            {slides.map((b, i) => {
-              if (i !== slide && i !== (slide + 1) % slideCount) return null;
-              const isCurrent = i === slide;
-              return (
-                <img key={b.id || i}
-                  src={b.image}
-                  alt="banner"
-                  loading={isCurrent ? 'eager' : 'lazy'}
-                  decoding="async"
-                  fetchpriority={isCurrent ? 'high' : 'auto'}
-                  className={`absolute inset-0 w-full h-full object-cover transition-[transform,opacity] duration-700 ease-out group-hover:scale-105 ${isCurrent ? 'opacity-100' : 'opacity-0'}`} />
-              );
-            })}
+            <img
+              key={slides[slide].id || slide}
+              src={slides[slide].image}
+              alt="banner"
+              loading="eager"
+              decoding="async"
+              fetchPriority="high"
+              className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
+            />
             <div className={`absolute inset-0 bg-gradient-to-r ${slides[slide].color}`} style={{ opacity: (slides[slide].overlayOpacity ?? 80) / 100 }}></div>
           </LinkOrDiv>
           <button onClick={prevSlide} className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/90 shadow flex items-center justify-center text-slate-600 hover:bg-white opacity-100 md:opacity-0 md:group-hover:opacity-100 transition">
@@ -393,7 +382,7 @@ export default function Home() {
                 <div key={i} className="flex min-w-[82vw] snap-start flex-col overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm transition duration-300 hover:shadow-lg md:min-w-0">
                   <div className="relative aspect-square bg-slate-50 overflow-hidden">
                     {f.image ? (
-                      <img src={f.image} alt={f.title} className="w-full h-full object-cover" />
+                      <img src={f.image} alt={f.title} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center bg-slate-100">
                         <Icon size={48} className="text-slate-400" strokeWidth={1.5} />

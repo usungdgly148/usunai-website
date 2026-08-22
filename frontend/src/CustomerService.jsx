@@ -44,17 +44,19 @@ export default function CustomerService() {
       `}</style>
 
       {/* 悬停白底容器：二维码 + 三行文字（仅作视觉展示，pointer-events-none 避免遮挡下层列表点击） */}
-      <div
+      {open && <div
         className={`
           mb-3 mr-0 bg-white rounded-2xl shadow-2xl p-4 min-w-[200px] max-w-[260px]
           transition-all duration-300 origin-bottom-right pointer-events-none
-          ${open ? 'opacity-100 translate-y-0 visible' : 'opacity-0 translate-y-2 invisible'}
+          opacity-100 translate-y-0 visible
         `}
       >
         <div className="flex flex-col items-center">
           {hasQr ? (
             <img
               src={customerService.qr}
+              loading="lazy"
+              decoding="async"
               alt="客服二维码"
               className="w-36 h-36 object-contain rounded-xl border border-slate-100"
             />
@@ -69,11 +71,11 @@ export default function CustomerService() {
             {line3 && <p className="text-xs text-slate-500">{line3}</p>}
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* 浮动图标：外层 pointer-events-none（见父 div），仅圆按钮接收交互，避免遮挡下层点击 */}
       <div
-        className="relative flex flex-col items-center cursor-pointer"
+        className="customer-service-float relative flex flex-col items-center cursor-pointer"
         style={{ animation: 'cs-float 3s ease-in-out infinite' }}
         role="button"
         aria-label="联系我们"
@@ -82,21 +84,19 @@ export default function CustomerService() {
       >
         {/* 呼吸脉冲环 */}
         <span
-          className="absolute inset-0 -m-1 rounded-full border-2 border-blue-400/60"
+          className="customer-service-ping absolute inset-0 -m-1 rounded-full border-2 border-blue-400/60"
           style={{ animation: 'cs-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite' }}
         />
         <span
-          className="absolute inset-0 -m-1 rounded-full border-2 border-blue-400/40"
+          className="customer-service-ping absolute inset-0 -m-1 rounded-full border-2 border-blue-400/40"
           style={{ animation: 'cs-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite 0.6s' }}
         />
 
         <button
-          className="relative w-14 h-14 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/30 flex items-center justify-center outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 pointer-events-auto"
+          className="customer-service-pulse relative w-14 h-14 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/30 flex items-center justify-center outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 pointer-events-auto"
           style={{ animation: 'cs-pulse 2s ease-in-out infinite' }}
           type="button"
           onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
-          onMouseEnter={() => setOpen(true)}
-          onMouseLeave={() => setOpen(false)}
         >
           <ChatBubbleIcon />
           {/* 未读红点 */}

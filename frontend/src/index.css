@@ -75,6 +75,16 @@ html, body, #root {
   height: 100%;
 }
 
+.inner-page-shell {
+  height: calc(100vh - 64px);
+}
+
+@supports (height: 100svh) {
+  .inner-page-shell {
+    height: calc(100svh - 64px);
+  }
+}
+
 /* 移动端优化（#14）：去掉点击高亮灰闪，让触控反馈更干净 */
 html {
   -webkit-text-size-adjust: 100%;
@@ -142,6 +152,40 @@ body {
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
   background-repeat: no-repeat, repeat;
   background-size: 100% 100%, 180px 180px;
+}
+
+@media (max-width: 767px) {
+  .backdrop-blur,
+  .backdrop-blur-sm,
+  .backdrop-blur-md {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  .page-noise {
+    position: absolute;
+    background-image: radial-gradient(120% 55% at 50% -8%, rgba(30, 74, 120, 0.10), rgba(30, 74, 120, 0) 60%);
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+  }
+
+  .customer-service-float,
+  .customer-service-ping,
+  .customer-service-pulse {
+    animation: none !important;
+  }
+
+  .inner-page-shell {
+    overscroll-behavior: none;
+  }
+}
+
+@media (min-width: 768px) {
+  @supports (height: 100dvh) {
+    .inner-page-shell {
+      height: calc(100dvh - 64px);
+    }
+  }
 }
 
 .gradient-bg {
