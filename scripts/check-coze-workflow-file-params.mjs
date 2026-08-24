@@ -7,6 +7,7 @@ const server = fs.readFileSync(new URL('../server/index.mjs', import.meta.url), 
 assert.match(frontend, /function serializeCozeFileRef\(value\)/);
 assert.match(frontend, /items\.map\(serializeCozeFileRef\)\.filter\(Boolean\)/);
 assert.match(frontend, /serializeCozeFileRef\(Array\.isArray\(parsed\) \? parsed\[0\] : parsed\)/);
+assert.match(frontend, /const cfg = \{\s+id: workflow\.id,/);
 
 assert.match(server, /function normalizeCozeWorkflowParameters\(parameters, fields\)/);
 assert.match(server, /normalized\[field\.key\] = items\.map\(serializeCozeWorkflowFileRef\)\.filter\(Boolean\)/);

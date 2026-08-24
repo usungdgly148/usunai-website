@@ -1048,6 +1048,7 @@ export default function Workflow() {
 
       // 调扣子工作流
       const cfg = {
+        id: workflow.id,
         baseUrl: auth.baseUrl,
         workflowId: workflow.workflowId,
         platform: 'coze-old',
