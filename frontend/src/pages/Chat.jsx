@@ -8,7 +8,7 @@ import { HistoryPanel, InfoCard, Drawer, SubHeader, RequireLoginModal, Toast, ge
 import { fetchEstimate, estimateTokens, BILLING } from '../billing.js';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { extractResultMedia, classifyAsset, ASSET_TYPE_NAMES, SOURCE_TYPE_NAMES } from '../assetUtils.js';
+import { extractResultMedia, classifyAsset, resolveAssetCategory, ASSET_TYPE_NAMES, SOURCE_TYPE_NAMES } from '../assetUtils.js';
 import { copyText } from '../clipboard.js';
 import { compressImage } from '../imageCompress.js';
 
@@ -369,7 +369,8 @@ export default function Chat() {
   const addToAsset = (content) => {
     if (!user) { setShowLogin(true); return; }
     const { text, images, videos, audios } = extractResultMedia({ text: content, kind: 'text' });
-    const type = classifyAsset({ text, images, videos, audios, sourceName: agent.name });
+    const inferredType = classifyAsset({ text, images, videos, audios, sourceName: agent.name });
+    const type = resolveAssetCategory(agent.assetCategory, inferredType);
     addAsset({
       sourceType: 'agent',
       sourceId: agent.id,

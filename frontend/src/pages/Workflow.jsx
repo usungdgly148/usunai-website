@@ -4,7 +4,7 @@ import { Play, Upload, Bot, Clock, AlertCircle, Copy, RotateCcw, CheckCircle2, I
 import { useStore, getUserPlanStatus } from '../store.jsx';
 import { InfoCard, Drawer, SubHeader, RequireLoginModal, Toast, timeAgo } from '../innerUI.jsx';
 import { runWorkflow, uploadCozeFile } from '../cozeApi.js';
-import { extractResultMedia, classifyAsset, ASSET_TYPE_NAMES, SOURCE_TYPE_NAMES } from '../assetUtils.js';
+import { extractResultMedia, classifyAsset, resolveAssetCategory, ASSET_TYPE_NAMES, SOURCE_TYPE_NAMES } from '../assetUtils.js';
 import { copyText } from '../clipboard.js';
 
 /* ---------- field widgets ---------- */
@@ -998,6 +998,7 @@ export default function Workflow() {
     else if (tags.includes('document') || tags.includes('code')) type = 'copy';
     // 无标记时回退到内容特征判定
     if (!type) type = classifyAsset({ text, images, videos, audios, sourceName: workflow.name });
+    type = resolveAssetCategory(workflow.assetCategory, type);
     addAsset({
       sourceType: 'workflow',
       sourceId: workflow.id,

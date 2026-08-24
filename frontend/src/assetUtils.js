@@ -150,6 +150,21 @@ export const ASSET_TYPE_NAMES = {
   graphic: '图文',
 };
 
+export const ASSET_CATEGORY_OPTIONS = [
+  { value: '', label: '自动识别（兼容旧配置）' },
+  { value: 'copy', label: '文案' },
+  { value: 'image', label: '图片' },
+  { value: 'video', label: '视频' },
+  { value: 'audio', label: '音频' },
+  { value: 'graphic', label: '图文' },
+];
+
+const ASSET_CATEGORY_VALUES = new Set(ASSET_CATEGORY_OPTIONS.slice(1).map((item) => item.value));
+
+export function resolveAssetCategory(configured, fallback) {
+  return ASSET_CATEGORY_VALUES.has(configured) ? configured : fallback;
+}
+
 export const SOURCE_TYPE_NAMES = {
   agent: 'AI 对话',
   workflow: '工作流',

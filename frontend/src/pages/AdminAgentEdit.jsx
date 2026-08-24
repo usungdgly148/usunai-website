@@ -6,12 +6,14 @@ import { ArrowLeft, Save, Eye, EyeOff, Plus, X, Trash2, KeyRound, MessageSquareT
 import { Card, AdminIconPicker, TutorialSettings, renderIcon, PrimaryButton, SecondaryButton } from '../adminUI.jsx';
 import CozeBotPicker, { MOCK_PROVIDER_ID } from '../components/CozeBotPicker.jsx';
 import { listKnowledgeBases } from '../knowledgeApi.js';
+import { ASSET_CATEGORY_OPTIONS } from '../assetUtils.js';
 
 const COLOR_OPTIONS = ['bg-blue-600', 'bg-rose-600', 'bg-emerald-600', 'bg-amber-600', 'bg-violet-600', 'bg-slate-700', 'bg-cyan-600', 'bg-teal-600'];
 
 const blankForm = {
   name: '', desc: '', category: 'copy', icon: 'FileText', iconColor: 'bg-blue-600',
   avatar: '', tags: [], published: false, vip: false, sortOrder: 999,
+  assetCategory: '',
   tutorialImage: '', tutorialUrl: '', tutorialTitle: '新手使用教程',
   platform: 'coze-new', apiKey: '', baseUrl: '', projectId: '', botId: '', authProviderId: '',
   model: 'deepseek-v4-flash', thinkingEnabled: false, reasoningEffort: 'medium',
@@ -419,6 +421,13 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
               ))}
             </div>
             <input onKeyDown={addTag} placeholder="输入标签后回车" className={inputCls} />
+          </Field>
+          <Field label="加入资产库分类" hint="用户点击“加入资产库”后，结果将保存到所选分类；自动识别会保持原有判断方式">
+            <select value={form.assetCategory || ''} onChange={e => set({ assetCategory: e.target.value })} className={inputCls}>
+              {ASSET_CATEGORY_OPTIONS.map(option => (
+                <option key={option.value || 'auto'} value={option.value}>{option.label}</option>
+              ))}
+            </select>
           </Field>
           <TutorialSettings
             image={form.tutorialImage}
