@@ -17,8 +17,9 @@
     "check:session-isolation:integration": "node scripts/check-session-isolation-integration.mjs",
     "check:billing-settlement": "node scripts/check-billing-settlement-contract.mjs",
     "check:plan-validity": "node scripts/check-plan-validity.mjs",
+    "check:coze-workflow-files": "node scripts/check-coze-workflow-file-params.mjs",
     "candidate:build": "node scripts/build-candidate.mjs",
     "candidate:verify": "node scripts/verify-candidate.mjs",
-    "verify": "npm run check:secrets && npm run check:baseline && npm run check:stage-a && npm run check:stage-b && npm run check:stage-c && npm run check:stage-d && npm run check:stage-e && npm run check:stage-g && npm run check:session-isolation && npm run check:billing-settlement && npm run check:plan-validity"
+    "verify": "npm run check:secrets && npm run check:baseline && npm run check:stage-a && npm run check:stage-b && npm run check:stage-c && npm run check:stage-d && npm run check:stage-e && npm run check:stage-g && npm run check:session-isolation && npm run check:billing-settlement && npm run check:plan-validity && npm run check:coze-workflow-files"
   }
 }

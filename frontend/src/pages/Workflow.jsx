@@ -172,6 +172,22 @@ function FileField({ field, value, onChange, auth }) {
   );
 }
 
+// Coze 工作流文件参数不是普通对象：单文件必须是序列化 JSON 字符串，
+// 多文件必须是“序列化 JSON 字符串”的数组。URL 则保持原样透传。
+function serializeCozeFileRef(value) {
+  if (value && typeof value === 'object' && value.file_id) {
+    return JSON.stringify({ file_id: String(value.file_id) });
+  }
+  if (typeof value !== 'string') return value;
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === 'object' && parsed.file_id) {
+      return JSON.stringify({ file_id: String(parsed.file_id) });
+    }
+  } catch { /* 普通 URL 或文本按原值透传 */ }
+  return value;
+}
+
 // 按字段 style 渲染输入控件（与后台「样式」选项对齐）
 function Field({ field, value, onChange, auth }) {
   const baseInput = 'w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-50 outline-none transition text-[15px] text-slate-700 placeholder:text-slate-400';
@@ -1046,7 +1062,8 @@ export default function Workflow() {
         cfg.apiKey = auth.apiKey;
       }
 
-      // 文件/图片字段按扣子期望格式包装：Array<Image> 传数组，单 Image/File 传对象
+      // 文件/图片字段按扣子 OpenAPI 格式包装：
+      // 单 Image/File 传序列化 JSON 字符串；Array<Image/File> 传字符串数组。
       const parameters = {};
       for (const f of enabled) {
         const raw = snapshot[f.key];
@@ -1061,11 +1078,14 @@ export default function Workflow() {
         if (isFile) {
           try {
             const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) parameters[f.key] = parsed;
-            else if (isArray) parameters[f.key] = [parsed];
-            else parameters[f.key] = parsed;
+            if (isArray) {
+              const items = Array.isArray(parsed) ? parsed : [parsed];
+              parameters[f.key] = items.map(serializeCozeFileRef).filter(Boolean);
+            } else {
+              parameters[f.key] = serializeCozeFileRef(Array.isArray(parsed) ? parsed[0] : parsed);
+            }
           } catch {
-            // 兜底：非 JSON 字符串直接透传（理论上不应出现）
+            // 公开 URL 可直接作为文件参数传给 Coze。
             parameters[f.key] = raw;
           }
         } else {

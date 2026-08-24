@@ -1508,11 +1508,60 @@ function translateCozeApiError(rawMsg, code) {
   if (c === 4299 || /rate limit|too many requests|flow.*control/i.test(msg)) {
     return '扣子侧触发限流。请稍候再试，或到扣子后台「订阅/套餐」查看配额。';
   }
+  if (c === 6020 || /Failed to request URL for plugin node|connection error or invalid address/i.test(msg)) {
+    return '扣子工作流的插件节点无法访问输入文件或外部 URL。请重新上传文件后再试；若未上传文件或持续失败，请检查扣子工作流中该插件节点使用的 URL 是否仍可公开访问。';
+  }
   if (c >= 5000 && c < 6000) {
     return `扣子服务端暂时异常（${c}）。请稍候重试，或到扣子状态页检查。`;
   }
   // 默认回退：保留原始 msg 的前 200 字符
   return msg.slice(0, 200) || `扣子返回错误（code=${c}）`;
+}
+
+function isCozeWorkflowFileField(field) {
+  const type = String(field?.type || '').toLowerCase();
+  const itemType = String(field?.items?.type || field?.items?.data_type || '').toLowerCase();
+  return field?.style === 'file'
+    || type === 'file'
+    || type === 'image'
+    || type === 'video'
+    || (type === 'array' && ['file', 'image', 'video'].includes(itemType))
+    || (type.startsWith('array<') && /(file|image|video)/.test(type));
+}
+
+function serializeCozeWorkflowFileRef(value) {
+  if (value && typeof value === 'object' && value.file_id) {
+    return JSON.stringify({ file_id: String(value.file_id) });
+  }
+  if (typeof value !== 'string') return value;
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === 'object' && parsed.file_id) {
+      return JSON.stringify({ file_id: String(parsed.file_id) });
+    }
+  } catch { /* 公开 URL 按原值透传 */ }
+  return value;
+}
+
+// 服务端兜底兼容旧前端：无论浏览器传对象还是字符串，转发 Coze 前统一为官方格式。
+function normalizeCozeWorkflowParameters(parameters, fields) {
+  const normalized = { ...(parameters || {}) };
+  for (const field of Array.isArray(fields) ? fields : []) {
+    if (!field?.key || !isCozeWorkflowFileField(field) || normalized[field.key] == null || normalized[field.key] === '') continue;
+    const type = String(field.type || '').toLowerCase();
+    const isArray = type === 'array' || type.startsWith('array<');
+    let value = normalized[field.key];
+    if (typeof value === 'string') {
+      try { value = JSON.parse(value); } catch { /* URL 字符串保持原值 */ }
+    }
+    if (isArray) {
+      const items = Array.isArray(value) ? value : [value];
+      normalized[field.key] = items.map(serializeCozeWorkflowFileRef).filter(Boolean);
+    } else {
+      normalized[field.key] = serializeCozeWorkflowFileRef(Array.isArray(value) ? value[0] : value);
+    }
+  }
+  return normalized;
 }
 // 把扣子的英文错误翻译成可操作的中文提示（OAuth 鉴权阶段）
 function interpretCozeOAuthError(text) {
@@ -2699,9 +2748,10 @@ const server = http.createServer(async (req, res) => {
       const base = String(runtime.baseUrl).replace(/\/+$/, '');
       const upstream = `${base}/v1/workflow/run`;
       const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+      const parameters = normalizeCozeWorkflowParameters(body.parameters || {}, runtime.formFields || []);
       const bodyStr = JSON.stringify({
         workflow_id: String(runtime.workflowId).trim(),
-        parameters: body.parameters || {},
+        parameters,
         ext: body.ext || {},
       });
       try {
@@ -2713,7 +2763,7 @@ const server = http.createServer(async (req, res) => {
         let parsed = null; try { parsed = JSON.parse(text); } catch { /* ignore */ }
         if (r.statusCode < 200 || r.statusCode >= 300) { emitSSEError(res, `扣子返回 ${r.statusCode}：${text.slice(0, 300)}`); return; }
         if (parsed && typeof parsed === 'object' && parsed.code !== undefined && parsed.code !== 0) {
-          emitSSEError(res, `扣子报错 code=${parsed.code}：${parsed.msg || parsed.message || '未知错误'}`);
+          emitSSEError(res, `扣子报错 code=${parsed.code}：${translateCozeApiError(parsed.msg || parsed.message, parsed.code)}`);
           return;
         }
         // 扣子 /v1/workflow/run 返回的 data 字段本身是 JSON 字符串，
