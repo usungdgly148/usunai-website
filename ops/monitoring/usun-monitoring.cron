@@ -1,0 +1,1 @@
+*/5 * * * * root /usr/bin/python3 /opt/usun-monitoring/check-local-health.py >/dev/null 2>&1
