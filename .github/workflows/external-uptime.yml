@@ -21,6 +21,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --location --max-time 15 --retry 2 https://usunai.top/ | grep -Fq '友尚AI'
+          curl --fail --silent --show-error --location --max-time 15 --retry 2 https://usunai.top/ | grep -Fq '&#21451;&#23578;AI'
           curl --fail --silent --show-error --location --max-time 15 --retry 2 https://usunai.top/api/health | python3 -c 'import json,sys; assert json.load(sys.stdin).get("ok") is True'
           curl --fail --silent --show-error --location --max-time 15 --retry 2 --output /dev/null https://usunai.top/admin/login
