@@ -14,7 +14,7 @@ CONFIG_PATH = Path("/etc/usun-monitoring/push.env")
 
 HTTP_MONITORS = [
     ("01 主站 HTTPS", "http", "https://usunai.top/", None, 60, "主站可访问性"),
-    ("02 首页核心内容", "keyword", "https://usunai.top/", "友尚AI", 120, "首页应包含稳定品牌文字"),
+    ("02 首页核心内容", "keyword", "https://usunai.top/", "&#21451;&#23578;AI", 120, "首页应包含稳定品牌文字"),
     ("03 后端健康接口", "keyword", "https://usunai.top/api/health", '"ok":true', 60, "后端聚合健康接口"),
     ("04 管理后台登录页", "http", "https://usunai.top/admin/login", None, 300, "后台登录入口可访问性"),
     ("09a www 主域名与 SSL", "http", "https://www.usunai.top/", None, 600, "www 主域名、DNS 与证书"),
