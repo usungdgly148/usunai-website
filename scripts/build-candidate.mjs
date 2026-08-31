@@ -12,6 +12,8 @@ const viteCli = path.join(frontendDir, 'node_modules', 'vite', 'bin', 'vite.js')
 const releaseFiles = [
   'server/billing.js',
   'server/index.mjs',
+  'server/miniapp-api.mjs',
+  'server/miniapp-auth.mjs',
   'server/migrate-tutorial-images.mjs',
   'server/plan-validity.mjs',
   'server/kv-local.js',

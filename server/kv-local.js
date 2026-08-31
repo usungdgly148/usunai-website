@@ -104,6 +104,80 @@ export async function kvPutMany(entries) {
   return true;
 }
 
+// Resolve or create one WeChat mini-program identity atomically. This prevents
+// two concurrent wx.login requests from creating duplicate website accounts.
+export async function kvResolveWechatIdentity({ identityKey, unionKey = '', userIndexKey, identity, reg, user }) {
+  const select = db.prepare('SELECT value FROM kv WHERE key = ?');
+  const put = db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)');
+  return db.transaction(() => {
+    const direct = select.get(safeKey(identityKey));
+    if (direct) return { ok: true, created: false, identity: JSON.parse(direct.value) };
+
+    if (unionKey) {
+      const unionRow = select.get(safeKey(unionKey));
+      if (unionRow) {
+        const linkedIdentityKey = JSON.parse(unionRow.value);
+        const linked = select.get(safeKey(linkedIdentityKey));
+        if (linked) return { ok: true, created: false, identity: JSON.parse(linked.value) };
+      }
+    }
+
+    put.run(safeKey(identityKey), JSON.stringify(identity));
+    put.run(safeKey(userIndexKey), JSON.stringify(identityKey));
+    if (unionKey) put.run(safeKey(unionKey), JSON.stringify(identityKey));
+    put.run(safeKey('reg_' + reg.id), JSON.stringify(reg));
+    put.run(safeKey('user_' + user.id), JSON.stringify(user));
+    return { ok: true, created: true, identity };
+  })();
+}
+
+// Repoint a verified mini-program identity to an existing website account in
+// one transaction. Existing balances, validity, assets and history are never
+// overwritten by the temporary mini-program account.
+export async function kvBindWechatIdentity({ identityKey, currentUserId, targetUserId, currentUserIndexKey, targetUserIndexKey, updatedAt }) {
+  const select = db.prepare('SELECT value FROM kv WHERE key = ?');
+  const put = db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)');
+  const del = db.prepare('DELETE FROM kv WHERE key = ?');
+  return db.transaction(() => {
+    const identityRow = select.get(safeKey(identityKey));
+    if (!identityRow) return { ok: false, reason: 'identity_not_found' };
+    const identity = JSON.parse(identityRow.value);
+    if (String(identity.userId) !== String(currentUserId)) return { ok: false, reason: 'identity_mismatch' };
+
+    const targetRegRow = select.get(safeKey('reg_' + targetUserId));
+    const targetUserRow = select.get(safeKey('user_' + targetUserId));
+    if (!targetRegRow && !targetUserRow) return { ok: false, reason: 'target_not_found' };
+
+    const linkedRow = select.get(safeKey(targetUserIndexKey));
+    if (linkedRow && JSON.parse(linkedRow.value) !== identityKey) {
+      return { ok: false, reason: 'target_already_bound' };
+    }
+
+    const updatedIdentity = { ...identity, userId: targetUserId, bindingState: 'bound', updatedAt };
+    put.run(safeKey(identityKey), JSON.stringify(updatedIdentity));
+    put.run(safeKey(targetUserIndexKey), JSON.stringify(identityKey));
+    del.run(safeKey(currentUserIndexKey));
+
+    const currentRegRow = select.get(safeKey('reg_' + currentUserId));
+    const currentUserRow = select.get(safeKey('user_' + currentUserId));
+    if (currentRegRow) {
+      const currentReg = JSON.parse(currentRegRow.value);
+      put.run(safeKey('reg_' + currentUserId), JSON.stringify({ ...currentReg, status: 'merged', mergedInto: targetUserId, updatedAt }));
+    }
+    if (currentUserRow) {
+      const currentUser = JSON.parse(currentUserRow.value);
+      put.run(safeKey('user_' + currentUserId), JSON.stringify({ ...currentUser, status: 'merged', mergedInto: targetUserId, updatedAt }));
+    }
+
+    return {
+      ok: true,
+      identity: updatedIdentity,
+      reg: targetRegRow ? JSON.parse(targetRegRow.value) : null,
+      user: targetUserRow ? JSON.parse(targetUserRow.value) : null,
+    };
+  })();
+}
+
 // 智能体调用完成后的余额、算力流水在同一事务落库。
 // allowPartial 仅用于“上游已经成功返回，但实际费用超过当前余额”的收尾场景：
 // 扣完剩余余额并保留应计费用/差额，避免成功任务没有任何算力流水。

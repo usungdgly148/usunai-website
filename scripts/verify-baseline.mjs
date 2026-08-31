@@ -18,7 +18,13 @@ const forbiddenSegments = new Set([
   "backups", "deploy-backups", "image-variants", "knowledge-files", "node_modules",
   "qdrant-snapshots", "qdrant-storage", "uploads",
 ]);
-const skippedDirectories = new Set([".git", "frontend/node_modules"]);
+const skippedDirectories = new Set([
+  ".git",
+  "frontend/node_modules",
+  "miniapp/dist",
+  "miniapp/node_modules",
+  "server/node_modules",
+]);
 
 function walk(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {

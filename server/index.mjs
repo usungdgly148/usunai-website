@@ -17,6 +17,8 @@ import * as KV from './kv-local.js';
 import nodemailer from 'nodemailer';
 import sharp from 'sharp';
 import { resolveMaxPlanValidity } from './plan-validity.mjs';
+import { handleMiniappApi } from './miniapp-api.mjs';
+import { handleMiniappAuth } from './miniapp-auth.mjs';
 import {
   configureKnowledgeService,
   handleKnowledgeAdminRoute,
@@ -186,6 +188,10 @@ const WECHAT = {
   redirectUri: process.env.WECHAT_REDIRECT_URI || '',
 };
 const WECHAT_MODE = (WECHAT.appId && WECHAT.appSecret && WECHAT.redirectUri) ? 'real' : 'mock';
+const WECHAT_MINIAPP = {
+  appId: process.env.WECHAT_MINIAPP_APP_ID || 'wx4f071fbfd1e51130',
+  appSecret: process.env.WECHAT_MINIAPP_APP_SECRET || '',
+};
 // 扫码会话状态：state -> { status:'pending'|'done'|'error', user, expires }
 const wechatStates = new Map();
 const newDemoWechatUser = () => ({
@@ -303,6 +309,34 @@ let phoneUsers = readJson(PHONE_USERS_FILE, []);
 const savePhoneUsers = () => writeJson(PHONE_USERS_FILE, phoneUsers);
 // 验证码会话：phone -> { code, expires }
 const phoneCodes = new Map();
+
+async function verifyPhoneCodeValue(phone, code) {
+  const normalizedPhone = String(phone || '').trim();
+  const normalizedCode = String(code || '').trim();
+  if (!/^1[3-9]\d{9}$/.test(normalizedPhone)) return { ok: false, message: '请输入有效的手机号' };
+  if (!/^\d{4,8}$/.test(normalizedCode)) return { ok: false, message: '验证码格式不正确' };
+  if (DYPNS_MODE === 'real') {
+    const result = await callDypns('CheckSmsVerifyCode', {
+      PhoneNumber: normalizedPhone,
+      SignName: ALIYUN_DYPNS.signName,
+      TemplateCode: ALIYUN_DYPNS.templateCode,
+      CountryCode: '86',
+      VerifyCode: normalizedCode,
+    });
+    const verifyResult = result.data?.Model?.VerifyResult;
+    const valid = result.ok && (verifyResult === 'PASS' || verifyResult === 1 || verifyResult === '1');
+    return valid
+      ? { ok: true }
+      : { ok: false, message: '验证码错误或已过期，请重新获取' };
+  }
+  const record = phoneCodes.get(normalizedPhone);
+  if (!record || record.expires < Date.now()) return { ok: false, message: '验证码已过期，请重新获取' };
+  if (record.code !== '1234' || normalizedCode !== '1234') {
+    return { ok: false, message: '验证码错误（mock 请用 1234）' };
+  }
+  phoneCodes.delete(normalizedPhone);
+  return { ok: true };
+}
 // 邮箱重置 token：token -> { userId, expires }（15 分钟过期，一次性使用）
 const emailResetTokens = new Map();
 
@@ -444,8 +478,8 @@ function jwtVerify(token) {
   if (!payload || typeof payload.exp !== 'number' || payload.exp < Date.now()) return null;
   return payload;
 }
-function createSession(userId, role = 'user') {
-  return jwtSign({ sub: userId, role, iat: Date.now(), exp: Date.now() + SESSION_TTL_MS });
+function createSession(userId, role = 'user', extra = {}) {
+  return jwtSign({ sub: userId, role, ...extra, iat: Date.now(), exp: Date.now() + SESSION_TTL_MS });
 }
 const revokedSessions = new Map();
 const sessionDigest = (token) => crypto.createHash('sha256').update(String(token || '')).digest('hex');
@@ -462,7 +496,13 @@ function getSession(req) {
   }
   const payload = jwtVerify(token);
   if (!payload) return null;
-  return { userId: payload.sub, role: payload.role, exp: payload.exp };
+  return {
+    userId: payload.sub,
+    role: payload.role,
+    client: payload.client || 'web',
+    identityKey: payload.identityKey || '',
+    exp: payload.exp,
+  };
 }
 // 是否管理员会话
 const isAdminSession = (s) => !!(s && s.role === 'admin');
@@ -1325,7 +1365,8 @@ const CORS = (req, res) => {
   if (origin && CORS_ALLOWED_ORIGINS.has(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Idempotency-Key,X-Request-Id');
+    res.setHeader('Access-Control-Expose-Headers', 'X-Request-Id');
     res.setHeader('Vary', 'Origin');
   }
 };
@@ -1993,6 +2034,30 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ ok: true, agents: Object.keys(agents).length }));
       return;
     }
+    if (await handleMiniappAuth(req, res, u, {
+      KV,
+      readBody,
+      getSession,
+      isAdminSession,
+      getPlanValidity,
+      sanitizeId: sanitizeIdSafe,
+      createMiniappSession: (userId, identityKey) => createSession(userId, 'user', {
+        client: 'miniapp',
+        identityKey,
+      }),
+      findRegByEmail,
+      findUserByPhone,
+      verifyPassword: verifyPasswordStore,
+      verifyPhoneCode: verifyPhoneCodeValue,
+      config: WECHAT_MINIAPP,
+    })) return;
+    if (await handleMiniappApi(req, res, u, {
+      KV,
+      getSession,
+      isAdminSession,
+      getPlanValidity,
+      sanitizeId: sanitizeIdSafe,
+    })) return;
     if (await handleKnowledgeAdminRoute(req, res, u, { requireAdmin, readBody, getAgents: () => agents })) return;
     if (p === '/api/billing-config') {
       res.setHeader('Content-Type', 'application/json');
@@ -3049,43 +3114,10 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/auth/phone-verify' && req.method === 'POST') {
       const { phone, code } = await readBody(req);
       res.setHeader('Content-Type', 'application/json');
-      if (!/^1[3-9]\d{9}$/.test(phone || '')) {
-        res.end(JSON.stringify({ ok: false, msg: '请输入有效的手机号' }));
+      const verified = await verifyPhoneCodeValue(phone, code);
+      if (!verified.ok) {
+        res.end(JSON.stringify({ ok: false, msg: verified.message }));
         return;
-      }
-      if (!/^\d{4,8}$/.test(String(code || ''))) {
-        res.end(JSON.stringify({ ok: false, msg: '验证码格式不正确' }));
-        return;
-      }
-      if (DYPNS_MODE === 'real') {
-        const r = await callDypns('CheckSmsVerifyCode', {
-          PhoneNumber: phone,
-          SignName: ALIYUN_DYPNS.signName,
-          TemplateCode: ALIYUN_DYPNS.templateCode,
-          CountryCode: '86',
-          VerifyCode: String(code),
-        });
-        if (!r.ok) {
-          res.end(JSON.stringify({ ok: false, msg: '验证码错误或已过期，请重新获取' }));
-          return;
-        }
-        const verifyResult = r.data?.Model?.VerifyResult;
-        const valid = verifyResult === 'PASS' || verifyResult === 1 || verifyResult === '1';
-        if (!valid) {
-          res.end(JSON.stringify({ ok: false, msg: '验证码错误或已过期，请重新获取' }));
-          return;
-        }
-      } else {
-        const rec = phoneCodes.get(phone);
-        if (!rec || rec.expires < Date.now()) {
-          res.end(JSON.stringify({ ok: false, msg: '验证码已过期，请重新获取' }));
-          return;
-        }
-        if (rec.code !== '1234' || String(code) !== '1234') {
-          res.end(JSON.stringify({ ok: false, msg: '验证码错误（mock 请用 1234）' }));
-          return;
-        }
-        phoneCodes.delete(phone);
       }
       // 查/建用户（2026-08-03 收敛进 SQLite KV，phoneUsers.json 仅作过渡兜底）
       let u = null;

@@ -19,8 +19,12 @@
     "check:plan-validity": "node scripts/check-plan-validity.mjs",
     "check:coze-workflow-files": "node scripts/check-coze-workflow-file-params.mjs",
     "check:asset-category-routing": "node scripts/check-asset-category-routing.mjs",
+    "check:miniapp-stage1": "node scripts/check-miniapp-stage1-contracts.mjs",
+    "check:miniapp-stage2": "node scripts/check-miniapp-stage2-auth.mjs",
+    "check:miniapp-stage3": "node scripts/check-miniapp-stage3-ui.mjs",
+    "build:miniapp": "npm run build:weapp --prefix miniapp",
     "candidate:build": "node scripts/build-candidate.mjs",
     "candidate:verify": "node scripts/verify-candidate.mjs",
-    "verify": "npm run check:secrets && npm run check:baseline && npm run check:stage-a && npm run check:stage-b && npm run check:stage-c && npm run check:stage-d && npm run check:stage-e && npm run check:stage-g && npm run check:session-isolation && npm run check:billing-settlement && npm run check:plan-validity && npm run check:coze-workflow-files && npm run check:asset-category-routing"
+    "verify": "npm run check:secrets && npm run check:baseline && npm run check:stage-a && npm run check:stage-b && npm run check:stage-c && npm run check:stage-d && npm run check:stage-e && npm run check:stage-g && npm run check:session-isolation && npm run check:billing-settlement && npm run check:plan-validity && npm run check:coze-workflow-files && npm run check:asset-category-routing && npm run check:miniapp-stage1 && npm run check:miniapp-stage2 && npm run check:miniapp-stage3"
   }
 }

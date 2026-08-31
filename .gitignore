@@ -23,6 +23,8 @@ data/
 node_modules/
 frontend/dist/
 frontend/.vite/
+miniapp/dist/
+miniapp/.swc/
 coverage/
 logs/
 *.log
