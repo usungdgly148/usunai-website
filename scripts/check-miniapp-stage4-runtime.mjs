@@ -14,6 +14,11 @@ const workflow = read('miniapp/src/pages/workflow/index.tsx');
 const appConfig = read('miniapp/src/app.config.ts');
 
 assert.ok(server.indexOf('handleMiniappRuntime(req, res, u') < server.indexOf('handleMiniappApi(req, res, u'), 'runtime routes must be handled before read-only routes');
+const runtimeCallStart = server.indexOf('handleMiniappRuntime(req, res, u');
+const apiCallStart = server.indexOf('handleMiniappApi(req, res, u', runtimeCallStart);
+const runtimeWiring = server.slice(runtimeCallStart, apiCallStart);
+assert.match(runtimeWiring, /sanitizeId:\s*sanitizeIdSafe/, 'runtime routes must use the initialized ID sanitizer');
+assert.doesNotMatch(runtimeWiring, /\n\s*sanitizeId,\s*\n/, 'runtime routes must not reference the later request-local sanitizer');
 assert.match(runtime, /proxyRequest\(deps\.port, '\/api\/coze\/chat'/);
 assert.match(runtime, /proxyRequest\(port, '\/api\/coze\/workflow-run'/);
 assert.match(runtime, /requestJson\(deps\.port, '\/api\/coze\/file-upload'/);

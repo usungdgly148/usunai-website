@@ -2057,7 +2057,7 @@ const server = http.createServer(async (req, res) => {
       readBody,
       getSession,
       isAdminSession,
-      sanitizeId,
+      sanitizeId: sanitizeIdSafe,
       getAgents: () => agents,
       port: PORT,
     })) return;
