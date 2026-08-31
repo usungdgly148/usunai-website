@@ -53,6 +53,22 @@ export interface PublicContent {
   recommended: string[];
 }
 
+export type MiniappLayoutBlockType = 'carousel' | 'announcements' | 'search' | 'categories' | 'featured-agents' | 'featured-workflows' | 'quick-links' | 'spacer';
+export interface MiniappLayoutBlock {
+  id: string;
+  type: MiniappLayoutBlockType;
+  visible: boolean;
+  title?: string;
+  image?: string;
+  backgroundColor?: string;
+  textColor?: string;
+  spacing?: number;
+  link?: string;
+  dataSource?: 'recommended' | 'all' | 'current-category' | '';
+  limit?: number;
+}
+export interface MiniappLayout { page: 'home' | 'category'; blocks: MiniappLayoutBlock[]; }
+
 export interface UserProfile {
   id: string;
   name: string;

@@ -10,7 +10,8 @@ export default {
     'pages/compute/index',
     'pages/assets/index',
     'pages/orders/index',
-    'pages/bind/index'
+    'pages/bind/index',
+    'pages/webview/index'
   ],
   window: {
     backgroundTextStyle: 'light',

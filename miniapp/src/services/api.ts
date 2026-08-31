@@ -1,11 +1,12 @@
 import Taro from '@tarojs/taro';
-import type { ApiEnvelope, PublicContent, UserProfile } from '../types';
+import type { ApiEnvelope, MiniappLayout, PublicContent, UserProfile } from '../types';
 
 export const API_BASE = 'https://www.usunai.top';
 const TOKEN_KEY = 'usunai_miniapp_token';
 const BINDING_KEY = 'usunai_miniapp_binding_required';
 const CONTENT_CACHE_KEY = 'usunai_miniapp_content_v1';
 const CONTENT_TTL = 5 * 60 * 1000;
+const LAYOUT_TTL = 60 * 1000;
 let loginPromise: Promise<string> | null = null;
 
 export class ApiError extends Error {
@@ -76,6 +77,25 @@ export async function getPublicContent(force = false): Promise<PublicContent> {
   } catch (error) {
     if (cached?.data) return cached.data;
     throw error;
+  }
+}
+
+const DEFAULT_LAYOUTS: Record<'home' | 'category', MiniappLayout> = {
+  home: { page: 'home', blocks: ['carousel', 'announcements', 'search', 'categories', 'featured-agents', 'featured-workflows', 'quick-links'].map((type, index) => ({ id: `${type}-${index}`, type: type as MiniappLayout['blocks'][number]['type'], visible: true, spacing: 16, limit: 8 })) },
+  category: { page: 'category', blocks: ['search', 'categories', 'featured-agents', 'featured-workflows'].map((type, index) => ({ id: `${type}-${index}`, type: type as MiniappLayout['blocks'][number]['type'], visible: true, spacing: 16, limit: 12 })) },
+};
+
+export async function getMiniappLayout(page: 'home' | 'category', force = false): Promise<MiniappLayout> {
+  const cacheKey = `usunai_miniapp_layout_${page}_v1`;
+  const cached = Taro.getStorageSync<{ savedAt: number; data: MiniappLayout }>(cacheKey);
+  if (!force && cached?.data && Date.now() - cached.savedAt < LAYOUT_TTL) return cached.data;
+  try {
+    const response = await apiRequest<MiniappLayout>(`/api/miniapp/v1/layout?page=${page}`, { auth: false });
+    if (!response.data || response.data.page !== page || !Array.isArray(response.data.blocks)) throw new Error('布局格式无效');
+    Taro.setStorageSync(cacheKey, { savedAt: Date.now(), data: response.data });
+    return response.data;
+  } catch {
+    return cached?.data || DEFAULT_LAYOUTS[page];
   }
 }
 

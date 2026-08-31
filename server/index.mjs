@@ -20,6 +20,7 @@ import { resolveMaxPlanValidity } from './plan-validity.mjs';
 import { handleMiniappApi } from './miniapp-api.mjs';
 import { handleMiniappAuth } from './miniapp-auth.mjs';
 import { handleMiniappRuntime } from './miniapp-runtime.mjs';
+import { handleMiniappLayout } from './miniapp-layout.mjs';
 import {
   configureKnowledgeService,
   handleKnowledgeAdminRoute,
@@ -2061,6 +2062,7 @@ const server = http.createServer(async (req, res) => {
       getAgents: () => agents,
       port: PORT,
     })) return;
+    if (await handleMiniappLayout(req, res, u, { KV, requireAdmin, readBody })) return;
     if (await handleMiniappApi(req, res, u, {
       KV,
       getSession,
