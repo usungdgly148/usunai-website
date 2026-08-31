@@ -4,6 +4,8 @@ export default {
     'pages/category/index',
     'pages/search/index',
     'pages/detail/index',
+    'pages/chat/index',
+    'pages/workflow/index',
     'pages/profile/index',
     'pages/compute/index',
     'pages/assets/index',

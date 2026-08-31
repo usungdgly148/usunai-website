@@ -11,6 +11,35 @@ export interface ContentItem {
   suggestedQuestions?: string[];
   resultKind?: string;
   uses?: number;
+  supportsImages?: boolean;
+  assetCategory?: 'copy' | 'image' | 'video' | 'audio' | 'article';
+  formFields?: FormField[];
+  outputFields?: Array<Record<string, unknown>>;
+}
+
+export interface FormField {
+  id?: string;
+  key?: string;
+  name?: string;
+  label?: string;
+  type?: string;
+  inputType?: string;
+  itemType?: string;
+  required?: boolean;
+  placeholder?: string;
+  options?: Array<string | { label?: string; value?: string }>;
+}
+
+export interface RuntimeTask {
+  id: string;
+  workflowId: string;
+  name?: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  result?: Record<string, unknown>;
+  error?: string;
+  createdAt: string;
+  updatedAt?: string;
+  completedAt?: string;
 }
 
 export interface CategoryItem { id: string; key?: string; name?: string; label?: string; }

@@ -19,6 +19,7 @@ import sharp from 'sharp';
 import { resolveMaxPlanValidity } from './plan-validity.mjs';
 import { handleMiniappApi } from './miniapp-api.mjs';
 import { handleMiniappAuth } from './miniapp-auth.mjs';
+import { handleMiniappRuntime } from './miniapp-runtime.mjs';
 import {
   configureKnowledgeService,
   handleKnowledgeAdminRoute,
@@ -2050,6 +2051,15 @@ const server = http.createServer(async (req, res) => {
       verifyPassword: verifyPasswordStore,
       verifyPhoneCode: verifyPhoneCodeValue,
       config: WECHAT_MINIAPP,
+    })) return;
+    if (await handleMiniappRuntime(req, res, u, {
+      KV,
+      readBody,
+      getSession,
+      isAdminSession,
+      sanitizeId,
+      getAgents: () => agents,
+      port: PORT,
     })) return;
     if (await handleMiniappApi(req, res, u, {
       KV,

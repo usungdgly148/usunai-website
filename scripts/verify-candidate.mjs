@@ -51,6 +51,9 @@ for (const file of listed.keys()) if (!actual.has(file)) errors.push(`manifest l
 const required = [
   'dist/index.html',
   'server/index.mjs',
+  'server/miniapp-api.mjs',
+  'server/miniapp-auth.mjs',
+  'server/miniapp-runtime.mjs',
   'server/plan-validity.mjs',
   'server/package.json',
   'server/package-lock.json',

@@ -39,3 +39,28 @@ button::after { border: 0; }
 .chip-row { display: flex; gap: 12px; overflow-x: auto; white-space: nowrap; }
 .chip { flex-shrink: 0; padding: 14px 22px; border-radius: 999px; background: #fff; color: #455670; }
 .chip-active { background: #183865; color: #fff; }
+.runtime-page { display: flex; min-height: 100vh; padding: 24px; flex-direction: column; }
+.runtime-header { flex-shrink: 0; padding: 8px 4px 18px; }
+.chat-scroll, .workflow-scroll { flex: 1; min-height: 0; }
+.chat-row { display: flex; margin: 14px 0; }
+.chat-row-user { justify-content: flex-end; }
+.chat-bubble { max-width: 86%; padding: 20px 22px; border-radius: 20px; line-height: 1.55; white-space: pre-wrap; }
+.assistant-bubble { background: #fff; border: 1px solid #e1e8f2; }
+.user-bubble { background: #2864ea; color: #fff; }
+.reasoning-text { display: block; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid rgba(120, 140, 170, .2); color: #7a899f; font-size: 23px; }
+.composer { display: flex; flex-shrink: 0; align-items: center; gap: 10px; margin-top: 14px; padding: 10px; border: 1px solid #dce5f0; border-radius: 24px; background: #fff; }
+.composer-add, .composer-send { width: auto; min-width: 72px; margin: 0; padding: 0 14px; border-radius: 16px; font-size: 25px; }
+.composer-add { background: #f0f4fa; color: #234; }
+.composer-send { background: #2864ea; color: #fff; }
+.composer-input { flex: 1; height: 66px; }
+.image-grid, .media-grid { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
+.upload-thumb { width: 120px; height: 120px; border-radius: 14px; }
+.composer-images { flex-shrink: 0; }
+.runtime-error { display: block; margin: 12px 0; padding: 16px; border-radius: 12px; background: #fff0f1; color: #d83248; font-size: 24px; }
+.runtime-field { margin-bottom: 20px; }
+.runtime-textarea { width: 100%; min-height: 180px; padding: 18px 22px; border: 1px solid #dce5f0; border-radius: 16px; background: #fff; }
+.picker-value { display: flex; align-items: center; color: #4b5c74; }
+.file-button { margin: 0; border: 1px dashed #b7c5d9; border-radius: 16px; background: #f8fafc; color: #345; font-size: 26px; }
+.runtime-submit { flex-shrink: 0; }
+.result-text { display: block; margin-top: 16px; color: #34445d; font-size: 24px; line-height: 1.55; white-space: pre-wrap; }
+.media-thumb { width: 220px; height: 160px; border-radius: 14px; background: #eef2f7; }

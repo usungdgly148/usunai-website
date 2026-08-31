@@ -62,7 +62,10 @@ function bySortOrder(a, b) {
 export function sanitizePublicContent(config = {}) {
   const agents = asCollection(config.agents)
     .filter((item) => item?.published === true)
-    .map((item) => pickPublic(item, AGENT_PUBLIC_FIELDS))
+    .map((item) => ({
+      ...pickPublic(item, AGENT_PUBLIC_FIELDS),
+      supportsImages: item.platform === 'deepseek-native' || item.supportsImages === true,
+    }))
     .filter(Boolean)
     .sort(bySortOrder);
   const workflows = asCollection(config.workflows)

@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useRouter } from '@tarojs/taro';
+import Taro, { useRouter } from '@tarojs/taro';
 import { Button, Text, View } from '@tarojs/components';
 import { PageState } from '../../components/page-state';
 import { useLoad } from '../../hooks/use-load';
@@ -19,8 +19,8 @@ export default function DetailPage() {
       <Text className='page-subtitle'>{params.type === 'workflow' ? 'AI 工作流' : 'AI 智能体'}</Text>
       <View className='card section'><Text className='card-desc'>{item.description || '暂无简介'}</Text><View className='tag-row'>{(item.tags || []).map((tag) => <Text className='tag' key={tag}>{tag}</Text>)}</View></View>
       {item.opening && <View className='card'><Text className='card-title'>使用说明</Text><Text className='card-desc'>{item.opening}</Text></View>}
-      <Button className='primary-button' disabled>运行功能将在下一阶段开放</Button>
-      <Text className='muted'>本阶段先完成内容浏览和账号数据一致性，AI 对话与工作流运行将在阶段四接入现有服务端扣费与任务体系。</Text>
+      <Button className='primary-button' onClick={() => Taro.navigateTo({ url: params.type === 'workflow' ? `/pages/workflow/index?id=${encodeURIComponent(item.id)}` : `/pages/chat/index?id=${encodeURIComponent(item.id)}` })}>{params.type === 'workflow' ? '配置并运行' : '开始对话'}</Button>
+      <Text className='muted'>运行记录、算力消耗和资产均与网站账号保持一致。</Text>
     </>}
   </View>;
 }
