@@ -8,6 +8,7 @@ const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'u
 const appConfig = read('miniapp/src/app.config.ts');
 const app = read('miniapp/src/app.tsx');
 const api = read('miniapp/src/services/api.ts');
+const taroConfig = read('miniapp/config/index.ts');
 const projectConfig = JSON.parse(read('miniapp/project.config.json'));
 const packageJson = JSON.parse(read('miniapp/package.json'));
 
@@ -25,7 +26,8 @@ assert.equal(projectConfig.miniprogramRoot, 'dist/');
 assert.equal(packageJson.scripts['build:weapp'], 'taro build --type weapp');
 assert.ok(packageJson.devDependencies['@tarojs/webpack5-runner'], 'build runner must stay a development dependency');
 
-assert.match(api, /https:\/\/www\.usunai\.top/);
+assert.match(taroConfig, /https:\/\/www\.usunai\.top/);
+assert.match(api, /__MINIAPP_API_BASE__/);
 assert.match(api, /\/api\/miniapp\/v1\/auth\/login/);
 assert.match(api, /\/api\/miniapp\/v1\/auth\/bind/);
 assert.match(api, /CONTENT_CACHE_KEY/);

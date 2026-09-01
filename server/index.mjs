@@ -21,6 +21,7 @@ import { handleMiniappApi } from './miniapp-api.mjs';
 import { handleMiniappAuth } from './miniapp-auth.mjs';
 import { handleMiniappRuntime } from './miniapp-runtime.mjs';
 import { handleMiniappLayout } from './miniapp-layout.mjs';
+import { attachMiniappRequestMetric, handleMiniappObservability } from './miniapp-observability.mjs';
 import {
   configureKnowledgeService,
   handleKnowledgeAdminRoute,
@@ -2030,12 +2031,14 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.statusCode = 204; res.end(); return; }
   const u = new URL(req.url, 'http://localhost');
   const p = u.pathname;
+  attachMiniappRequestMetric(req, res, KV, p);
   try {
     if (p === '/api/health') {
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ ok: true, agents: Object.keys(agents).length }));
       return;
     }
+    if (await handleMiniappObservability(req, res, u, { KV, requireAdmin, readBody })) return;
     if (await handleMiniappAuth(req, res, u, {
       KV,
       readBody,

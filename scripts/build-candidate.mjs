@@ -16,6 +16,7 @@ const releaseFiles = [
   'server/miniapp-auth.mjs',
   'server/miniapp-runtime.mjs',
   'server/miniapp-layout.mjs',
+  'server/miniapp-observability.mjs',
   'server/migrate-tutorial-images.mjs',
   'server/plan-validity.mjs',
   'server/kv-local.js',

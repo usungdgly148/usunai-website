@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type PropsWithChildren } from 'react';
 import Taro from '@tarojs/taro';
 import { Button, Text, View } from '@tarojs/components';
+import { reportClientError } from './services/api';
 import './app.scss';
 
 class AppErrorBoundary extends Component<PropsWithChildren, { failed: boolean }> {
@@ -10,8 +11,16 @@ class AppErrorBoundary extends Component<PropsWithChildren, { failed: boolean }>
     return { failed: true };
   }
 
-  componentDidCatch(_error: Error, _info: ErrorInfo) {
-    // 不记录账号、Token 或请求正文，仅提供可恢复的页面状态。
+  componentDidCatch(error: Error, _info: ErrorInfo) {
+    const pages = Taro.getCurrentPages();
+    const page = pages[pages.length - 1]?.route || '/miniapp';
+    const seed = `${error.name || 'Error'}:${page}`;
+    let hash = 2166136261;
+    for (let index = 0; index < seed.length; index += 1) {
+      hash ^= seed.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    void reportClientError({ page, errorCode: error.name || 'CLIENT_RENDER_ERROR', fingerprint: `fp_${(hash >>> 0).toString(16)}` });
   }
 
   render() {

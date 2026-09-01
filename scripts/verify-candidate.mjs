@@ -55,6 +55,7 @@ const required = [
   'server/miniapp-auth.mjs',
   'server/miniapp-runtime.mjs',
   'server/miniapp-layout.mjs',
+  'server/miniapp-observability.mjs',
   'server/plan-validity.mjs',
   'server/package.json',
   'server/package-lock.json',

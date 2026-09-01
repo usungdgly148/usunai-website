@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import { errorEnvelope, requestIdFor, sendJson, successEnvelope } from './miniapp-api.mjs';
+import { recordMiniappMetric } from './miniapp-observability.mjs';
 
 const JSON_LIMIT = 35 * 1024 * 1024;
 const TASK_RESULT_LIMIT = 12 * 1024 * 1024;
@@ -105,7 +106,8 @@ function loadPublishedAgent(getAgents, id) {
   return list.find((item) => item && item.published === true && String(item.id) === String(id)) || null;
 }
 
-async function runWorkflowTask({ KV, port, authorization, task, parameters }) {
+async function runWorkflowTask({ KV, port, authorization, task, parameters, observability = {} }) {
+  const metricStartedAt = Date.now();
   const key = taskStorageKey(task.id);
   const running = { ...task, status: 'running', startedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
   await KV.kvPut(key, running);
@@ -128,6 +130,14 @@ async function runWorkflowTask({ KV, port, authorization, task, parameters }) {
       completedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+    await recordMiniappMetric(KV, {
+      kind: 'workflow',
+      route: '/api/miniapp/v1/workflows/:id/tasks',
+      ok: true,
+      statusCode: response.statusCode,
+      durationMs: Date.now() - metricStartedAt,
+      ...observability,
+    }).catch(() => {});
   } catch (error) {
     await KV.kvPut(key, {
       ...running,
@@ -136,6 +146,15 @@ async function runWorkflowTask({ KV, port, authorization, task, parameters }) {
       completedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+    await recordMiniappMetric(KV, {
+      kind: 'workflow',
+      route: '/api/miniapp/v1/workflows/:id/tasks',
+      ok: false,
+      statusCode: Number(error?.statusCode) || 500,
+      durationMs: Date.now() - metricStartedAt,
+      errorCode: 'WORKFLOW_FAILED',
+      ...observability,
+    }).catch(() => {});
   }
 }
 
@@ -154,6 +173,8 @@ export async function handleMiniappRuntime(req, res, url, deps) {
   try {
     const chatMatch = path.match(/^\/api\/miniapp\/v1\/agents\/([^/]+)\/chat$/);
     if (chatMatch && req.method === 'POST') {
+      const metricStartedAt = Date.now();
+      let firstTokenMs = null;
       const agentId = decodeURIComponent(chatMatch[1]);
       if (!loadPublishedAgent(deps.getAgents, agentId)) {
         sendJson(res, 404, errorEnvelope('AGENT_NOT_FOUND', '智能体不存在或未上架', requestId), requestId);
@@ -165,8 +186,22 @@ export async function handleMiniappRuntime(req, res, url, deps) {
         res.setHeader('Content-Type', upstream.headers['content-type'] || 'text/event-stream; charset=utf-8');
         res.setHeader('Cache-Control', 'no-cache, no-transform');
         res.setHeader('X-Accel-Buffering', 'no');
+        upstream.once('data', () => { firstTokenMs = Date.now() - metricStartedAt; });
         upstream.pipe(res);
-        upstream.on('end', resolve);
+        upstream.on('end', () => {
+          void recordMiniappMetric(deps.KV, {
+            kind: 'chat',
+            route: path,
+            ok: (upstream.statusCode || 502) < 400,
+            statusCode: upstream.statusCode || 502,
+            durationMs: Date.now() - metricStartedAt,
+            firstTokenMs,
+            clientEnvironment: req.headers['x-miniapp-environment'],
+            clientVersion: req.headers['x-miniapp-version'],
+            requestId,
+          }).catch(() => {});
+          resolve();
+        });
       });
       return true;
     }
@@ -230,7 +265,18 @@ export async function handleMiniappRuntime(req, res, url, deps) {
       const task = { id: keys.taskId, userId, workflowId, name: workflow.name || '', status: 'queued', createdAt: now, updatedAt: now };
       await deps.KV.kvPut(taskStorageKey(task.id), task);
       await deps.KV.kvPut(keys.idempotencyKey, { taskId: task.id, userId, createdAt: now });
-      void runWorkflowTask({ KV: deps.KV, port: deps.port, authorization, task, parameters: body.parameters || {} });
+      void runWorkflowTask({
+        KV: deps.KV,
+        port: deps.port,
+        authorization,
+        task,
+        parameters: body.parameters || {},
+        observability: {
+          clientEnvironment: req.headers['x-miniapp-environment'],
+          clientVersion: req.headers['x-miniapp-version'],
+          requestId,
+        },
+      });
       sendJson(res, 202, successEnvelope(task, requestId), requestId);
       return true;
     }

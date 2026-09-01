@@ -1,7 +1,10 @@
 import Taro from '@tarojs/taro';
 import type { ApiEnvelope, MiniappLayout, PublicContent, UserProfile } from '../types';
 
-export const API_BASE = 'https://www.usunai.top';
+export const API_BASE = __MINIAPP_API_BASE__;
+export const MINIAPP_ENVIRONMENT = __MINIAPP_ENV__;
+export const MINIAPP_VERSION = __MINIAPP_VERSION__;
+export const MINIAPP_BUILD = __MINIAPP_BUILD__;
 const TOKEN_KEY = 'usunai_miniapp_token';
 const BINDING_KEY = 'usunai_miniapp_binding_required';
 const CONTENT_CACHE_KEY = 'usunai_miniapp_content_v1';
@@ -17,6 +20,14 @@ export class ApiError extends Error {
 
 interface RequestOptions { method?: 'GET' | 'POST'; data?: unknown; auth?: boolean; header?: Record<string, string>; }
 
+function requestHeaders() {
+  return {
+    'X-Request-Id': `mp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`,
+    'X-Miniapp-Environment': MINIAPP_ENVIRONMENT,
+    'X-Miniapp-Version': MINIAPP_VERSION,
+  };
+}
+
 async function rawRequest<T>(path: string, options: RequestOptions = {}): Promise<ApiEnvelope<T>> {
   const token = Taro.getStorageSync<string>(TOKEN_KEY);
   const response = await Taro.request<ApiEnvelope<T>>({
@@ -26,6 +37,7 @@ async function rawRequest<T>(path: string, options: RequestOptions = {}): Promis
     timeout: 15000,
     header: {
       'Content-Type': 'application/json',
+      ...requestHeaders(),
       ...(options.auth !== false && token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.header || {}),
     },
@@ -130,7 +142,7 @@ export async function sendPhoneCode(phone: string) {
     method: 'POST',
     data: { phone },
     timeout: 15000,
-    header: { 'Content-Type': 'application/json' },
+    header: { 'Content-Type': 'application/json', ...requestHeaders() },
   });
   if (response.statusCode < 200 || response.statusCode >= 300 || !response.data?.ok) {
     throw new ApiError('PHONE_CODE_FAILED', response.data?.msg || '验证码发送失败，请稍后重试', response.statusCode);
@@ -211,7 +223,7 @@ export async function streamAgentChat(
       data: payload,
       timeout: 300000,
       enableChunked: true,
-      header: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      header: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...requestHeaders() },
       success(response) {
         if (settled) return;
         if (response.statusCode >= 200 && response.statusCode < 300) { emitBlocks(); if (!settled) { settled = true; resolve(); } }
@@ -221,4 +233,24 @@ export async function streamAgentChat(
     });
     task.onChunkReceived(({ data }) => { if (!settled) { buffer += decodeUtf8(data, decoder); emitBlocks(); } });
   });
+}
+
+export async function reportClientError(payload: { page?: string; errorCode?: string; fingerprint?: string }) {
+  try {
+    await Taro.request({
+      url: `${API_BASE}/api/miniapp/v1/client-errors`,
+      method: 'POST',
+      data: {
+        page: String(payload.page || '/miniapp').slice(0, 180),
+        errorCode: String(payload.errorCode || 'CLIENT_RENDER_ERROR').slice(0, 80),
+        fingerprint: String(payload.fingerprint || '').slice(0, 80),
+        environment: MINIAPP_ENVIRONMENT,
+        version: MINIAPP_VERSION,
+      },
+      timeout: 3000,
+      header: { 'Content-Type': 'application/json', ...requestHeaders() },
+    });
+  } catch {
+    // Telemetry is best-effort and must never block the user.
+  }
 }
