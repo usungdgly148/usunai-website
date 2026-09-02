@@ -16,7 +16,7 @@ const MAX_BLOCKS = 40;
 const MAX_VERSIONS = 30;
 
 const defaults = {
-  home: ['carousel', 'announcements', 'search', 'categories', 'featured-agents', 'featured-workflows', 'quick-links'],
+  home: ['carousel', 'announcements', 'search', 'categories', 'featured-agents', 'featured-workflows'],
   category: ['search', 'categories', 'featured-agents', 'featured-workflows'],
 };
 
@@ -50,6 +50,31 @@ function numberInRange(value, fallback, min, max) {
   return Number.isFinite(parsed) ? Math.min(max, Math.max(min, Math.round(parsed))) : fallback;
 }
 
+function safeCarouselSlides(value) {
+  if (!Array.isArray(value)) return [];
+  if (value.length > 8) throw new Error('轮播图最多支持 8 张');
+  return value.map((slide, index) => {
+    if (!slide || typeof slide !== 'object') throw new Error(`第 ${index + 1} 张轮播图无效`);
+    return {
+      image: safeImage(slide.image),
+      title: text(slide.title, 80),
+      subtitle: text(slide.subtitle, 160),
+      link: safeLink(slide.link, '轮播图链接'),
+    };
+  }).filter((slide) => slide.image);
+}
+
+function safeCategoryImages(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const entries = Object.entries(value);
+  if (entries.length > 30) throw new Error('分类背景图最多支持 30 项');
+  return Object.fromEntries(entries.map(([key, image]) => {
+    const categoryKey = text(key, 100);
+    if (!categoryKey) throw new Error('分类标识无效');
+    return [categoryKey, safeImage(image)];
+  }).filter(([, image]) => image));
+}
+
 export function defaultMiniappLayout(page) {
   const pageKey = MINIAPP_LAYOUT_PAGES.has(page) ? page : 'home';
   return {
@@ -64,6 +89,8 @@ export function defaultMiniappLayout(page) {
       textColor: '',
       spacing: type === 'spacer' ? 24 : 16,
       link: '',
+      slides: [],
+      categoryImages: {},
       dataSource: type.startsWith('featured-') ? 'recommended' : '',
       limit: type.startsWith('featured-') ? 8 : 12,
     })),
@@ -91,6 +118,8 @@ export function validateMiniappLayout(input, expectedPage = '') {
       textColor: safeColor(block.textColor),
       spacing: numberInRange(block.spacing, 16, 0, 120),
       link: safeLink(block.link),
+      slides: safeCarouselSlides(block.slides),
+      categoryImages: safeCategoryImages(block.categoryImages),
       dataSource: ['recommended', 'all', 'current-category', ''].includes(block.dataSource) ? block.dataSource : '',
       limit: numberInRange(block.limit, 8, 1, 24),
     };

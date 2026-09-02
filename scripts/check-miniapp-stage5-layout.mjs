@@ -69,7 +69,7 @@ assert.match(server, /handleMiniappLayout/);
 assert.match(app, /admin\/miniapp-design/);
 assert.match(nav, /小程序设计/);
 assert.match(admin, /保存草稿/);
-assert.match(admin, />发布<\/button>/);
+assert.match(admin, />发布(?:布局)?<\/button>/);
 assert.match(admin, /回滚/);
 assert.match(admin, /draggable/);
 assert.match(renderer, /featured-agents/);

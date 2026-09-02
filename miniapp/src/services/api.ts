@@ -28,21 +28,54 @@ function requestHeaders() {
   };
 }
 
+function normalizeNetworkError(error: unknown): ApiError {
+  const errMsg = error && typeof error === 'object' && 'errMsg' in error
+    ? String((error as { errMsg?: unknown }).errMsg || '')
+    : error instanceof Error ? error.message : '';
+  const normalized = errMsg.toLowerCase();
+  if (normalized.includes('not in domain list') || normalized.includes('合法域名')) {
+    return new ApiError('REQUEST_DOMAIN_INVALID', '服务器域名尚未通过小程序校验，请检查 request 合法域名。');
+  }
+  if (normalized.includes('ssl') || normalized.includes('certificate') || normalized.includes('tls')) {
+    return new ApiError('REQUEST_TLS_INVALID', '服务器 HTTPS 证书校验失败，请检查证书配置。');
+  }
+  if (normalized.includes('timeout')) {
+    return new ApiError('REQUEST_TIMEOUT', '请求超时，请稍后重试。');
+  }
+  return new ApiError('REQUEST_NETWORK_FAILED', '网络请求失败，请检查网络后重试。');
+}
+
 async function rawRequest<T>(path: string, options: RequestOptions = {}): Promise<ApiEnvelope<T>> {
   const token = Taro.getStorageSync<string>(TOKEN_KEY);
-  const response = await Taro.request<ApiEnvelope<T>>({
-    url: `${API_BASE}${path}`,
-    method: options.method || 'GET',
-    data: options.data,
-    timeout: 15000,
-    header: {
-      'Content-Type': 'application/json',
-      ...requestHeaders(),
-      ...(options.auth !== false && token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.header || {}),
-    },
-  });
-  const body = response.data;
+  let response: Taro.request.SuccessCallbackResult<ApiEnvelope<T>>;
+  try {
+    response = await Taro.request<ApiEnvelope<T>>({
+      url: `${API_BASE}${path}`,
+      method: options.method || 'GET',
+      data: options.data,
+      dataType: 'json',
+      timeout: 15000,
+      header: {
+        'Content-Type': 'application/json',
+        ...requestHeaders(),
+        ...(options.auth !== false && token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options.header || {}),
+      },
+    });
+  } catch (error) {
+    throw normalizeNetworkError(error);
+  }
+  const responseData: unknown = response.data;
+  let body: ApiEnvelope<T>;
+  if (typeof responseData === 'string') {
+    try {
+      body = JSON.parse(responseData) as ApiEnvelope<T>;
+    } catch {
+      throw new ApiError('RESPONSE_INVALID', '服务器返回内容格式异常，请稍后重试。', response.statusCode);
+    }
+  } else {
+    body = responseData as ApiEnvelope<T>;
+  }
   if (response.statusCode < 200 || response.statusCode >= 300 || !body?.ok) {
     throw new ApiError(body?.error?.code || 'REQUEST_FAILED', body?.error?.message || '网络请求失败，请稍后重试', response.statusCode);
   }

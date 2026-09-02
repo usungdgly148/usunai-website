@@ -20,3 +20,10 @@ export const publishMiniappLayout = (page, layout) => request(`/api/admin/miniap
 export const rollbackMiniappLayout = (page, versionId) => request(`/api/admin/miniapp-layouts/${page}/rollback`, {
   method: 'POST', body: JSON.stringify({ versionId }),
 });
+
+export async function getMiniappPreviewContent() {
+  const response = await fetch('/api/miniapp/v1/content', { credentials: 'include' });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !body.ok) throw new Error(body.error || '无法读取小程序预览内容');
+  return body.data;
+}

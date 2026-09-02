@@ -1,6 +1,7 @@
 export default {
   pages: [
     'pages/home/index',
+    'pages/announcements/index',
     'pages/category/index',
     'pages/search/index',
     'pages/detail/index',

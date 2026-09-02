@@ -42,7 +42,16 @@ export interface RuntimeTask {
   completedAt?: string;
 }
 
-export interface CategoryItem { id: string; key?: string; name?: string; label?: string; }
+export interface CategoryItem {
+  id: string;
+  key?: string;
+  name?: string;
+  label?: string;
+  icon?: string;
+  color?: string;
+  miniappImage?: string;
+  miniappLink?: string;
+}
 export interface PublicContent {
   agents: ContentItem[];
   workflows: ContentItem[];
@@ -54,6 +63,12 @@ export interface PublicContent {
 }
 
 export type MiniappLayoutBlockType = 'carousel' | 'announcements' | 'search' | 'categories' | 'featured-agents' | 'featured-workflows' | 'quick-links' | 'spacer';
+export interface MiniappCarouselSlide {
+  image: string;
+  title?: string;
+  subtitle?: string;
+  link?: string;
+}
 export interface MiniappLayoutBlock {
   id: string;
   type: MiniappLayoutBlockType;
@@ -64,6 +79,8 @@ export interface MiniappLayoutBlock {
   textColor?: string;
   spacing?: number;
   link?: string;
+  slides?: MiniappCarouselSlide[];
+  categoryImages?: Record<string, string>;
   dataSource?: 'recommended' | 'all' | 'current-category' | '';
   limit?: number;
 }
