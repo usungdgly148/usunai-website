@@ -1,4 +1,3 @@
-import Taro, { usePullDownRefresh } from '@tarojs/taro';
 import { View } from '@tarojs/components';
 import { LayoutBlocks } from '../../components/layout-blocks';
 import { PageState } from '../../components/page-state';
@@ -25,15 +24,6 @@ export default function HomePage() {
     const [content, layout] = await Promise.all([getPublicContent(), getMiniappLayout('home')]);
     return { content: normalizeContent(content), layout };
   }, []);
-
-  usePullDownRefresh(async () => {
-    try {
-      await Promise.all([getPublicContent(true), getMiniappLayout('home', true)]);
-      await state.reload();
-    } finally {
-      Taro.stopPullDownRefresh();
-    }
-  });
 
   return <View className='page mini-home-page'>
     <PageState loading={state.loading} error={state.error} onRetry={state.reload} />
