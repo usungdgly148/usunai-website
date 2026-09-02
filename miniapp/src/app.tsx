@@ -12,15 +12,19 @@ class AppErrorBoundary extends Component<PropsWithChildren, { failed: boolean }>
   }
 
   componentDidCatch(error: Error, _info: ErrorInfo) {
-    const pages = Taro.getCurrentPages();
-    const page = pages[pages.length - 1]?.route || '/miniapp';
-    const seed = `${error.name || 'Error'}:${page}`;
-    let hash = 2166136261;
-    for (let index = 0; index < seed.length; index += 1) {
-      hash ^= seed.charCodeAt(index);
-      hash = Math.imul(hash, 16777619);
+    try {
+      const pages = typeof Taro.getCurrentPages === 'function' ? Taro.getCurrentPages() : [];
+      const page = pages[pages.length - 1]?.route || '/miniapp';
+      const seed = `${error.name || 'Error'}:${page}`;
+      let hash = 2166136261;
+      for (let index = 0; index < seed.length; index += 1) {
+        hash ^= seed.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+      }
+      void reportClientError({ page, errorCode: error.name || 'CLIENT_RENDER_ERROR', fingerprint: `fp_${(hash >>> 0).toString(16)}` });
+    } catch {
+      // Error telemetry must never prevent the fallback page from rendering.
     }
-    void reportClientError({ page, errorCode: error.name || 'CLIENT_RENDER_ERROR', fingerprint: `fp_${(hash >>> 0).toString(16)}` });
   }
 
   render() {
@@ -38,15 +42,24 @@ class AppErrorBoundary extends Component<PropsWithChildren, { failed: boolean }>
 }
 
 function configureUpdateManager() {
-  if (!Taro.canIUse('getUpdateManager')) return;
-  const manager = Taro.getUpdateManager();
-  manager.onUpdateReady(() => {
-    Taro.showModal({
-      title: '发现新版本',
-      content: '新版本已经准备好，是否立即更新？',
-      success: ({ confirm }) => confirm && manager.applyUpdate(),
+  try {
+    if (typeof Taro.getUpdateManager !== 'function') return;
+    const manager = Taro.getUpdateManager();
+    if (!manager || typeof manager.onUpdateReady !== 'function') return;
+    manager.onUpdateReady(() => {
+      try {
+        Taro.showModal({
+          title: '发现新版本',
+          content: '新版本已经准备好，是否立即更新？',
+          success: ({ confirm }) => confirm && manager.applyUpdate(),
+        });
+      } catch {
+        // A failed update prompt must not interrupt the current session.
+      }
     });
-  });
+  } catch {
+    // Some preview/runtime environments do not expose update APIs reliably.
+  }
 }
 
 class App extends Component<PropsWithChildren> {

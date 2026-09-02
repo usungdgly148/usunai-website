@@ -5,11 +5,25 @@ import { PageState } from '../../components/page-state';
 import { MiniappTabBar } from '../../components/miniapp-tab-bar';
 import { useLoad } from '../../hooks/use-load';
 import { getMiniappLayout, getPublicContent } from '../../services/api';
+import type { PublicContent } from '../../types';
+
+function normalizeContent(content: PublicContent): PublicContent {
+  return {
+    ...content,
+    agents: Array.isArray(content?.agents) ? content.agents : [],
+    workflows: Array.isArray(content?.workflows) ? content.workflows : [],
+    categories: Array.isArray(content?.categories) ? content.categories : [],
+    categoryGroups: Array.isArray(content?.categoryGroups) ? content.categoryGroups : [],
+    banners: Array.isArray(content?.banners) ? content.banners : [],
+    announcements: Array.isArray(content?.announcements) ? content.announcements : [],
+    recommended: Array.isArray(content?.recommended) ? content.recommended : [],
+  };
+}
 
 export default function HomePage() {
   const state = useLoad(async () => {
     const [content, layout] = await Promise.all([getPublicContent(), getMiniappLayout('home')]);
-    return { content, layout };
+    return { content: normalizeContent(content), layout };
   }, []);
 
   usePullDownRefresh(async () => {
