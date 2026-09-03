@@ -6,14 +6,16 @@ const MAX_RECORD_SCAN = 5000;
 
 const AGENT_PUBLIC_FIELDS = [
   'id', 'kind', 'name', 'description', 'category', 'avatar', 'icon', 'iconColor',
-  'cardGradient', 'cardBg', 'tags', 'tutorialImage', 'tutorialUrl', 'tutorialTitle',
+  'desc', 'cardGradient', 'cardBg', 'gradientFrom', 'gradientTo', 'gradientAngle',
+  'tags', 'tutorialImage', 'tutorialUrl', 'tutorialTitle',
   'published', 'sortOrder', 'views', 'uses', 'works', 'rating', 'vip', 'featured',
   'priceType', 'priceRate', 'opening', 'suggestedQuestions', 'assetCategory',
 ];
 
 const WORKFLOW_PUBLIC_FIELDS = [
   'id', 'kind', 'name', 'description', 'category', 'avatar', 'icon', 'iconColor',
-  'cardGradient', 'cardBg', 'tags', 'tutorialImage', 'tutorialUrl', 'tutorialTitle',
+  'desc', 'cardGradient', 'cardBg', 'gradientFrom', 'gradientTo', 'gradientAngle',
+  'tags', 'tutorialImage', 'tutorialUrl', 'tutorialTitle',
   'published', 'sortOrder', 'views', 'uses', 'works', 'rating', 'vip', 'featured',
   'priceType', 'priceRate', 'resultKind', 'formFields', 'outputFields', 'assetCategory',
 ];
@@ -45,6 +47,17 @@ function pickPublic(value, fields) {
     .map(([key, item]) => [key, cleanNested(item)]));
 }
 
+function toPublicContentItem(value, fields) {
+  const item = pickPublic(value, fields);
+  if (!item) return null;
+  return {
+    ...item,
+    // Web cards store their public description in `desc`; keep the miniapp
+    // contract consistent without exposing any connection credentials.
+    description: String(item.description || item.desc || '').trim(),
+  };
+}
+
 function asCollection(value) {
   if (Array.isArray(value)) return value;
   if (value && typeof value === 'object') return Object.values(value);
@@ -62,15 +75,18 @@ function bySortOrder(a, b) {
 export function sanitizePublicContent(config = {}) {
   const agents = asCollection(config.agents)
     .filter((item) => item?.published === true)
-    .map((item) => ({
-      ...pickPublic(item, AGENT_PUBLIC_FIELDS),
-      supportsImages: item.platform === 'deepseek-native' || item.supportsImages === true,
-    }))
+    .map((item) => {
+      const publicItem = toPublicContentItem(item, AGENT_PUBLIC_FIELDS);
+      return publicItem ? {
+        ...publicItem,
+        supportsImages: item.platform === 'deepseek-native' || item.supportsImages === true,
+      } : null;
+    })
     .filter(Boolean)
     .sort(bySortOrder);
   const workflows = asCollection(config.workflows)
     .filter((item) => item?.published === true)
-    .map((item) => pickPublic(item, WORKFLOW_PUBLIC_FIELDS))
+    .map((item) => toPublicContentItem(item, WORKFLOW_PUBLIC_FIELDS))
     .filter(Boolean)
     .sort(bySortOrder);
   const publishedIds = new Set([...agents, ...workflows].map((item) => String(item.id)));

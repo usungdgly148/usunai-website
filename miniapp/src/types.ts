@@ -6,6 +6,13 @@ export interface ContentItem {
   category?: string;
   avatar?: string;
   icon?: string;
+  iconColor?: string;
+  desc?: string;
+  cardGradient?: string;
+  cardBg?: string;
+  gradientFrom?: string;
+  gradientTo?: string;
+  gradientAngle?: number;
   tags?: string[];
   opening?: string;
   suggestedQuestions?: string[];
