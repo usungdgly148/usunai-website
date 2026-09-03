@@ -3712,7 +3712,9 @@ const server = http.createServer(async (req, res) => {
       if (!fs.existsSync(fp)) { res.statusCode = 404; res.end('not found'); return; }
       const ext = String(key).split('.').pop()?.toLowerCase() || '';
       const CT_MAP = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon', mp4: 'video/mp4', webm: 'video/webm', mp3: 'audio/mpeg', wav: 'audio/wav', pdf: 'application/pdf', txt: 'text/plain', json: 'application/json' };
-      const acceptsWebp = String(req.headers.accept || '').includes('image/webp');
+      const requestedFormat = String(u.searchParams.get('format') || '').toLowerCase();
+      const acceptsWebp = requestedFormat === 'webp'
+        || String(req.headers.accept || '').includes('image/webp');
       if (OPTIMIZABLE_IMAGE_EXTENSIONS.has(ext) && acceptsWebp) {
         try {
           const requestedWidth = Number.parseInt(u.searchParams.get('w') || '', 10);

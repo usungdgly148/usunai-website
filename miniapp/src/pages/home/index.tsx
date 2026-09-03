@@ -21,7 +21,7 @@ function normalizeContent(content: PublicContent): PublicContent {
 
 export default function HomePage() {
   const state = useLoad(async () => {
-    const [content, layout] = await Promise.all([getPublicContent(), getMiniappLayout('home')]);
+    const [content, layout] = await Promise.all([getPublicContent(), getMiniappLayout('home', true)]);
     return { content: normalizeContent(content), layout };
   }, []);
 

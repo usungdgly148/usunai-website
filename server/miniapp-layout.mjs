@@ -127,6 +127,31 @@ export function validateMiniappLayout(input, expectedPage = '') {
   return { page, blocks };
 }
 
+const DEFAULT_MINIAPP_PUBLIC_ORIGIN = 'https://www.usunai.top';
+
+function publicMediaUrl(value, origin) {
+  const source = String(value || '').trim();
+  if (!source || /^https:\/\//i.test(source)) return source;
+  if (!source.startsWith('/') || source.startsWith('//')) return source;
+  return `${origin.replace(/\/+$/, '')}${source}`;
+}
+
+export function prepareMiniappLayoutForClient(layout, origin = process.env.MINIAPP_PUBLIC_ORIGIN || DEFAULT_MINIAPP_PUBLIC_ORIGIN) {
+  const result = JSON.parse(JSON.stringify(layout || {}));
+  result.blocks = Array.isArray(result.blocks) ? result.blocks.map((block) => ({
+    ...block,
+    image: publicMediaUrl(block.image, origin),
+    slides: Array.isArray(block.slides) ? block.slides.map((slide) => ({
+      ...slide,
+      image: publicMediaUrl(slide.image, origin),
+    })) : [],
+    categoryImages: block.categoryImages && typeof block.categoryImages === 'object'
+      ? Object.fromEntries(Object.entries(block.categoryImages).map(([key, image]) => [key, publicMediaUrl(image, origin)]))
+      : {},
+  })) : [];
+  return result;
+}
+
 const keys = (page) => ({
   draft: `miniapp_layout_draft_${page}`,
   versions: `miniapp_layout_versions_${page}`,
@@ -210,7 +235,7 @@ export async function handleMiniappLayout(req, res, url, { KV, requireAdmin, rea
       return true;
     }
     const result = await resolveMiniappLayout(KV, page);
-    send(res, 200, { ok: true, data: result.layout, meta: { timestamp: new Date().toISOString(), versionId: result.versionId, source: result.source } }, 'public, max-age=30');
+    send(res, 200, { ok: true, data: prepareMiniappLayoutForClient(result.layout), meta: { timestamp: new Date().toISOString(), versionId: result.versionId, source: result.source } }, 'public, max-age=30');
     return true;
   }
 

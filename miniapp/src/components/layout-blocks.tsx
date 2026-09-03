@@ -1,8 +1,53 @@
 import Taro from '@tarojs/taro';
 import { Image, Input, Swiper, SwiperItem, Text, View } from '@tarojs/components';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ContentCard } from './content-card';
+import { API_BASE } from '../services/api';
 import type { ContentItem, MiniappLayout, MiniappLayoutBlock, PublicContent } from '../types';
+
+function absoluteImageUrl(value: string) {
+  const source = String(value || '').trim();
+  if (!source || /^(?:https?:)?\/\//i.test(source) || /^data:/i.test(source)) return source;
+  return source.startsWith('/') ? `${API_BASE.replace(/\/+$/, '')}${source}` : source;
+}
+
+function optimizedImageUrl(source: string, width: number, height: number) {
+  if (!source.includes('/api/blob/serve?')) return source;
+  const separator = source.includes('?') ? '&' : '?';
+  return `${source}${separator}format=webp&w=${width}&h=${height}`;
+}
+
+function ResilientImage({
+  src,
+  className,
+  width,
+  height,
+  lazyLoad = false,
+}: {
+  src: string;
+  className: string;
+  width: number;
+  height: number;
+  lazyLoad?: boolean;
+}) {
+  const original = absoluteImageUrl(src);
+  const preferred = optimizedImageUrl(original, width, height);
+  const [current, setCurrent] = useState(preferred);
+
+  useEffect(() => setCurrent(preferred), [preferred]);
+  if (!original) return null;
+
+  return <Image
+    className={className}
+    mode='aspectFill'
+    src={current}
+    webp
+    lazyLoad={lazyLoad}
+    onError={() => {
+      if (current !== original) setCurrent(original);
+    }}
+  />;
+}
 
 const titles: Record<MiniappLayoutBlock['type'], string> = {
   carousel: '精选推荐',
@@ -101,7 +146,7 @@ export function LayoutBlocks({ layout, content, category = '', type = '' }: { la
       return <View key={block.id} className={className} style={style}>
         <Swiper className='layout-swiper mini-hero-swiper' autoplay circular indicatorDots indicatorColor='rgba(255,255,255,.45)' indicatorActiveColor='#ffffff'>
           {slides.slice(0, block.limit || 8).map((slide, index) => <SwiperItem key={`${slide.image}-${index}`} onClick={() => internalNavigate(slide.link || block.link || '')}>
-            <Image className='layout-banner mini-hero-image' mode='aspectFill' src={slide.image} />
+            <ResilientImage className='layout-banner mini-hero-image' src={slide.image} width={1200} height={675} lazyLoad={index > 0} />
             <View className='mini-hero-shade' />
             <View className='mini-hero-copy'>
               <Text className='mini-hero-kicker'>{slide.subtitle || '友尚 AI 智能获客'}</Text>
@@ -129,7 +174,7 @@ export function LayoutBlocks({ layout, content, category = '', type = '' }: { la
         const image = block.categoryImages?.[categoryRef(item)] || item.miniappImage || '';
         return <View className='mini-category-item' key={item.id} onClick={() => internalNavigate(destination)}>
           {image
-            ? <Image className='mini-category-picture' src={image} mode='aspectFill' />
+            ? <ResilientImage className='mini-category-picture' src={image} width={640} height={480} lazyLoad />
             : <View className='mini-category-fallback' style={{ backgroundColor: item.color || undefined }} />}
           <View className='mini-category-cover'><Text className='mini-category-label'>{title}</Text><Text className='mini-category-go'>→</Text></View>
         </View>;
