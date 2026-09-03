@@ -147,11 +147,6 @@ export function LayoutBlocks({ layout, content, category = '', type = '' }: { la
         <Swiper className='layout-swiper mini-hero-swiper' autoplay circular indicatorDots indicatorColor='rgba(255,255,255,.45)' indicatorActiveColor='#ffffff'>
           {slides.slice(0, block.limit || 8).map((slide, index) => <SwiperItem key={`${slide.image}-${index}`} onClick={() => internalNavigate(slide.link || block.link || '')}>
             <ResilientImage className='layout-banner mini-hero-image' src={slide.image} width={1200} height={675} lazyLoad={index > 0} />
-            <View className='mini-hero-shade' />
-            <View className='mini-hero-copy'>
-              <Text className='mini-hero-kicker'>{slide.subtitle || '友尚 AI 智能获客'}</Text>
-              <Text className='layout-banner-title'>{slide.title || '让每一个问题，都有合适的 AI 工具'}</Text>
-            </View>
           </SwiperItem>)}
         </Swiper>
       </View>;

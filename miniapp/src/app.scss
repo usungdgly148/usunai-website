@@ -145,9 +145,6 @@ button::after { border: 0; }
 .layout-swiper, .layout-banner { height: 360px; border-radius: 30px; }
 .mini-hero-swiper { background: #c9ddff; }
 .mini-hero-image { background: linear-gradient(135deg, #264ca8, #617fee); }
-.mini-hero-shade { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(9, 28, 74, .75), rgba(20, 45, 111, .22) 68%, rgba(20, 45, 111, .04)); }
-.mini-hero-copy { position: absolute; top: 52px; right: 38px; left: 38px; display: flex; align-items: flex-start; flex-direction: column; }
-.mini-hero-kicker { padding: 8px 15px; border: 1px solid rgba(255,255,255,.38); border-radius: 999px; background: rgba(255,255,255,.12); color: #fff; font-size: 20px; }
 .layout-banner-title { position: static; max-width: 78%; margin-top: 20px; font-size: 39px; font-weight: 750; letter-spacing: -.8px; line-height: 1.25; text-shadow: none; }
 .mini-hero-action { margin-top: 22px; color: #fff; font-size: 23px; font-weight: 650; }
 .mini-announcement-card { display: flex; min-height: 76px; align-items: center; gap: 16px; margin-top: 22px; padding: 0 20px; border: 1px solid #dde9ff; border-radius: 20px; background: #fff; box-shadow: 0 8px 22px rgba(40, 90, 170, .05); }
