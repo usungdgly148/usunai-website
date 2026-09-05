@@ -48,3 +48,8 @@ deploy-backups/
 Thumbs.db
 .idea/
 .vscode/
+
+# Local-only WeChat DevTools workspace settings and one-shot preview/upload reports
+miniapp/project.private.config.json
+artifacts/
+.planning/

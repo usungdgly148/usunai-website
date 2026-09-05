@@ -18,10 +18,28 @@ export interface ContentItem {
   suggestedQuestions?: string[];
   resultKind?: string;
   uses?: number;
+  priceRate?: number;
+  tutorialImage?: string;
+  tutorialUrl?: string;
+  tutorialTitle?: string;
   supportsImages?: boolean;
   assetCategory?: 'copy' | 'image' | 'video' | 'audio' | 'article';
   formFields?: FormField[];
   outputFields?: Array<Record<string, unknown>>;
+}
+
+export interface FormFieldOption {
+  label?: string;
+  value?: string;
+}
+
+export interface FormFieldAdvanced {
+  component?: string;
+  options?: Array<string | FormFieldOption>;
+  hint?: string;
+  min?: number;
+  max?: number;
+  step?: number;
 }
 
 export interface FormField {
@@ -34,7 +52,13 @@ export interface FormField {
   itemType?: string;
   required?: boolean;
   placeholder?: string;
-  options?: Array<string | { label?: string; value?: string }>;
+  hint?: string;
+  options?: Array<string | FormFieldOption>;
+  default?: unknown;
+  enabled?: boolean;
+  style?: string;
+  items?: { type?: string; data_type?: string };
+  advanced?: FormFieldAdvanced;
 }
 
 export interface RuntimeTask {

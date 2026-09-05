@@ -157,7 +157,7 @@ export function storeBoundSession(token: string) {
   Taro.setStorageSync(BINDING_KEY, false);
 }
 
-export async function getPagedRecords(path: 'assets' | 'compute-records' | 'orders', page: number, pageSize = 12) {
+export async function getPagedRecords(path: 'assets' | 'compute-records' | 'orders' | 'history', page: number, pageSize = 12) {
   const response = await apiRequest<Array<Record<string, unknown>>>(`/api/miniapp/v1/${path}?page=${page}&pageSize=${pageSize}`);
   return { items: response.data, pagination: response.meta };
 }
