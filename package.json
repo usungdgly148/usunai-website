@@ -6,6 +6,31 @@
   "scripts": {
     "check:secrets": "node scripts/check-secrets.mjs",
     "check:baseline": "node scripts/verify-baseline.mjs",
-    "verify": "npm run check:secrets && npm run check:baseline"
+    "check:stage-a": "node scripts/check-stage-a-contracts.mjs",
+    "check:stage-b": "node scripts/check-stage-b-contracts.mjs",
+    "check:stage-c": "node scripts/check-stage-c-contracts.mjs",
+    "check:stage-d": "node scripts/check-stage-d-contracts.mjs",
+    "check:stage-d:integration": "node scripts/check-stage-d-integration.mjs",
+    "check:stage-e": "node scripts/check-stage-e-contracts.mjs",
+    "check:stage-g": "node scripts/check-stage-g-contracts.mjs",
+    "check:session-isolation": "node scripts/check-session-isolation-contract.mjs",
+    "check:session-isolation:integration": "node scripts/check-session-isolation-integration.mjs",
+    "check:billing-settlement": "node scripts/check-billing-settlement-contract.mjs",
+    "check:plan-validity": "node scripts/check-plan-validity.mjs",
+    "check:coze-workflow-files": "node scripts/check-coze-workflow-file-params.mjs",
+    "check:asset-category-routing": "node scripts/check-asset-category-routing.mjs",
+    "check:miniapp-stage1": "node scripts/check-miniapp-stage1-contracts.mjs",
+    "check:miniapp-stage2": "node scripts/check-miniapp-stage2-auth.mjs",
+    "check:miniapp-stage3": "node scripts/check-miniapp-stage3-ui.mjs",
+    "check:miniapp-stage4": "node scripts/check-miniapp-stage4-runtime.mjs",
+    "check:miniapp-stage5": "node scripts/check-miniapp-stage5-layout.mjs",
+    "check:miniapp-stage7": "node scripts/check-miniapp-stage7.mjs",
+    "build:miniapp": "npm run build:weapp --prefix miniapp",
+    "build:miniapp:development": "node scripts/build-miniapp-release.mjs development",
+    "build:miniapp:experience": "node scripts/build-miniapp-release.mjs experience",
+    "build:miniapp:production": "node scripts/build-miniapp-release.mjs production",
+    "candidate:build": "node scripts/build-candidate.mjs",
+    "candidate:verify": "node scripts/verify-candidate.mjs",
+    "verify": "npm run check:secrets && npm run check:baseline && npm run check:stage-a && npm run check:stage-b && npm run check:stage-c && npm run check:stage-d && npm run check:stage-e && npm run check:stage-g && npm run check:session-isolation && npm run check:billing-settlement && npm run check:plan-validity && npm run check:coze-workflow-files && npm run check:asset-category-routing && npm run check:miniapp-stage1 && npm run check:miniapp-stage2 && npm run check:miniapp-stage3 && npm run check:miniapp-stage4 && npm run check:miniapp-stage5 && npm run check:miniapp-stage7"
   }
 }

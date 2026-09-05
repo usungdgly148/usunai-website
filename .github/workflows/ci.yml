@@ -1,8 +1,10 @@
 name: Verify code baseline
 
 on:
+  workflow_dispatch:
   push:
-    branches: [main, "feature/**", "fix/**"]
+    branches: [main, "feature/**", "fix/**", "recovery/**"]
+    tags: ["candidate-*"]
   pull_request:
     branches: [main]
 
@@ -15,12 +17,61 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
 
       - name: Verify repository
         run: npm run verify
+
+      - name: Install server dependencies for integration checks
+        run: npm ci --prefix server
+
+      - name: Run isolated backend integration checks
+        run: npm run check:stage-d:integration && npm run check:session-isolation:integration
+
+      - name: Install recovered frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Audit production frontend dependencies
+        run: npm audit --prefix frontend --omit=dev --audit-level=high
+
+      - name: Build recovered frontend source
+        run: npm run build --prefix frontend
+
+      - name: Install mini program dependencies
+        run: npm ci --prefix miniapp
+
+      - name: Audit mini program production dependencies
+        run: npm audit --prefix miniapp --omit=dev --audit-level=high
+
+      - name: Type-check mini program source
+        run: npm run typecheck --prefix miniapp
+
+      - name: Build WeChat mini program
+        run: npm run build:weapp --prefix miniapp
+
+      - name: Build isolated full-stack candidate
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/candidate-')
+        run: npm run candidate:build -- "$CANDIDATE_LABEL"
+        env:
+          CANDIDATE_LABEL: github-${{ github.run_id }}-${{ github.sha }}
+
+      - name: Verify isolated full-stack candidate
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/candidate-')
+        run: npm run candidate:verify -- "$CANDIDATE_LABEL"
+        env:
+          CANDIDATE_LABEL: github-${{ github.run_id }}-${{ github.sha }}
+
+      - name: Upload isolated candidate
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/candidate-')
+        uses: actions/upload-artifact@v7
+        with:
+          name: usunai-candidate-${{ github.sha }}
+          path: .tmp/candidates/github-${{ github.run_id }}-${{ github.sha }}/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14
