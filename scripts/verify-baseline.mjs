@@ -10,7 +10,8 @@ const requiredFiles = [
   "server/rag.mjs",
   "server/package.json",
   "server/package-lock.json",
-  "dist/index.html",
+  "frontend/package.json",
+  "miniapp/package.json",
   "deploy/usun.service",
   "deploy/usun.nginx.conf",
 ];
@@ -20,6 +21,7 @@ const forbiddenSegments = new Set([
 ]);
 const skippedDirectories = new Set([
   ".git",
+  "dist",
   "frontend/node_modules",
   "miniapp/dist",
   "miniapp/node_modules",

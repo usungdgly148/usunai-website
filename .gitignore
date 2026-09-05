@@ -19,6 +19,9 @@ qdrant-snapshots/
 image-variants/
 data/
 
+# Build artifacts — always build from source (frontend/ and miniapp/)
+/dist/
+
 # Dependencies, logs and caches
 node_modules/
 frontend/dist/
