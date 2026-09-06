@@ -13,6 +13,35 @@ export default defineConfig(async (merge, { command, mode }) => {
   }
   const version = String(process.env.MINIAPP_VERSION || '0.1.0');
   const build = String(process.env.MINIAPP_BUILD || 'local');
+
+  // TDesign 按需复制：整个 miniprogram_dist（含 60+ 未用组件）会撑爆微信主包 2MB 上限。
+  // 这里只复制「app.config usingComponents 直接注册的 15 个 + 它们 index.json 的传递依赖」，
+  // 外加共享目录 common / mixins / config-provider 与 date-time-picker 依赖的默认中文 locale。
+  // 根 index.js 会 re-export action-sheet/message 等未用组件，故不复制（运行时组件都走相对路径）。
+  const TDESIGN_SRC = 'node_modules/tdesign-miniprogram/miniprogram_dist/';
+  const TDESIGN_DST = 'dist/miniprogram_npm/tdesign-miniprogram/';
+  const TDESIGN_COMPONENTS = [
+    // 直接使用（app.config.ts usingComponents）
+    'chat-message', 'toast', 'dialog', 'skeleton', 'tab-bar', 'tab-bar-item', 'popup',
+    'switch', 'slider', 'date-time-picker', 'picker', 'picker-item', 'notice-bar',
+    'image-viewer', 'empty',
+    // 传递依赖（各组件 index.json 内 usingComponents 递归引用）
+    'chat-content', 'chat-thinking', 'chat-loading', 'chat-markdown', 'attachments',
+    'icon', 'loading', 'overlay', 'button', 'badge', 'image',
+  ];
+  const TDESIGN_SHARED = ['common', 'mixins', 'config-provider'];
+  const tdesignCopyPatterns = [
+    ...[...TDESIGN_COMPONENTS, ...TDESIGN_SHARED].map((name) => ({
+      from: `${TDESIGN_SRC}${name}/`,
+      to: `${TDESIGN_DST}${name}/`,
+      ignore: ['*.ts', '*.d.ts', '*.map'],
+    })),
+    // date-time-picker 的 mixins/using-config 只 import ../locale/zh_CN（默认中文），
+    // 其余 8 种语言 locale 无需复制，省 ~80KB。
+    { from: `${TDESIGN_SRC}locale/zh_CN.js`, to: `${TDESIGN_DST}locale/zh_CN.js` },
+    { from: `${TDESIGN_SRC}locale/zh_CN.d.ts`, to: `${TDESIGN_DST}locale/zh_CN.d.ts` },
+  ];
+
   const base: UserConfigExport = {
     projectName: 'usunai-miniapp',
     date: '2026-08-31',
@@ -32,11 +61,7 @@ export default defineConfig(async (merge, { command, mode }) => {
     },
     copy: {
       patterns: [
-        {
-          from: 'node_modules/tdesign-miniprogram/miniprogram_dist/',
-          to: 'dist/miniprogram_npm/tdesign-miniprogram/',
-          ignore: ['*.ts', '*.map'],
-        },
+        ...tdesignCopyPatterns,
         // TDesign 内嵌依赖：chat-markdown.js 运行时通过 import 'marked' / 'tslib' 解析。
         // 必须同时复制到顶层 miniprogram_npm 才能被小程序基础库 ESM 找到。
         // 用 UMD/CommonJS 版本（marked 用 .umd.js、tslib 用 tslib.js），避免运行时 ESM `export` 报错。
