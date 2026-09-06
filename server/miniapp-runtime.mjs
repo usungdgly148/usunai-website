@@ -161,6 +161,9 @@ async function runWorkflowTask({ KV, port, authorization, task, parameters, obse
 export async function handleMiniappRuntime(req, res, url, deps) {
   const path = url.pathname;
   if (!path.startsWith('/api/miniapp/v1/')) return false;
+  // `assets` 与 `history` 的「读取列表」由 handleMiniappApi 以 GET 提供（分页 + 筛选）；
+  // 这里只负责它们的 POST 写入。GET 必须放行，否则会被下面兜底的 405 吞掉，列表永远拉不到。
+  if (req.method === 'GET' && (path === '/api/miniapp/v1/assets' || path === '/api/miniapp/v1/history')) return false;
   const isRuntimePath = /^\/api\/miniapp\/v1\/(?:agents\/[^/]+\/chat|uploads|workflows\/[^/]+\/tasks|tasks\/[^/]+|history|assets)$/.test(path);
   if (!isRuntimePath) return false;
 

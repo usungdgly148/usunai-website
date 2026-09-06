@@ -4,9 +4,12 @@ import { Button, Image, ScrollView, Text, Textarea, View } from '@tarojs/compone
 import { PageState } from '../../components/page-state';
 import { MarkdownContent } from '../../components/markdown-content';
 import { EntityInfoCard, SideDrawer, timeAgo } from '../../components/inner-ui';
+import { TdIcon } from '../../components/td-icon';
 import { getPagedRecords, getPublicContent, saveRuntimeAsset, saveRuntimeHistory, streamAgentChat, uploadRuntimeFile } from '../../services/api';
 import { collectMediaUrls, fileToDataUrl, runtimeId } from '../../services/runtime';
+import { confirmDialog, toast } from '../../utils/feedback';
 import type { ContentItem } from '../../types';
+import { useThemePage } from '../../hooks/use-theme-page';
 
 type ChatMessage = { id: string; role: 'user' | 'assistant'; text: string; reasoning?: string; images?: string[] };
 type HistoryRecord = Record<string, unknown> & { id?: string; title?: string; createdAt?: string; agentId?: string; messages?: ChatMessage[] };
@@ -16,17 +19,26 @@ const sessionKey = (agentId?: string) => `usunai_miniapp_chat_session_${agentId 
 /** 输入框自适应高度的最大行数，超过后固定高度并在框内滚动 */
 const COMPOSER_MAX_LINES = 10;
 
-function ReasoningBlock({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <View className='reasoning-block'>
-      <Text className='reasoning-toggle' onClick={() => setOpen(!open)}>{open ? '收起思考过程 ▲' : '查看思考过程 ▼'}</Text>
-      {!!open && <Text className='reasoning-text'>{text}</Text>}
-    </View>
-  );
+/** ChatMessage → t-chat-message 的 content 数组（attachment/thinking/markdown） */
+function toTDesignContent(message: ChatMessage, streaming: boolean) {
+  const content: Array<Record<string, unknown>> = [];
+  if (message.role === 'user') {
+    if (message.images?.length) {
+      content.push({
+        type: 'attachment',
+        data: message.images.map((url) => ({ fileType: 'image', name: 'image.jpg', size: 0, url, status: 'success' })),
+      });
+    }
+    if (message.text) content.push({ type: 'text', data: message.text });
+  } else {
+    if (message.reasoning) content.push({ type: 'thinking', data: { title: '思考过程', text: message.reasoning } });
+    content.push({ type: 'markdown', data: message.text || (streaming ? '正在生成…' : '') });
+  }
+  return content;
 }
 
 export default function ChatPage() {
+  const { pageStyle } = useThemePage();
   const { params } = useRouter();
   const agentId = params.id;
   const [agent, setAgent] = useState<ContentItem>();
@@ -34,6 +46,8 @@ export default function ChatPage() {
   const [error, setError] = useState('');
   const [input, setInput] = useState('');
   const [images, setImages] = useState<string[]>([]);
+  /** t-image-viewer 预览（发送前图片大图） */
+  const [viewer, setViewer] = useState<{ urls: string[]; current: number } | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -70,7 +84,7 @@ export default function ChatPage() {
         if (uploaded.dataUrl) next.push(uploaded.dataUrl);
       }
       setImages((current) => [...current, ...next].slice(0, 4));
-    } catch (reason) { Taro.showToast({ title: reason instanceof Error ? reason.message : '图片上传失败', icon: 'none' }); }
+    } catch (reason) { toast(reason instanceof Error ? reason.message : '图片上传失败', 'error'); }
   };
 
   const runTurn = async (userMessage: ChatMessage, baseMessages: ChatMessage[]) => {
@@ -134,8 +148,13 @@ export default function ChatPage() {
     void runTurn(userMessage, messages.slice(0, userIdx));
   };
 
-  const startNewChat = () => {
+  const startNewChat = async () => {
     if (sending) return;
+    if (messages.length && !(await confirmDialog({
+      title: '开始新对话',
+      content: '当前对话已自动保存到历史记录，确定开始新对话吗？',
+      confirmText: '开始新对话',
+    }))) return;
     setMessages([]); setInput(''); setImages([]); setError(''); setInputCapped(false);
     setSessionId(runtimeId('miniapp_chat'));
     setHistoryOpen(false);
@@ -149,7 +168,7 @@ export default function ChatPage() {
       setHistoryLoading(false);
     }).catch(() => {
       setHistoryLoading(false);
-      Taro.showToast({ title: '历史记录加载失败', icon: 'none' });
+      toast('历史记录加载失败', 'error');
     });
   };
 
@@ -177,13 +196,13 @@ export default function ChatPage() {
         source: `agent:${agent.id}`,
         createdAt: new Date().toISOString(),
       });
-      Taro.showToast({ title: `已加入「${ASSET_TYPE_NAMES[type] || '结果'}」资产库`, icon: 'success' });
-    } catch (reason) { Taro.showToast({ title: reason instanceof Error ? reason.message : '保存失败', icon: 'none' }); }
+      toast(`已加入「${ASSET_TYPE_NAMES[type] || '结果'}」资产库`, 'success');
+    } catch (reason) { toast(reason instanceof Error ? reason.message : '保存失败', 'error'); }
   };
 
   const suggestions = useMemo(() => (agent?.suggestedQuestions || []).filter((item) => typeof item === 'string' && item.trim()).slice(0, 6), [agent]);
 
-  return <View className='runtime-page chat-page'>
+  return <View className='runtime-page chat-page' style={pageStyle}>
     <PageState loading={loading} error={error && !agent ? error : ''} empty={!loading && !error && !agent} />
     {agent && <>
       <View className='runtime-header header-row'>
@@ -192,8 +211,8 @@ export default function ChatPage() {
           <Text className='muted'>AI 智能体 · 实时对话</Text>
         </View>
         <View className='header-actions'>
-          <Text className='header-icon-btn' onClick={openHistory}>🕒</Text>
-          <Text className='header-icon-btn' onClick={() => setInfoOpen(true)}>📚</Text>
+          <Text className='header-icon-btn' onClick={openHistory}><TdIcon name='time' /></Text>
+          <Text className='header-icon-btn' onClick={() => setInfoOpen(true)}><TdIcon name='info-circle' /></Text>
         </View>
       </View>
       <ScrollView className='chat-scroll' scrollY scrollIntoView={messages.length ? `message-${messages[messages.length - 1].id}` : undefined}>
@@ -206,25 +225,31 @@ export default function ChatPage() {
           <Text className='suggestion-caption'>试试这样问 · 点击直接发送</Text>
           {suggestions.map((item) => <Text key={item} className='suggestion-chip' onClick={() => send(item)}>{item}</Text>)}
         </View>}
-        {messages.map((message) => <View id={`message-${message.id}`} key={message.id} className={`chat-row ${message.role === 'user' ? 'chat-row-user' : ''}`}>
-          <View className={`chat-bubble ${message.role === 'user' ? 'user-bubble' : 'assistant-bubble'}`}>
-            {!!message.images?.length && <View className='image-grid'>{message.images.map((url) => <Image key={url} src={url} mode='aspectFill' className='upload-thumb' />)}</View>}
-            {message.role === 'assistant' && !!message.reasoning && <ReasoningBlock text={message.reasoning} />}
-            {message.role === 'assistant'
-              ? <MarkdownContent value={message.text || (sending ? '正在生成…' : '')} />
-              : <Text>{message.text}</Text>}
-            {message.role === 'assistant' && !!message.text && !sending && <View className='msg-actions'>
-              <Text className='msg-action' onClick={() => Taro.setClipboardData({ data: message.text })}>复制</Text>
-              <Text className='msg-action' onClick={() => regenerate(message.id)}>重新生成</Text>
-              <Text className='msg-action' onClick={() => addAsset(message)}>加入资产库</Text>
-            </View>}
-          </View>
-        </View>)}
+        {messages.map((message) => {
+          const isLast = message.id === messages[messages.length - 1].id;
+          const streaming = sending && message.role === 'assistant' && isLast;
+          return (
+            <View id={`message-${message.id}`} key={message.id} className='chat-row'>
+              <t-chat-message
+                content={toTDesignContent(message, streaming)}
+                role={message.role}
+                placement={message.role === 'user' ? 'right' : 'left'}
+                variant='base'
+                status={message.role === 'assistant' ? (streaming ? 'streaming' : 'complete') : undefined}
+              />
+              {message.role === 'assistant' && !!message.text && !sending && <View className='msg-actions'>
+                <Text className='msg-action' onClick={() => Taro.setClipboardData({ data: message.text })}>复制</Text>
+                <Text className='msg-action' onClick={() => regenerate(message.id)}>重新生成</Text>
+                <Text className='msg-action' onClick={() => addAsset(message)}>加入资产库</Text>
+              </View>}
+            </View>
+          );
+        })}
       </ScrollView>
       {!!error && !!agent && <Text className='runtime-error'>{error}</Text>}
-      {!!images.length && <View className='image-grid composer-images'>{images.map((url) => <Image key={url} src={url} mode='aspectFill' className='upload-thumb' />)}</View>}
+      {!!images.length && <View className='image-grid composer-images'>{images.map((url, imageIndex) => <Image key={url} src={url} mode='aspectFill' className='upload-thumb' onClick={() => setViewer({ urls: images, current: imageIndex })} />)}</View>}
       <View className='composer'>
-        {agent.supportsImages && <Button className='composer-add' onClick={chooseImage}>＋</Button>}
+        {agent.supportsImages && <Button className='composer-add' onClick={chooseImage}><TdIcon name='add' /></Button>}
         <Textarea
           className={`composer-input ${inputCapped ? 'composer-input-capped' : ''}`}
           value={input}
@@ -239,7 +264,7 @@ export default function ChatPage() {
           onLineChange={(event) => setInputCapped((event.detail.lineCount || 1) > COMPOSER_MAX_LINES)}
           onConfirm={() => send()}
         />
-        <Button className='composer-send' loading={sending} disabled={sending} onClick={() => send()}>➤</Button>
+        <Button className='composer-send' loading={sending} disabled={sending} onClick={() => send()}><TdIcon name='send' /></Button>
       </View>
 
       <SideDrawer open={historyOpen} title='对话历史' onClose={() => setHistoryOpen(false)}>
@@ -257,6 +282,15 @@ export default function ChatPage() {
       <SideDrawer open={infoOpen} title='智能体名片' onClose={() => setInfoOpen(false)}>
         <EntityInfoCard entity={agent} type='agent' />
       </SideDrawer>
+      <t-toast id='t-toast' theme='info' />
+      <t-dialog id='t-dialog' title='' />
+      <t-image-viewer
+        visible={!!viewer}
+        images={viewer?.urls || []}
+        current={viewer?.current || 0}
+        closeBtn
+        onClose={() => setViewer(null)}
+      />
     </>}
   </View>;
 }

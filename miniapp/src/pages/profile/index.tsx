@@ -1,9 +1,12 @@
 import Taro, { usePullDownRefresh } from '@tarojs/taro';
 import { Button, Text, View } from '@tarojs/components';
+import { useState } from 'react';
 import { MiniappTabBar } from '../../components/miniapp-tab-bar';
 import { PageState } from '../../components/page-state';
 import { useLoad } from '../../hooks/use-load';
 import { getMe, isBindingRequired } from '../../services/api';
+import { useThemePage } from '../../hooks/use-theme-page';
+import { type ThemeMode, readMode, resolveTheme, setMode } from '../../utils/theme';
 
 const validDate = (value: string | null) => value ? new Date(value).toLocaleDateString('zh-CN') : '有效期未设置';
 
@@ -22,13 +25,39 @@ const links = [
   { label: '隐私政策', url: '/pages/webview/index?url=https%3A%2F%2Fwww.usunai.top%2Flegal-agreements' },
 ];
 
+const MODE_OPTIONS: { value: ThemeMode; label: string; hint: string }[] = [
+  { value: 'light', label: '浅色', hint: '始终使用明亮外观' },
+  { value: 'dark', label: '深色', hint: '界面使用暗黑配色，夜间更护眼' },
+  { value: 'auto', label: '跟随系统', hint: '随微信系统深浅色自动切换' },
+];
+
+const modeLabel = (mode: ThemeMode) => MODE_OPTIONS.find((item) => item.value === mode)?.label || '浅色';
+
 export default function ProfilePage() {
+  const { pageStyle } = useThemePage();
   const state = useLoad(() => getMe(), []);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => readMode());
+  const [showThemeSheet, setShowThemeSheet] = useState(false);
   usePullDownRefresh(async () => { await state.reload(); Taro.stopPullDownRefresh(); });
 
-  return <View className='page mini-profile-page'>
+  const pickMode = (mode: ThemeMode) => {
+    setMode(mode);
+    setThemeMode(mode);
+    setShowThemeSheet(false);
+  };
+
+  return <View className='page mini-profile-page' style={pageStyle}>
     <View className='mini-page-topbar'><Text className='mini-page-heading'>我的</Text><Text className='mini-page-caption'>账户、算力与创作资产</Text></View>
     <PageState loading={state.loading} error={state.error} onRetry={state.reload} />
+    <View className='mini-settings-list mini-settings-list--theme'>
+      <View className='mini-settings-row' onClick={() => setShowThemeSheet(true)}>
+        <Text>深色模式</Text>
+        <View className='mini-settings-pick'>
+          <Text className='mini-settings-current'>{themeMode === 'auto' ? '跟随系统' : modeLabel(themeMode)}</Text>
+          <Text className='mini-settings-arrow'>›</Text>
+        </View>
+      </View>
+    </View>
     {state.data && <>
       <View className='mini-profile-head'>
         <View className='mini-profile-avatar'><Text>{String(state.data.nickname || state.data.name || '友').slice(0, 1)}</Text></View>
@@ -43,5 +72,33 @@ export default function ProfilePage() {
       <View className='mini-settings-list'>{links.map(item => <View className='mini-settings-row' key={item.label} onClick={() => Taro.navigateTo({ url: item.url })}><Text>{item.label}</Text><Text className='mini-settings-arrow'>›</Text></View>)}</View>
     </>}
     <MiniappTabBar active='profile' />
+    <t-popup
+      visible={showThemeSheet}
+      placement='bottom'
+      showOverlay
+      closeOnOverlayClick
+      onVisibleChange={(event: { detail?: { visible?: boolean } }) => {
+        if (!event.detail?.visible) setShowThemeSheet(false);
+      }}
+    >
+      <View className='theme-sheet'>
+        <View className='theme-sheet-grab' />
+        <Text className='theme-sheet-title'>外观模式</Text>
+        {MODE_OPTIONS.map((option) => (
+          <View
+            key={option.value}
+            className={`theme-sheet-row ${themeMode === option.value ? 'theme-sheet-row-active' : ''}`}
+            onClick={() => pickMode(option.value)}
+          >
+            <View className='theme-sheet-option'>
+              <Text className='theme-sheet-label'>{option.label}</Text>
+              <Text className='theme-sheet-hint'>{option.hint}</Text>
+            </View>
+            {themeMode === option.value && <Text className='theme-sheet-check'>✓</Text>}
+          </View>
+        ))}
+        <Text className='theme-sheet-foot'>当前界面为{modeLabel(resolveTheme(themeMode))}外观{themeMode === 'auto' ? '（跟随系统）' : ''}，选择后立即生效</Text>
+      </View>
+    </t-popup>
   </View>;
 }

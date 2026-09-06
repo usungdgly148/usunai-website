@@ -157,8 +157,17 @@ export function storeBoundSession(token: string) {
   Taro.setStorageSync(BINDING_KEY, false);
 }
 
-export async function getPagedRecords(path: 'assets' | 'compute-records' | 'orders' | 'history', page: number, pageSize = 12) {
-  const response = await apiRequest<Array<Record<string, unknown>>>(`/api/miniapp/v1/${path}?page=${page}&pageSize=${pageSize}`);
+export async function getPagedRecords(
+  path: 'assets' | 'compute-records' | 'orders' | 'history',
+  page: number,
+  pageSize = 12,
+  extraQuery = '',
+) {
+  // 列表读取走 GET：服务端 handleMiniappApi 从 url.searchParams 读取 page / pageSize / category / keyword。
+  // 写入（saveRuntimeAsset / saveRuntimeHistory）才是 POST，由 handleMiniappRuntime 处理。
+  const query = [`page=${page}`, `pageSize=${pageSize}`];
+  if (extraQuery) query.push(extraQuery);
+  const response = await apiRequest<Array<Record<string, unknown>>>(`/api/miniapp/v1/${path}?${query.join('&')}`);
   return { items: response.data, pagination: response.meta };
 }
 

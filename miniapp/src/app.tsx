@@ -2,6 +2,7 @@ import { Component, type ErrorInfo, type PropsWithChildren } from 'react';
 import Taro from '@tarojs/taro';
 import { Button, Text, View } from '@tarojs/components';
 import { reportClientError } from './services/api';
+import { listenSystemTheme } from './utils/theme';
 import './app.scss';
 
 class AppErrorBoundary extends Component<PropsWithChildren, { failed: boolean }> {
@@ -65,6 +66,7 @@ function configureUpdateManager() {
 class App extends Component<PropsWithChildren> {
   componentDidMount() {
     configureUpdateManager();
+    listenSystemTheme();
   }
 
   render() {

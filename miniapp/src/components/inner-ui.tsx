@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import Taro from '@tarojs/taro';
 import { Image, Text, View } from '@tarojs/components';
 import type { ContentItem } from '../types';
+import { TdIcon } from './td-icon';
 
 export function timeAgo(iso?: string) {
   if (!iso) return '';
@@ -18,21 +19,29 @@ export function timeAgo(iso?: string) {
   return `${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
-/** 右侧滑出抽屉（对齐网页端移动版 Drawer） */
+/** 右侧滑出抽屉（TDesign t-popup 实现，placement=right，自带遮罩/滑入滑出动画） */
 export function SideDrawer({ open, title, onClose, children }: {
   open: boolean; title: string; onClose: () => void; children: ReactNode;
 }) {
-  if (!open) return null;
-  return <View className='drawer-root'>
-    <View className='drawer-mask' onClick={onClose} />
-    <View className='drawer-panel'>
-      <View className='drawer-header'>
-        <Text className='drawer-title'>{title}</Text>
-        <Text className='drawer-close' onClick={onClose}>✕</Text>
+  return (
+    <t-popup
+      visible={open}
+      placement='right'
+      showOverlay
+      closeOnOverlayClick
+      onVisibleChange={(e: { detail?: { visible?: boolean } }) => {
+        if (!e.detail?.visible) onClose();
+      }}
+    >
+      <View className='drawer-panel'>
+        <View className='drawer-header'>
+          <Text className='drawer-title'>{title}</Text>
+          <Text className='drawer-close' onClick={onClose}><TdIcon name='close' /></Text>
+        </View>
+        <View className='drawer-body'>{children}</View>
       </View>
-      <View className='drawer-body'>{children}</View>
-    </View>
-  </View>;
+    </t-popup>
+  );
 }
 
 /** 智能体/工作流信息卡（对齐网页端 InfoCard） */

@@ -1,1 +1,1 @@
-export default { navigationBarTitleText: '搜索' };
+export default { navigationBarTitleText: "搜索", enablePullDownRefresh: true };

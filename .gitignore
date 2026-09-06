@@ -27,6 +27,7 @@ node_modules/
 frontend/dist/
 frontend/.vite/
 miniapp/dist/
+miniapp/dist_backup*/
 miniapp/.swc/
 coverage/
 logs/

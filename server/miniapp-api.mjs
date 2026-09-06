@@ -181,10 +181,15 @@ async function loadUserRecords(KV, prefix, userId) {
 }
 
 function filterItems(items, searchParams) {
-  const type = String(searchParams.get('type') || '').trim().toLowerCase();
-  const query = String(searchParams.get('q') || '').trim().toLowerCase();
+  // 小程序客户端用 category（分类 tab）与 keyword（搜索词）过滤；兼容网页端 type / q 的旧命名。
+  const category = String(searchParams.get('category') || searchParams.get('type') || '').trim().toLowerCase();
+  const query = String(searchParams.get('keyword') || searchParams.get('q') || '').trim().toLowerCase();
   return items.filter((item) => {
-    if (type && String(item.type || item.kind || item.category || '').toLowerCase() !== type) return false;
+    if (category && category !== 'task') {
+      const raw = String(item.type || item.kind || item.category || '').toLowerCase();
+      const match = raw === category || (category === 'copy' && raw === 'soft');
+      if (!match) return false;
+    }
     if (!query) return true;
     return JSON.stringify(item).toLowerCase().includes(query);
   });

@@ -2,8 +2,11 @@ import { useState } from 'react';
 import Taro from '@tarojs/taro';
 import { Button, Input, Text, View } from '@tarojs/components';
 import { bindWebsiteAccount, sendPhoneCode, storeBoundSession } from '../../services/api';
+import { toast } from '../../utils/feedback';
+import { useThemePage } from '../../hooks/use-theme-page';
 
 export default function BindPage() {
+  const { pageStyle } = useThemePage();
   const [method, setMethod] = useState<'email' | 'phone'>('email');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -12,12 +15,12 @@ export default function BindPage() {
   const [busy, setBusy] = useState(false);
 
   const sendCode = async () => {
-    if (!/^1[3-9]\d{9}$/.test(phone)) return void Taro.showToast({ title: '请输入正确手机号', icon: 'none' });
+    if (!/^1[3-9]\d{9}$/.test(phone)) return void toast('请输入正确手机号', 'warning');
     try {
       await sendPhoneCode(phone);
-      Taro.showToast({ title: '验证码已发送', icon: 'success' });
+      toast('验证码已发送', 'success');
     } catch (error) {
-      Taro.showToast({ title: error instanceof Error ? error.message : '发送失败', icon: 'none' });
+      toast(error instanceof Error ? error.message : '发送失败', 'error');
     }
   };
 
@@ -28,16 +31,16 @@ export default function BindPage() {
         ? await bindWebsiteAccount({ method, email: email.trim(), password })
         : await bindWebsiteAccount({ method, phone: phone.trim(), code: code.trim() });
       storeBoundSession(result.token);
-      Taro.showToast({ title: '绑定成功', icon: 'success' });
+      toast('绑定成功', 'success');
       setTimeout(() => Taro.reLaunch({ url: '/pages/profile/index' }), 500);
     } catch (error) {
-      Taro.showToast({ title: error instanceof Error ? error.message : '绑定失败', icon: 'none', duration: 2500 });
+      toast(error instanceof Error ? error.message : '绑定失败', 'error');
     } finally {
       setBusy(false);
     }
   };
 
-  return <View className='page'>
+  return <View className='page' style={pageStyle}>
     <Text className='page-title'>绑定网站账户</Text>
     <Text className='page-subtitle'>绑定后继续使用网站已有的算力、资产和订单。不会创建重复余额。</Text>
     <View className='chip-row section'>
@@ -53,5 +56,6 @@ export default function BindPage() {
       <Button className='secondary-button' onClick={sendCode}>获取验证码</Button>
     </View>}
     <Button className='primary-button' loading={busy} disabled={busy} onClick={submit}>确认绑定</Button>
+    <t-toast id='t-toast' theme='info' />
   </View>;
 }

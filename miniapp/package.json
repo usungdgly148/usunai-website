@@ -5,6 +5,9 @@
   "scripts": {
     "dev:weapp": "taro build --type weapp --watch",
     "build:weapp": "taro build --type weapp",
+    "build:weapp:prod": "taro build --type weapp --mode production",
+    "postbuild:weapp": "node scripts/postbuild-clean-nested.js && node scripts/postbuild-esm-to-cjs.js && node scripts/postbuild-transpile-deps.js",
+    "postbuild:weapp:prod": "node scripts/postbuild-clean-nested.js && node scripts/postbuild-esm-to-cjs.js && node scripts/postbuild-transpile-deps.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -15,8 +18,13 @@
     "@tarojs/react": "4.2.1",
     "@tarojs/runtime": "4.2.1",
     "@tarojs/taro": "4.2.1",
+    "dayjs": "^1.11.23",
+    "marked": "^18.0.11",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "tdesign-miniprogram": "^1.16.0",
+    "tinycolor2": "^1.6.0",
+    "tslib": "^2.8.1"
   },
   "devDependencies": {
     "@babel/core": "^7.28.3",

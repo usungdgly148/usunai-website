@@ -4,15 +4,17 @@ import { Button, Text, View } from '@tarojs/components';
 import { PageState } from '../../components/page-state';
 import { useLoad } from '../../hooks/use-load';
 import { getPublicContent } from '../../services/api';
+import { useThemePage } from '../../hooks/use-theme-page';
 
 export default function DetailPage() {
+  const { pageStyle } = useThemePage();
   const { params } = useRouter();
   const state = useLoad(() => getPublicContent(), []);
   const item = useMemo(() => {
     const list = params.type === 'workflow' ? state.data?.workflows : state.data?.agents;
     return list?.find((entry) => entry.id === params.id);
   }, [state.data, params.id, params.type]);
-  return <View className='page'>
+  return <View className='page' style={pageStyle}>
     <PageState loading={state.loading} error={state.error} empty={!state.loading && !state.error && !item} onRetry={state.reload} />
     {item && <>
       <Text className='page-title'>{item.name}</Text>

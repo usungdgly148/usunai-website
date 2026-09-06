@@ -10,7 +10,11 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "types": ["@tarojs/taro", "@types/webpack-env"]
+    "types": ["@tarojs/taro", "@types/webpack-env"],
+    "paths": {
+      "@/tdesign/*": ["./node_modules/tdesign-miniprogram/miniprogram_dist/*"],
+      "tdesign-miniprogram/*": ["./node_modules/tdesign-miniprogram/miniprogram_dist/*"]
+    }
   },
   "include": ["src", "config"]
 }

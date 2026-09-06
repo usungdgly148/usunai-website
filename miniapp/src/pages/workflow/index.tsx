@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Taro, { useRouter } from '@tarojs/taro';
-import { Button, Image, Input, Picker, ScrollView, Slider, Switch, Text, Textarea, Video, View } from '@tarojs/components';
+import { Button, Image, Input, ScrollView, Text, Textarea, Video, View } from '@tarojs/components';
 import { PageState } from '../../components/page-state';
 import { EntityInfoCard, SideDrawer, timeAgo } from '../../components/inner-ui';
+import { TdIcon } from '../../components/td-icon';
 import { getPagedRecords, getPublicContent, getRuntimeTask, saveRuntimeAsset, saveRuntimeHistory, submitWorkflowTask, uploadRuntimeFile } from '../../services/api';
 import { fileToDataUrl, runtimeId } from '../../services/runtime';
+import { hideFeedbackToast, loadingToast, toast } from '../../utils/feedback';
 import type { ContentItem, FormField, FormFieldOption, RuntimeTask } from '../../types';
+import { useThemePage } from '../../hooks/use-theme-page';
 
 const ACTIVE_TASK_PREFIX = 'usunai_miniapp_active_workflow_';
 type HistoryRecord = Record<string, unknown> & { id?: string; title?: string; createdAt?: string; workflowId?: string; taskId?: string };
@@ -105,6 +108,10 @@ function WorkflowPage() {
   const [infoOpen, setInfoOpen] = useState(false);
   const [historyList, setHistoryList] = useState<HistoryRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  /** TDesign 弹层选择器状态：date=日期弹层 / select=下拉弹层，key 为正在编辑的字段键 */
+  const [fieldPicker, setFieldPicker] = useState<{ kind: 'date' | 'select'; key: string } | null>(null);
+  /** t-image-viewer 全屏看图（结果图 / 历史结果图 / 上传预览共用） */
+  const [viewer, setViewer] = useState<{ urls: string[]; current: number } | null>(null);
   const audioRef = useRef<Taro.InnerAudioContext | null>(null);
   const fields = useMemo(() => (workflow?.formFields || []).filter((field) => field.enabled !== false), [workflow]);
 
@@ -206,7 +213,7 @@ function WorkflowPage() {
       }
       setValues((current) => ({ ...current, [key]: multi ? uploaded : (uploaded[uploaded.length - 1] ?? '') }));
       setPreviews((current) => ({ ...current, [key]: localPreviews }));
-    } catch (reason) { Taro.showToast({ title: reason instanceof Error ? reason.message : '文件上传失败', icon: 'none' }); }
+    } catch (reason) { toast(reason instanceof Error ? reason.message : '文件上传失败', 'error'); }
   };
 
   const removeFile = (field: FormField, index: number, removeIndex: number) => {
@@ -219,7 +226,7 @@ function WorkflowPage() {
   const submit = async () => {
     if (!workflow || task?.status === 'queued' || task?.status === 'running') return;
     const missing = fields.find((field, index) => field.required && !values[fieldKey(field, index)]);
-    if (missing) { Taro.showToast({ title: `请填写${fieldLabel(missing, fields.indexOf(missing))}`, icon: 'none' }); return; }
+    if (missing) { toast(`请填写${fieldLabel(missing, fields.indexOf(missing))}`, 'warning'); return; }
     setError('');
     const snapshot: Record<string, unknown> = {};
     fields.forEach((field, index) => { snapshot[fieldKey(field, index)] = values[fieldKey(field, index)]; });
@@ -236,6 +243,7 @@ function WorkflowPage() {
   const resetFields = () => {
     if (workflow) setValues(initValues(workflow));
     setPreviews({});
+    setFieldPicker(null);
   };
 
   const openHistory = () => {
@@ -246,22 +254,22 @@ function WorkflowPage() {
       setHistoryLoading(false);
     }).catch(() => {
       setHistoryLoading(false);
-      Taro.showToast({ title: '历史记录加载失败', icon: 'none' });
+      toast('历史记录加载失败', 'error');
     });
   };
 
   const selectHistory = (record: HistoryRecord) => {
     const taskId = String(record.taskId || '');
-    if (!taskId) { Taro.showToast({ title: '该记录缺少任务信息', icon: 'none' }); return; }
+    if (!taskId) { toast('该记录缺少任务信息', 'warning'); return; }
     setHistoryOpen(false);
     setError('');
-    Taro.showLoading({ title: '加载中' });
+    loadingToast('加载中…');
     getRuntimeTask(taskId).then((current) => {
-      Taro.hideLoading();
+      hideFeedbackToast();
       setTask(current);
     }).catch(() => {
-      Taro.hideLoading();
-      Taro.showToast({ title: '任务记录加载失败', icon: 'none' });
+      hideFeedbackToast();
+      toast('任务记录加载失败', 'error');
     });
   };
 
@@ -276,24 +284,24 @@ function WorkflowPage() {
     context.src = url;
     context.play();
     context.onEnded(() => setPlayingUrl(''));
-    context.onError(() => { setPlayingUrl(''); Taro.showToast({ title: '音频播放失败', icon: 'none' }); });
+    context.onError(() => { setPlayingUrl(''); toast('音频播放失败', 'error'); });
     audioRef.current = context;
     setPlayingUrl(url);
   };
 
   const openDocument = (url: string) => {
-    Taro.showLoading({ title: '正在下载…' });
+    loadingToast('正在下载…');
     Taro.downloadFile({
       url,
       success: (res) => {
-        Taro.hideLoading();
-        if (res.statusCode !== 200) { Taro.showToast({ title: '文件下载失败', icon: 'none' }); return; }
+        hideFeedbackToast();
+        if (res.statusCode !== 200) { toast('文件下载失败', 'error'); return; }
         Taro.openDocument({ filePath: res.tempFilePath, showMenu: true, fail: () => Taro.setClipboardData({ data: url }) });
       },
       fail: () => {
-        Taro.hideLoading();
+        hideFeedbackToast();
         Taro.setClipboardData({ data: url });
-        Taro.showToast({ title: '已复制文件链接', icon: 'none' });
+        toast('已复制文件链接');
       },
     });
   };
@@ -314,8 +322,8 @@ function WorkflowPage() {
         source: `workflow:${workflow.id}`,
         createdAt: new Date().toISOString(),
       });
-      Taro.showToast({ title: '已加入资产库', icon: 'success' });
-    } catch (reason) { Taro.showToast({ title: reason instanceof Error ? reason.message : '保存失败', icon: 'none' }); }
+      toast('已加入资产库', 'success');
+    } catch (reason) { toast(reason instanceof Error ? reason.message : '保存失败', 'error'); }
   };
 
   const renderDocRows = (urls: string[], name: string) => urls.map((url, index) => {
@@ -332,7 +340,7 @@ function WorkflowPage() {
 
   const renderAudioRows = (urls: string[], name: string) => urls.map((url, index) => (
     <View key={`${url}:${index}`} className='audio-row'>
-      <Text className='audio-play' onClick={() => toggleAudio(url)}>{playingUrl === url ? '❚❚' : '▶'}</Text>
+      <Text className='audio-play' onClick={() => toggleAudio(url)}>{playingUrl === url ? <TdIcon name='pause-circle' /> : <TdIcon name='play-circle' />}</Text>
       <Text className='audio-name'>{name}{urls.length > 1 ? ` · ${index + 1}` : ''}</Text>
     </View>
   ));
@@ -345,7 +353,7 @@ function WorkflowPage() {
     if (tag === 'image-required') {
       return urls.length ? <View key={index}>
         <Text className='media-section-title'>{name}</Text>
-        <View className='media-grid'>{urls.map((url) => <Image key={url} className='media-thumb' src={url} mode='aspectFill' onClick={() => Taro.previewImage({ current: url, urls })} />)}</View>
+        <View className='media-grid'>{urls.map((url, mediaIndex) => <Image key={url} className='media-thumb' src={url} mode='aspectFill' onClick={() => setViewer({ urls, current: mediaIndex })} />)}</View>
       </View> : null;
     }
     if (tag === 'video-required') {
@@ -398,7 +406,7 @@ function WorkflowPage() {
     const fallbackText = found.text || (result.kind === 'json' ? JSON.stringify(result.data, null, 2) : '');
     return <View>
       {!!fallbackText && <Text className='result-text'>{fallbackText}</Text>}
-      {!!found.images.length && <View className='media-grid'>{found.images.map((url) => <Image key={url} className='media-thumb' src={url} mode='aspectFill' onClick={() => Taro.previewImage({ current: url, urls: found.images })} />)}</View>}
+      {!!found.images.length && <View className='media-grid'>{found.images.map((url, mediaIndex) => <Image key={url} className='media-thumb' src={url} mode='aspectFill' onClick={() => setViewer({ urls: found.images, current: mediaIndex })} />)}</View>}
       {!!found.videos.length && <View className='media-grid'>{found.videos.map((url) => <Video key={url} className='media-thumb' src={url} controls />)}</View>}
       {!!found.audios.length && renderAudioRows(found.audios, '音频')}
     </View>;
@@ -428,7 +436,7 @@ function WorkflowPage() {
         <Button className='file-button' onClick={() => chooseFile(field, index)}>{fileEntries(key).length ? '已上传，点击继续选择' : (isImageField(field) || isVideoField(field)) ? '从相册选择上传' : '选择并上传文件'}</Button>
         {!!previews[key]?.length && isImageField(field) && <View className='file-preview-row'>
           {previews[key].map((path, previewIndex) => <View key={`${path}:${previewIndex}`} className='file-preview-item'>
-            <Image src={path} mode='aspectFill' className='upload-thumb' />
+            <Image src={path} mode='aspectFill' className='upload-thumb' onClick={() => setViewer({ urls: previews[key], current: previewIndex })} />
             <Text className='file-preview-remove' onClick={() => removeFile(field, index, previewIndex)}>×</Text>
           </View>)}
         </View>}
@@ -436,18 +444,27 @@ function WorkflowPage() {
       </>
         : (style === 'boolean' || rawType.includes('boolean') || advComponent === 'switch') ? <View className='switch-row'>
           <Text>{fieldLabel(field, index)}</Text>
-          <Switch checked={!!value} onChange={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />
+          <t-switch value={!!value} onChange={(event: { detail?: { value?: unknown } }) => setValues((current) => ({ ...current, [key]: !!event.detail?.value }))} />
         </View>
-          : (advComponent === 'slider' || style === 'slider') ? <>
-            <Slider min={advanced?.min ?? 0} max={advanced?.max ?? 100} step={advanced?.step ?? 1} value={Number(value) || advanced?.min || 0} onChange={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />
-            <Text className='slider-value'>{Number(value) || advanced?.min || 0}</Text>
-          </>
-            : (advComponent === 'date' || style === 'date') ? <Picker mode='date' value={String(value || '')} onChange={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))}>
-              <View className='form-input picker-value'>{String(value || '请选择日期')}</View>
-            </Picker>
-              : options.length ? <Picker mode='selector' range={options.map((item) => item.label || '')} onChange={(event) => setValues((current) => ({ ...current, [key]: options[Number(event.detail.value)]?.value }))}>
-                <View className='form-input picker-value'>{String(value || field.placeholder || '请选择')}</View>
-              </Picker>
+          : (advComponent === 'slider' || style === 'slider') ? <View className='slider-wrap'>
+            <t-slider
+              min={advanced?.min ?? 0}
+              max={advanced?.max ?? 100}
+              step={advanced?.step ?? 1}
+              value={Number(value) || advanced?.min || 0}
+              label
+              onChange={(event: { detail?: { value?: unknown } }) => {
+                const next = Number(event.detail?.value ?? advanced?.min ?? 0);
+                setValues((current) => ({ ...current, [key]: Number.isNaN(next) ? 0 : next }));
+              }}
+            />
+          </View>
+            : (advComponent === 'date' || style === 'date') ? <View className='form-input picker-value' onClick={() => setFieldPicker({ kind: 'date', key })}>
+              {String(value || '请选择日期')}
+            </View>
+              : options.length ? <View className='form-input picker-value' onClick={() => setFieldPicker({ kind: 'select', key })}>
+                {String(value ?? field.placeholder ?? '请选择')}
+              </View>
                 : (style === 'number' || /number|integer/.test(rawType)) ? <Input className='form-input' type='number' value={String(value ?? '')} placeholder={field.placeholder || '请输入数字'} onInput={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />
                   : /textarea|multiline/.test(`${style} ${rawType}`) ? <Textarea className='runtime-textarea' value={String(value || '')} placeholder={field.placeholder || '请输入'} onInput={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />
                     : <Input className='form-input' value={String(value ?? '')} placeholder={field.placeholder || '请输入'} onInput={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />}
@@ -471,7 +488,34 @@ function WorkflowPage() {
     return rows.length ? <View className='input-echo'>{rows}</View> : null;
   };
 
-  return <View className='runtime-page'>
+  const closeFieldPicker = () => setFieldPicker(null);
+
+  const activePickerField = fieldPicker
+    ? fields.find((field, index) => fieldKey(field, index) === fieldPicker.key)
+    : undefined;
+  const selectOptions = (() => {
+    if (!fieldPicker || fieldPicker.kind !== 'select' || !activePickerField) return [];
+    const raw = (activePickerField.advanced && typeof activePickerField.advanced === 'object'
+      ? activePickerField.advanced.options
+      : undefined) || activePickerField.options || [];
+    return raw.map(normalizeOption).map((item) => ({ label: item.label || '', value: item.value ?? item.label ?? '' }));
+  })();
+  const pickerValue = fieldPicker ? [String(values[fieldPicker.key] ?? '')] : [];
+
+  const confirmDatePicker = (event: { detail?: { value?: unknown } }) => {
+    const picked = String(event.detail?.value ?? '');
+    if (fieldPicker) setValues((current) => ({ ...current, [fieldPicker.key]: picked }));
+    setFieldPicker(null);
+  };
+
+  const confirmSelectPicker = (event: { detail?: { value?: unknown[] } }) => {
+    const picked = Array.isArray(event.detail?.value) ? event.detail.value[0] : undefined;
+    if (fieldPicker) setValues((current) => ({ ...current, [fieldPicker.key]: picked === undefined ? '' : picked }));
+    setFieldPicker(null);
+  };
+
+  const { pageStyle } = useThemePage();
+  return <View className='runtime-page' style={pageStyle}>
     <PageState loading={loading} error={error && !workflow ? error : ''} empty={!loading && !error && !workflow} />
     {workflow && <>
       <View className='runtime-header header-row'>
@@ -480,8 +524,8 @@ function WorkflowPage() {
           <Text className='muted'>配置参数 · 一键运行</Text>
         </View>
         <View className='header-actions'>
-          <Text className='header-icon-btn' onClick={openHistory}>🕒</Text>
-          <Text className='header-icon-btn' onClick={() => setInfoOpen(true)}>📚</Text>
+          <Text className='header-icon-btn' onClick={openHistory}><TdIcon name='time' /></Text>
+          <Text className='header-icon-btn' onClick={() => setInfoOpen(true)}><TdIcon name='info-circle' /></Text>
         </View>
       </View>
       <ScrollView className='workflow-scroll' scrollY>
@@ -520,6 +564,33 @@ function WorkflowPage() {
       <SideDrawer open={infoOpen} title='工作流信息' onClose={() => setInfoOpen(false)}>
         <EntityInfoCard entity={workflow} type='workflow' />
       </SideDrawer>
+      <t-toast id='t-toast' theme='info' />
+      <t-date-time-picker
+        visible={fieldPicker?.kind === 'date'}
+        mode='date'
+        format='YYYY-MM-DD'
+        title='选择日期'
+        confirmBtn='确定'
+        value={fieldPicker?.kind === 'date' ? String(values[fieldPicker.key] ?? '') : ''}
+        onConfirm={confirmDatePicker}
+        onCancel={closeFieldPicker}
+      />
+      <t-picker
+        visible={fieldPicker?.kind === 'select'}
+        title={activePickerField ? fieldLabel(activePickerField, fields.findIndex((field, index) => fieldKey(field, index) === fieldPicker?.key)) : '请选择'}
+        value={pickerValue}
+        onConfirm={confirmSelectPicker}
+        onCancel={closeFieldPicker}
+      >
+        <t-picker-item options={selectOptions} />
+      </t-picker>
+      <t-image-viewer
+        visible={!!viewer}
+        images={viewer?.urls || []}
+        current={viewer?.current || 0}
+        closeBtn
+        onClose={() => setViewer(null)}
+      />
     </>}
   </View>;
 }

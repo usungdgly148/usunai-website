@@ -154,10 +154,15 @@ export function LayoutBlocks({ layout, content, category = '', type = '' }: { la
     if (block.type === 'announcements') {
       const latest = content.announcements[0];
       if (!latest) return null;
-      return <View key={block.id} className={`section ${className} mini-announcement-card`} style={style} onClick={() => Taro.navigateTo({ url: '/pages/announcements/index' })}>
-        <Text className='mini-announcement-badge'>📣 公告</Text>
-        <View className='mini-announcement-marquee'><Text className='announcement-row'>{String(latest.title || latest.content || '')}</Text></View>
-        <Text className='mini-announcement-arrow'>›</Text>
+      return <View key={block.id} className={`section ${className}`} style={style}>
+        <t-notice-bar
+          visible
+          theme='info'
+          prefixIcon={false}
+          content={String(latest.title || latest.content || '')}
+          marquee
+          onClick={() => Taro.navigateTo({ url: '/pages/announcements/index' })}
+        />
       </View>;
     }
     if (block.type === 'search') return <SearchBlock key={block.id} block={block} className={className} style={style} />;

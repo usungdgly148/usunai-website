@@ -3,6 +3,7 @@ import { Text, View } from '@tarojs/components';
 import { PageState } from '../../components/page-state';
 import { useLoad } from '../../hooks/use-load';
 import { getPublicContent } from '../../services/api';
+import { useThemePage } from '../../hooks/use-theme-page';
 
 function openLink(url: string) {
   if (!url) return;
@@ -16,10 +17,11 @@ function openLink(url: string) {
 }
 
 export default function AnnouncementsPage() {
+  const { pageStyle } = useThemePage();
   const state = useLoad(() => getPublicContent(), []);
   const announcements = state.data?.announcements || [];
 
-  return <View className='page mini-announcements-page'>
+  return <View className='page mini-announcements-page' style={pageStyle}>
     <Text className='page-title'>公告通知</Text>
     <Text className='page-subtitle'>查看平台最新通知与服务动态</Text>
     <PageState loading={state.loading} error={state.error} empty={!state.loading && !state.error && announcements.length === 0} onRetry={state.reload} />

@@ -1,15 +1,18 @@
-import Taro, { useRouter } from '@tarojs/taro';
+import Taro, { usePullDownRefresh, useRouter } from '@tarojs/taro';
 import { useMemo, useState } from 'react';
 import { Input, Text, View } from '@tarojs/components';
 import { ContentCard } from '../../components/content-card';
 import { PageState } from '../../components/page-state';
 import { useLoad } from '../../hooks/use-load';
 import { getPublicContent } from '../../services/api';
+import { useThemePage } from '../../hooks/use-theme-page';
 
 export default function SearchPage() {
+  const { pageStyle } = useThemePage();
   const router = useRouter();
   const [query, setQuery] = useState(String(router.params.q || ''));
   const state = useLoad(() => getPublicContent(), []);
+  usePullDownRefresh(async () => { await state.reload(); Taro.stopPullDownRefresh(); });
   const entries = useMemo(() => {
     if (!state.data || !query.trim()) return [];
     const normalized = query.trim().toLowerCase();
@@ -19,7 +22,7 @@ export default function SearchPage() {
     ].filter(({ item }) => `${item.name} ${item.description || ''} ${(item.tags || []).join(' ')}`.toLowerCase().includes(normalized));
   }, [state.data, query]);
 
-  return <View className='page'>
+  return <View className='page' style={pageStyle}>
     <Text className='page-title'>全局搜索</Text>
     <View className='search-box'>
       <Input
