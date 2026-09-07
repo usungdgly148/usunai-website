@@ -5,6 +5,7 @@ import { MiniappTabBar } from '../../components/miniapp-tab-bar';
 import { PageState } from '../../components/page-state';
 import { AssetRow } from '../../components/asset-row';
 import { Pagination } from '../../components/pagination';
+import { TaskDetail } from '../../components/task-detail';
 import { getPagedRecords } from '../../services/api';
 import { useThemePage } from '../../hooks/use-theme-page';
 
@@ -41,6 +42,8 @@ export default function AssetsPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // 点击「任务详情」选中的资产，驱动底部弹出详情弹窗
+  const [selected, setSelected] = useState<Record<string, unknown> | null>(null);
 
   const reload = useCallback(async (targetPage: number) => {
     setLoading(true);
@@ -141,14 +144,24 @@ export default function AssetsPage() {
       <PageState loading={loading} error={error} empty={!loading && !error && items.length === 0} onRetry={() => void reload(1)} />
       {!loading && !error && items.length > 0 && (
         <>
-          <View className='mini-asset-head'>
-            {COLUMN_LABELS.map((label, i) => (
-              <Text key={label} className={`mini-asset-th th-${i}`}>{label}</Text>
-            ))}
-          </View>
-          {items.map((item, index) => (
-            <AssetRow key={String(item.id || `asset-${index}`)} item={item} />
-          ))}
+          <Text className='mini-asset-swipe-hint'>左右滑动查看更多列</Text>
+          {/* 7 列总宽超出屏幕，放横向 ScrollView 里左右滑动查看（表头与行一起滚动，保证对齐） */}
+          <ScrollView className='mini-asset-table-scroll' scrollX enableFlex showScrollbar={false}>
+            <View className='mini-asset-table'>
+              <View className='mini-asset-head'>
+                {COLUMN_LABELS.map((label, i) => (
+                  <Text key={label} className={`mini-asset-th th-${i}`}>{label}</Text>
+                ))}
+              </View>
+              {items.map((item, index) => (
+                <AssetRow
+                  key={String(item.id || `asset-${index}`)}
+                  item={item}
+                  onView={(row) => setSelected(row)}
+                />
+              ))}
+            </View>
+          </ScrollView>
         </>
       )}
     </View>
@@ -160,6 +173,9 @@ export default function AssetsPage() {
         <Pagination page={page} totalPages={totalPages} onChange={onPageChange} loading={loading} />
       </View>
     )}
+
+    {/* 任务详情弹窗（对齐网页端「我的资产」任务详情 Modal） */}
+    <TaskDetail asset={selected} visible={!!selected} onClose={() => setSelected(null)} />
 
     <MiniappTabBar active='assets' />
   </View>;

@@ -380,29 +380,35 @@ button::after { border: 0; }
 .mini-asset-search-placeholder { color: var(--mini-subtle-2); font-size: 26px; }
 .mini-asset-search-clear { display: flex; width: 36px; height: 36px; align-items: center; justify-content: center; border-radius: 50%; background: var(--mini-soft); color: var(--mini-subtle); font-size: 26px; line-height: 1; }
 
-/* 表头：7 列，与下面行严格对齐 */
-.mini-asset-head, .mini-asset-row { display: flex; align-items: center; gap: 0; padding: 0 22px; }
-.mini-asset-head { height: 70px; border-bottom: 1px solid var(--mini-line); color: var(--mini-subtle); font-size: 23px; font-weight: 600; }
-.mini-asset-th { display: block; flex-shrink: 0; }
-.mini-asset-th.th-0 { flex: 0 0 26%; min-width: 0; }
-.mini-asset-th.th-1 { flex: 0 0 12%; }
-.mini-asset-th.th-2 { flex: 0 0 10%; }
-.mini-asset-th.th-3 { flex: 0 0 18%; }
-.mini-asset-th.th-4 { flex: 0 0 10%; }
-.mini-asset-th.th-5 { flex: 0 0 12%; }
-.mini-asset-th.th-6 { flex: 0 0 12%; }
+/* 表格横向滚动容器：7 列固定总宽 1440px + 左右内边距 = 1488px，
+   超出屏幕（750rpx），外层 ScrollView 左右滑动即可查看被遮挡的列。 */
+.mini-asset-table-scroll { width: 100%; }
+.mini-asset-table { display: flex; width: 1488px; flex-direction: column; }
+.mini-asset-swipe-hint { display: block; padding: 10px 24px 2px; color: var(--mini-subtle-2); font-size: 20px; }
 
-/* 数据行：与表头列宽严格对齐 */
-.mini-asset-row { padding: 24px 22px; border-bottom: 1px solid var(--mini-line-faint); }
+/* 表头：7 列固定宽度，与下面行严格对齐 */
+.mini-asset-head, .mini-asset-row { display: flex; align-items: center; gap: 0; padding: 0 24px; }
+.mini-asset-head { height: 76px; border-bottom: 1px solid var(--mini-line); color: var(--mini-subtle); font-size: 23px; font-weight: 600; }
+.mini-asset-th { display: block; flex-shrink: 0; padding: 0 12px; }
+.mini-asset-th.th-0 { flex: 0 0 320px; min-width: 0; }
+.mini-asset-th.th-1 { flex: 0 0 150px; }
+.mini-asset-th.th-2 { flex: 0 0 140px; }
+.mini-asset-th.th-3 { flex: 0 0 300px; }
+.mini-asset-th.th-4 { flex: 0 0 130px; }
+.mini-asset-th.th-5 { flex: 0 0 200px; }
+.mini-asset-th.th-6 { flex: 0 0 200px; }
+
+/* 数据行：与表头列宽严格对齐（单元格左右 12px 内边距 = 列间距） */
+.mini-asset-row { padding: 26px 24px; border-bottom: 1px solid var(--mini-line-faint); }
 .mini-asset-row:last-child { border-bottom: 0; }
-.mini-asset-cell { display: flex; flex-shrink: 0; align-items: center; }
-.mini-asset-cell-name { flex: 0 0 26%; min-width: 0; flex-direction: column; align-items: flex-start; gap: 4px; }
-.mini-asset-cell-type { flex: 0 0 12%; }
-.mini-asset-cell-status { flex: 0 0 10%; }
-.mini-asset-cell-time { flex: 0 0 18%; }
-.mini-asset-cell-duration { flex: 0 0 10%; }
-.mini-asset-cell-cost { flex: 0 0 12%; }
-.mini-asset-cell-actions { flex: 0 0 12%; gap: 14px; justify-content: flex-start; }
+.mini-asset-cell { display: flex; flex-shrink: 0; align-items: center; padding: 0 12px; }
+.mini-asset-cell-name { flex: 0 0 320px; min-width: 0; flex-direction: column; align-items: flex-start; gap: 6px; }
+.mini-asset-cell-type { flex: 0 0 150px; }
+.mini-asset-cell-status { flex: 0 0 140px; }
+.mini-asset-cell-time { flex: 0 0 300px; }
+.mini-asset-cell-duration { flex: 0 0 130px; }
+.mini-asset-cell-cost { flex: 0 0 200px; }
+.mini-asset-cell-actions { flex: 0 0 200px; gap: 16px; justify-content: flex-start; }
 
 .mini-asset-name { display: -webkit-box; max-width: 100%; overflow: hidden; color: var(--mini-ink); font-size: 26px; font-weight: 700; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
 .mini-asset-name-sub { display: -webkit-box; max-width: 100%; overflow: hidden; color: var(--mini-subtle); font-size: 22px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
@@ -435,21 +441,48 @@ button::after { border: 0; }
 .mini-assets-page .mini-asset-panel { padding: 0; overflow: hidden; border-radius: 24px; background: var(--mini-surface); box-shadow: 0 12px 28px rgba(45, 80, 135, .06); }
 .mini-assets-page .mini-asset-panel .state { background: transparent; }
 
-/* 窄屏（< 600px）适配：列宽收缩 + 减小字号 */
+/* 窄屏（< 600px）适配：仅缩小字号。
+   列宽保持固定 px —— 表格统一走横向滚动展示，不再按屏幕宽度压缩列（否则会失去滑动查看的意义且表头错位）。 */
 @media (max-width: 600px) {
   .mini-asset-toolbar { flex-direction: column; align-items: stretch; }
   .mini-asset-search { width: 100%; max-width: 100%; }
   .mini-asset-th, .mini-asset-cell-text, .mini-asset-name { font-size: 22px; }
   .mini-asset-name-sub { font-size: 19px; }
   .mini-asset-status { font-size: 18px; padding: 2px 10px; }
-  .mini-asset-row, .mini-asset-head { padding: 0 14px; }
   .mini-asset-cell-actions { gap: 10px; }
   .mini-asset-action-link { font-size: 20px; }
-  .mini-asset-th.th-0, .mini-asset-cell-name { flex-basis: 28%; }
-  .mini-asset-th.th-1, .mini-asset-cell-type { flex-basis: 10%; }
-  .mini-asset-th.th-2, .mini-asset-cell-status { flex-basis: 12%; }
-  .mini-asset-th.th-3, .mini-asset-cell-time { flex-basis: 20%; }
-  .mini-asset-th.th-4, .mini-asset-cell-duration { flex-basis: 8%; }
-  .mini-asset-th.th-5, .mini-asset-cell-cost { flex-basis: 10%; }
-  .mini-asset-th.th-6, .mini-asset-cell-actions { flex-basis: 12%; }
 }
+
+/* ===== 任务详情弹窗（对齐网页端「我的资产 → 任务详情」Modal 结构） ===== */
+.mini-task-detail { display: flex; flex-direction: column; width: 690px; max-height: 1000px; overflow: hidden; border-radius: 32px; background: var(--mini-surface); }
+.mini-task-detail-head { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; padding: 28px 32px; border-bottom: 1px solid var(--mini-line-faint); }
+.mini-task-detail-title { color: var(--mini-ink); font-size: 32px; font-weight: 700; }
+.mini-task-detail-close { display: flex; width: 48px; height: 48px; align-items: center; justify-content: center; border-radius: 50%; color: var(--mini-subtle); }
+.mini-task-detail-close-icon { font-size: 26px; }
+
+.mini-task-detail-body { flex: 1; min-height: 0; max-height: 780px; padding: 28px 32px; }
+.mini-task-detail-intro { margin-bottom: 32px; }
+.mini-task-detail-time { display: block; color: var(--mini-subtle); font-size: 22px; }
+.mini-task-detail-name { display: block; margin-top: 8px; color: var(--mini-ink); font-size: 34px; font-weight: 700; line-height: 1.35; }
+
+.mini-task-detail-section { margin-bottom: 32px; }
+.mini-task-detail-label { display: block; margin-bottom: 14px; color: var(--mini-ink); font-size: 27px; font-weight: 600; }
+.mini-task-detail-sublabel { display: block; margin: 18px 0 12px; color: var(--mini-subtle); font-size: 21px; }
+.mini-task-detail-box { padding: 24px; border: 1px solid var(--mini-line-faint); border-radius: 24px; background: var(--mini-soft); }
+.mini-task-detail-kv { display: flex; gap: 8px; margin-bottom: 12px; }
+.mini-task-detail-kv:last-child { margin-bottom: 0; }
+.mini-task-detail-k { flex-shrink: 0; color: var(--mini-subtle); font-size: 24px; }
+.mini-task-detail-v { flex: 1; min-width: 0; color: var(--mini-text-2); font-size: 24px; line-height: 1.5; word-break: break-all; }
+.mini-task-detail-content { display: block; color: var(--mini-text-2); font-size: 25px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+
+.mini-task-detail-video { width: 100%; height: 360px; margin-bottom: 20px; border-radius: 20px; background: #000; }
+.mini-task-detail-images { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 12px; }
+.mini-task-detail-image { width: 100%; border-radius: 20px; background: var(--mini-soft); }
+
+.mini-task-detail-footmeta { display: flex; flex-wrap: wrap; gap: 24px; padding-top: 8px; }
+.mini-task-detail-footmeta-item { color: var(--mini-subtle); font-size: 22px; }
+
+.mini-task-detail-foot { display: flex; flex-shrink: 0; align-items: center; justify-content: flex-end; gap: 16px; padding: 22px 32px; border-top: 1px solid var(--mini-line-faint); background: var(--mini-soft); }
+.mini-task-detail-copy { padding: 14px 28px; border-radius: 999px; color: var(--mini-primary); font-size: 26px; font-weight: 600; }
+.mini-task-detail-closebtn { padding: 14px 28px; border-radius: 999px; color: var(--mini-subtle); font-size: 26px; font-weight: 600; }
+.mini-task-detail-copy:active { background: var(--mini-primary-soft); }
