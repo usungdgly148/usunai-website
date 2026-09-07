@@ -1,14 +1,19 @@
 import Taro, { usePullDownRefresh } from '@tarojs/taro';
-import { Button, Text, View } from '@tarojs/components';
+import { Button, Image, Input, Text, View } from '@tarojs/components';
 import { useState } from 'react';
 import { MiniappTabBar } from '../../components/miniapp-tab-bar';
 import { PageState } from '../../components/page-state';
 import { useLoad } from '../../hooks/use-load';
-import { getMe, isBindingRequired } from '../../services/api';
+import { changePassword, getMe, isBindingRequired, updateProfile } from '../../services/api';
 import { useThemePage } from '../../hooks/use-theme-page';
 import { type ThemeMode, readMode, resolveTheme, setMode } from '../../utils/theme';
+import { toast } from '../../utils/feedback';
 
 const validDate = (value: string | null) => value ? new Date(value).toLocaleDateString('zh-CN') : '有效期未设置';
+const maskPhone = (phone?: string) => {
+  if (!phone) return '';
+  return phone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2');
+};
 
 const shortcuts = [
   { icon: '▣', label: '我的资产', url: '/pages/assets/index' },
@@ -38,6 +43,16 @@ export default function ProfilePage() {
   const state = useLoad(() => getMe(), []);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => readMode());
   const [showThemeSheet, setShowThemeSheet] = useState(false);
+  // 昵称编辑
+  const [nickOpen, setNickOpen] = useState(false);
+  const [nickInput, setNickInput] = useState('');
+  const [nickSaving, setNickSaving] = useState(false);
+  // 修改密码
+  const [pwdOpen, setPwdOpen] = useState(false);
+  const [oldPwd, setOldPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [confirmPwd, setConfirmPwd] = useState('');
+  const [pwdBusy, setPwdBusy] = useState(false);
   usePullDownRefresh(async () => { await state.reload(); Taro.stopPullDownRefresh(); });
 
   const pickMode = (mode: ThemeMode) => {
@@ -45,6 +60,85 @@ export default function ProfilePage() {
     setThemeMode(mode);
     setShowThemeSheet(false);
   };
+
+  const copyId = () => {
+    if (!state.data?.id) return;
+    Taro.setClipboardData({ data: state.data.id }).then(() => toast('已复制用户 ID', 'success')).catch(() => {});
+  };
+
+  // 头像：选择图片 → 读 base64 → 更新 → 刷新
+  const pickAvatar = async () => {
+    try {
+      const res = await Taro.chooseImage({ count: 1, sizeType: ['compressed'], sourceType: ['album', 'camera'] });
+      const tempPath = res.tempFilePaths && res.tempFilePaths[0];
+      if (!tempPath) return;
+      const base64 = Taro.getFileSystemManager().readFileSync(tempPath, 'base64') as string;
+      if (base64.length > 1200 * 1024) { toast('图片过大，请选择更小的图片', 'warning'); return; }
+      let mime = 'jpeg';
+      try {
+        const info = await Taro.getImageInfo({ src: tempPath });
+        const t = String((info as { type?: string }).type || '').toLowerCase();
+        if (t === 'png' || t === 'gif' || t === 'webp') mime = t;
+        else if (t === 'jpeg' || t === 'jpg') mime = 'jpeg';
+      } catch { /* 默认 jpeg */ }
+      await updateProfile({ avatar: `data:image/${mime};base64,${base64}` });
+      toast('头像已更新', 'success');
+      await state.reload();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '头像更新失败', 'error');
+    }
+  };
+
+  const openNick = () => {
+    setNickInput(state.data?.nickname || state.data?.name || '');
+    setNickOpen(true);
+  };
+  const saveNick = async () => {
+    const name = nickInput.trim();
+    if (!name) { toast('昵称不能为空', 'warning'); return; }
+    setNickSaving(true);
+    try {
+      await updateProfile({ name });
+      toast('昵称已保存', 'success');
+      setNickOpen(false);
+      await state.reload();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '保存失败', 'error');
+    } finally {
+      setNickSaving(false);
+    }
+  };
+
+  const openPwd = () => {
+    setOldPwd(''); setNewPwd(''); setConfirmPwd('');
+    setPwdOpen(true);
+  };
+  const submitPwd = async () => {
+    if (newPwd.length < 6) { toast('新密码至少 6 位', 'warning'); return; }
+    if (newPwd !== confirmPwd) { toast('两次输入的密码不一致', 'warning'); return; }
+    if (state.data?.hasPassword && !oldPwd) { toast('请输入原密码', 'warning'); return; }
+    setPwdBusy(true);
+    try {
+      await changePassword({ oldPassword: oldPwd, newPassword: newPwd });
+      toast('密码修改成功', 'success');
+      setPwdOpen(false);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '修改失败', 'error');
+    } finally {
+      setPwdBusy(false);
+    }
+  };
+
+  const securityRows: Array<{ icon: string; label: string; value: string; action?: () => void; actionText?: string }> = [
+    { icon: '✉', label: '邮箱', value: state.data?.email || '未绑定' },
+    {
+      icon: '☎', label: '手机号', value: maskPhone(state.data?.phone) || '未绑定',
+      action: () => Taro.navigateTo({ url: '/pages/bind/index' }),
+      actionText: state.data?.phone ? '修改' : '绑定',
+    },
+    { icon: '💬', label: '微信', value: '已绑定' },
+    { icon: '🔒', label: '登录密码', value: state.data?.hasPassword ? '已设置' : '未设置', action: openPwd, actionText: '修改' },
+  ];
 
   return <View className='page mini-profile-page' style={pageStyle}>
     <View className='mini-page-topbar'><Text className='mini-page-heading'>我的</Text><Text className='mini-page-caption'>账户、算力与创作资产</Text></View>
@@ -59,19 +153,58 @@ export default function ProfilePage() {
       </View>
     </View>
     {state.data && <>
+      {/* 基本信息：头像 + 昵称 + 用户 ID（可编辑） */}
       <View className='mini-profile-head'>
-        <View className='mini-profile-avatar'><Text>{String(state.data.nickname || state.data.name || '友').slice(0, 1)}</Text></View>
-        <View><Text className='mini-profile-name'>{state.data.nickname || state.data.name || '微信用户'}</Text><Text className='muted'>用户 ID：{state.data.id}</Text></View>
+        <View className='mini-profile-avatar' onClick={pickAvatar}>
+          {state.data.avatar
+            ? <Image className='mini-profile-avatar-img' src={state.data.avatar} mode='aspectFill' />
+            : <Text>{String(state.data.nickname || state.data.name || '友').slice(0, 1)}</Text>}
+          <View className='mini-profile-avatar-badge'>📷</View>
+        </View>
+        <View className='mini-profile-head-main'>
+          <View className='mini-profile-name-row'>
+            <Text className='mini-profile-name'>{state.data.nickname || state.data.name || '微信用户'}</Text>
+            <Text className='mini-profile-edit' onClick={openNick}>编辑</Text>
+          </View>
+          <View className='mini-profile-id-row' onClick={copyId}>
+            <Text className='muted'>用户 ID：{state.data.id}</Text>
+            <Text className='mini-profile-copy'>复制</Text>
+          </View>
+          <Text className='mini-profile-avatar-hint' onClick={pickAvatar}>点击头像更换</Text>
+        </View>
       </View>
+
       <View className='mini-membership-card'>
         <View><Text className='mini-membership-kicker'>我的算力</Text><Text className='mini-membership-title'>可用点数</Text><Text className='mini-membership-desc'>有效期至 {validDate(state.data.validTo)}</Text></View>
         <View className='mini-membership-points'><Text>{state.data.points}</Text><Text>点</Text></View>
       </View>
+
+      {/* 账号安全 */}
+      <View className='mini-security-section'>
+        <Text className='mini-section-heading'>账号安全</Text>
+        <View className='mini-security-list'>
+          {securityRows.map((row) => (
+            <View key={row.label} className='mini-security-row'>
+              <View className='mini-security-left'>
+                <View className='mini-security-icon'><Text>{row.icon}</Text></View>
+                <View className='mini-security-info'>
+                  <Text className='mini-security-label'>{row.label}</Text>
+                  <Text className='mini-security-value'>{row.value}</Text>
+                </View>
+              </View>
+              {row.action && <Text className='mini-security-action' onClick={row.action}>{row.actionText}</Text>}
+            </View>
+          ))}
+        </View>
+      </View>
+
       {isBindingRequired() && <View className='mini-bind-card'><View><Text className='mini-bind-title'>绑定已有网站账号</Text><Text className='mini-bind-desc'>同步已有算力、资产和历史记录</Text></View><Button className='mini-bind-button' onClick={() => Taro.navigateTo({ url: '/pages/bind/index' })}>去绑定</Button></View>}
       <View className='mini-profile-shortcuts'>{shortcuts.map(item => <View className='mini-profile-shortcut' key={item.label} onClick={() => Taro.navigateTo({ url: item.url })}><Text className='mini-profile-shortcut-icon'>{item.icon}</Text><Text>{item.label}</Text></View>)}</View>
       <View className='mini-settings-list'>{links.map(item => <View className='mini-settings-row' key={item.label} onClick={() => Taro.navigateTo({ url: item.url })}><Text>{item.label}</Text><Text className='mini-settings-arrow'>›</Text></View>)}</View>
     </>}
     <MiniappTabBar active='profile' />
+
+    {/* 深色模式选择 */}
     <t-popup
       visible={showThemeSheet}
       placement='bottom'
@@ -100,5 +233,35 @@ export default function ProfilePage() {
         <Text className='theme-sheet-foot'>当前界面为{modeLabel(resolveTheme(themeMode))}外观{themeMode === 'auto' ? '（跟随系统）' : ''}，选择后立即生效</Text>
       </View>
     </t-popup>
+
+    {/* 昵称编辑 */}
+    <t-popup visible={nickOpen} placement='center' showOverlay closeOnOverlayClick onVisibleChange={(e: { detail?: { visible?: boolean } }) => { if (!e.detail?.visible) setNickOpen(false); }}>
+      <View className='mini-edit-sheet'>
+        <Text className='mini-edit-sheet-title'>修改昵称</Text>
+        <Input className='mini-edit-sheet-input' value={nickInput} maxlength={40} onInput={(e) => setNickInput(e.detail.value)} placeholder='请输入昵称' />
+        <View className='mini-edit-sheet-actions'>
+          <Button className='mini-edit-sheet-cancel' onClick={() => setNickOpen(false)}>取消</Button>
+          <Button className='mini-edit-sheet-ok' loading={nickSaving} disabled={nickSaving} onClick={saveNick}>保存</Button>
+        </View>
+      </View>
+    </t-popup>
+
+    {/* 修改密码 */}
+    <t-popup visible={pwdOpen} placement='center' showOverlay closeOnOverlayClick onVisibleChange={(e: { detail?: { visible?: boolean } }) => { if (!e.detail?.visible) setPwdOpen(false); }}>
+      <View className='mini-edit-sheet'>
+        <Text className='mini-edit-sheet-title'>修改登录密码</Text>
+        <Text className='mini-edit-sheet-sub'>密码需至少 6 位，修改后请使用新密码登录。</Text>
+        {state.data?.hasPassword && (
+          <Input className='mini-edit-sheet-input' password value={oldPwd} onInput={(e) => setOldPwd(e.detail.value)} placeholder='请输入原密码' />
+        )}
+        <Input className='mini-edit-sheet-input' password value={newPwd} onInput={(e) => setNewPwd(e.detail.value)} placeholder='请输入新密码（至少 6 位）' />
+        <Input className='mini-edit-sheet-input' password value={confirmPwd} onInput={(e) => setConfirmPwd(e.detail.value)} placeholder='请再次输入新密码' />
+        <View className='mini-edit-sheet-actions'>
+          <Button className='mini-edit-sheet-cancel' onClick={() => setPwdOpen(false)}>取消</Button>
+          <Button className='mini-edit-sheet-ok' loading={pwdBusy} disabled={pwdBusy} onClick={submitPwd}>确认修改</Button>
+        </View>
+      </View>
+    </t-popup>
+    <t-toast id='t-toast' theme='info' />
   </View>;
 }

@@ -128,6 +128,9 @@ export interface UserProfile {
   balance: number;
   validTo: string | null;
   expired: boolean;
+  provider?: string;
+  status?: string;
+  hasPassword?: boolean;
 }
 
 export interface ApiEnvelope<T> {

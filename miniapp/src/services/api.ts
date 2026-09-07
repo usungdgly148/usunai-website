@@ -148,6 +148,16 @@ export async function getMe() {
   return (await apiRequest<UserProfile>('/api/miniapp/v1/me')).data;
 }
 
+/** 更新个人资料（昵称 / 头像）。头像为 data URL（base64）或 http(s) URL。 */
+export async function updateProfile(patch: { name?: string; avatar?: string }) {
+  return (await apiRequest<UserProfile>('/api/miniapp/v1/profile', { method: 'POST', data: patch })).data;
+}
+
+/** 修改登录密码（无密码账号不支持）。 */
+export async function changePassword(payload: { oldPassword?: string; newPassword: string }) {
+  return (await apiRequest<{ ok: boolean }>('/api/miniapp/v1/password', { method: 'POST', data: payload })).data;
+}
+
 export function isBindingRequired() {
   return !!Taro.getStorageSync<boolean>(BINDING_KEY);
 }

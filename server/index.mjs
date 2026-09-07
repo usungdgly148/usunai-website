@@ -2072,6 +2072,9 @@ const server = http.createServer(async (req, res) => {
       isAdminSession,
       getPlanValidity,
       sanitizeId: sanitizeIdSafe,
+      readBody,
+      hashPassword: hashPasswordStore,
+      verifyPassword: verifyPasswordStore,
     })) return;
     if (await handleKnowledgeAdminRoute(req, res, u, { requireAdmin, readBody, getAgents: () => agents })) return;
     if (p === '/api/billing-config') {

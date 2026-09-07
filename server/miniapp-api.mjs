@@ -208,6 +208,73 @@ function userSession(req, res, requestId, { getSession, isAdminSession }) {
   return session;
 }
 
+async function updateProfile(req, res, requestId, session, deps) {
+  const { KV, sanitizeId, getPlanValidity } = deps;
+  const body = await deps.readBody(req);
+  const name = body && typeof body.name === 'string' ? body.name.trim() : '';
+  const avatar = body && typeof body.avatar === 'string' ? body.avatar.trim() : '';
+  const hasName = name !== '';
+  const hasAvatar = avatar !== '';
+  if (!hasName && !hasAvatar) {
+    sendJson(res, 400, errorEnvelope('NOTHING_TO_UPDATE', '没有需要更新的内容', requestId), requestId);
+    return;
+  }
+  if (hasName && (name.length < 1 || name.length > 40)) {
+    sendJson(res, 400, errorEnvelope('INVALID_NAME', '昵称长度需在 1~40 字之间', requestId), requestId);
+    return;
+  }
+  if (hasAvatar && !/^(data:image\/|https?:\/\/)/i.test(avatar)) {
+    sendJson(res, 400, errorEnvelope('INVALID_AVATAR', '头像格式不正确', requestId), requestId);
+    return;
+  }
+  // base64 头像上限 ~1MB（避免超大 data URL 撑爆 KV 记录）
+  if (hasAvatar && avatar.length > 1200 * 1024) {
+    sendJson(res, 400, errorEnvelope('AVATAR_TOO_LARGE', '头像图片过大，请压缩后重试', requestId), requestId);
+    return;
+  }
+  const safeId = sanitizeId(String(session.userId || ''));
+  const [reg, user] = await Promise.all([
+    KV.kvGet('reg_' + safeId),
+    KV.kvGet('user_' + safeId),
+  ]);
+  if (!reg && !user) {
+    sendJson(res, 404, errorEnvelope('USER_NOT_FOUND', '用户不存在', requestId), requestId);
+    return;
+  }
+  const nextReg = { ...(reg || {}), id: String(session.userId) };
+  const nextUser = { ...(user || {}), id: String(session.userId) };
+  if (hasName) { nextReg.name = name; nextUser.name = name; }
+  if (hasAvatar) { nextReg.avatar = avatar; nextUser.avatar = avatar; }
+  await Promise.all([KV.kvPut('reg_' + safeId, nextReg), KV.kvPut('user_' + safeId, nextUser)]);
+  sendJson(res, 200, successEnvelope(safeUser(nextReg, nextUser, getPlanValidity), requestId), requestId);
+}
+
+async function changePassword(req, res, requestId, session, deps) {
+  const { KV, sanitizeId, hashPassword, verifyPassword } = deps;
+  const body = await deps.readBody(req);
+  const oldPassword = String((body && body.oldPassword) || '');
+  const newPassword = String((body && body.newPassword) || '');
+  if (!newPassword || newPassword.length < 6) {
+    sendJson(res, 400, errorEnvelope('PASSWORD_TOO_SHORT', '新密码至少 6 位', requestId), requestId);
+    return;
+  }
+  const safeId = sanitizeId(String(session.userId || ''));
+  const reg = await KV.kvGet('reg_' + safeId);
+  if (!reg || !reg.password) {
+    sendJson(res, 400, errorEnvelope('PASSWORD_NOT_SET', '该账号未设置登录密码（微信登录），暂不支持修改', requestId), requestId);
+    return;
+  }
+  if (!verifyPassword(oldPassword, reg.password)) {
+    sendJson(res, 401, errorEnvelope('OLD_PASSWORD_WRONG', '原密码错误', requestId), requestId);
+    return;
+  }
+  const updated = { ...reg, password: hashPassword(newPassword) };
+  await KV.kvPut('reg_' + safeId, updated);
+  const user = await KV.kvGet('user_' + safeId);
+  if (user) await KV.kvPut('user_' + safeId, { ...user, hasPassword: true });
+  sendJson(res, 200, successEnvelope({ ok: true }, requestId), requestId);
+}
+
 export async function handleMiniappApi(req, res, url, deps) {
   const path = url.pathname;
   if (!path.startsWith('/api/miniapp/v1/')) return false;
@@ -215,6 +282,14 @@ export async function handleMiniappApi(req, res, url, deps) {
   const { KV, getSession, isAdminSession, getPlanValidity, sanitizeId } = deps;
 
   try {
+
+  if (req.method === 'POST' && (path === '/api/miniapp/v1/profile' || path === '/api/miniapp/v1/password')) {
+    const session = userSession(req, res, requestId, { getSession, isAdminSession });
+    if (!session) return true;
+    if (path === '/api/miniapp/v1/profile') await updateProfile(req, res, requestId, session, deps);
+    else await changePassword(req, res, requestId, session, deps);
+    return true;
+  }
 
   if (req.method !== 'GET') {
     sendJson(res, 405, errorEnvelope('METHOD_NOT_ALLOWED', '该接口不支持当前请求方法', requestId), requestId);

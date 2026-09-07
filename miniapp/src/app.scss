@@ -527,3 +527,40 @@ button::after { border: 0; }
   .mini-amount-up, .mini-amount-down { font-size: 22px; }
   .mini-badge { font-size: 18px; padding: 2px 10px; }
 }
+
+/* ===== 个人中心：头像/昵称编辑 + 账号安全 ===== */
+.mini-profile-avatar { position: relative; overflow: hidden; flex-shrink: 0; }
+.mini-profile-avatar-img { width: 100%; height: 100%; border-radius: 50%; }
+.mini-profile-avatar-badge { position: absolute; right: 0; bottom: 0; display: flex; width: 30px; height: 30px; align-items: center; justify-content: center; border: 2px solid #fff; border-radius: 50%; background: var(--mini-primary-soft); font-size: 16px; line-height: 1; }
+.mini-profile-head-main { min-width: 0; flex: 1; }
+.mini-profile-name-row { display: flex; align-items: center; gap: 12px; }
+.mini-profile-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mini-profile-edit { flex-shrink: 0; padding: 4px 16px; border: 1px solid var(--mini-primary-border); border-radius: 999px; color: var(--mini-primary); font-size: 21px; font-weight: 600; }
+.mini-profile-id-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.mini-profile-id-row .muted { font-size: 22px; }
+.mini-profile-copy { flex-shrink: 0; color: var(--mini-primary); font-size: 21px; }
+.mini-profile-avatar-hint { display: inline-block; margin-top: 10px; color: var(--mini-subtle-2); font-size: 20px; }
+
+.mini-security-section { margin-bottom: 22px; }
+.mini-section-heading { display: block; margin: 0 4px 14px; color: var(--mini-ink); font-size: 28px; font-weight: 700; }
+.mini-security-list { overflow: hidden; border: 1px solid var(--mini-line); border-radius: 26px; background: var(--mini-surface); box-shadow: 0 12px 28px rgba(45, 80, 135, .06); }
+.mini-security-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 24px 26px; border-bottom: 1px solid var(--mini-line-faint); }
+.mini-security-row:last-child { border-bottom: 0; }
+.mini-security-left { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.mini-security-icon { display: flex; width: 56px; height: 56px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 16px; background: var(--mini-soft); color: var(--mini-subtle); font-size: 27px; }
+.mini-security-info { min-width: 0; }
+.mini-security-label { display: block; color: var(--mini-ink); font-size: 28px; font-weight: 600; }
+.mini-security-value { display: block; margin-top: 4px; overflow: hidden; color: var(--mini-subtle); font-size: 22px; text-overflow: ellipsis; white-space: nowrap; }
+.mini-security-action { flex-shrink: 0; padding: 10px 24px; border: 1px solid var(--mini-line-strong); border-radius: 999px; color: var(--mini-text-2); font-size: 23px; }
+
+/* 编辑弹层（昵称 / 修改密码共用） */
+.mini-edit-sheet { width: 620px; padding: 32px 34px; border-radius: 28px; background: var(--mini-surface); }
+.mini-edit-sheet-title { display: block; color: var(--mini-ink); font-size: 32px; font-weight: 700; text-align: center; }
+.mini-edit-sheet-sub { display: block; margin-top: 12px; color: var(--mini-subtle); font-size: 22px; text-align: center; }
+.mini-edit-sheet-input { margin-top: 22px; height: 84px; padding: 0 24px; border: 1px solid var(--mini-line-strong); border-radius: 18px; background: var(--mini-soft); color: var(--mini-ink); font-size: 27px; }
+.mini-edit-sheet-actions { display: flex; gap: 18px; margin-top: 28px; }
+.mini-edit-sheet-cancel, .mini-edit-sheet-ok { flex: 1; margin: 0; height: 84px; border-radius: 18px; font-size: 28px; font-weight: 600; line-height: 84px; }
+.mini-edit-sheet-cancel { border: 1px solid var(--mini-line-strong); background: var(--mini-soft); color: var(--mini-text-2); }
+.mini-edit-sheet-ok { background: var(--mini-primary); color: #fff; }
+.mini-edit-sheet-cancel::after, .mini-edit-sheet-ok::after { border: 0; }
+
