@@ -73,8 +73,8 @@ export function TaskDetail({ asset, visible, onClose }: {
           </Text>
         </View>
 
-        {/* 主体（可滚动） */}
-        <ScrollView className='mini-task-detail-body' scrollY>
+        {/* 主体（可滚动）。width:'100%' 必须内联，scroll-view 默认会按内容撑开宽度导致外层弹窗被撑破。 */}
+        <ScrollView className='mini-task-detail-body' scrollY style={{ width: '100%', minWidth: 0 }}>
           {asset && (
             <>
               <View className='mini-task-detail-intro'>
