@@ -171,6 +171,23 @@ export async function getPagedRecords(
   return { items: response.data, pagination: response.meta };
 }
 
+/** 全量拉取某类记录（跨页循环，单页最多 100 条），用于客户端过滤 + 算力「剩余」倒推。 */
+export async function fetchAllRecords(
+  path: 'assets' | 'compute-records' | 'orders' | 'history',
+  pageSize = 100,
+) {
+  const all: Array<Record<string, unknown>> = [];
+  let page = 1;
+  let totalPages = 1;
+  do {
+    const result = await getPagedRecords(path, page, pageSize);
+    all.push(...result.items);
+    totalPages = Number(result.pagination.totalPages) || 1;
+    page += 1;
+  } while (page <= totalPages);
+  return all;
+}
+
 export async function bindWebsiteAccount(payload: { method: 'email'; email: string; password: string } | { method: 'phone'; phone: string; code: string }) {
   return (await apiRequest<{ token: string; user: UserProfile; bindingRequired: boolean }>('/api/miniapp/v1/auth/bind', {
     method: 'POST',

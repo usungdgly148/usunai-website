@@ -486,3 +486,44 @@ button::after { border: 0; }
 .mini-task-detail-copy { padding: 14px 28px; border-radius: 999px; color: var(--mini-primary); font-size: 26px; font-weight: 600; }
 .mini-task-detail-closebtn { padding: 14px 28px; border-radius: 999px; color: var(--mini-subtle); font-size: 26px; font-weight: 600; }
 .mini-task-detail-copy:active { background: var(--mini-primary-soft); }
+
+/* ===== 通用横向滚动数据表（算力记录 / 订单记录 共用） ===== */
+.mini-table-scroll { width: 100%; }
+.mini-table { display: flex; flex-direction: column; }
+.mini-table-swipe-hint { display: block; padding: 10px 24px 2px; color: var(--mini-subtle-2); font-size: 20px; }
+.mini-table-head, .mini-table-row { display: flex; align-items: center; gap: 0; padding: 0 24px; }
+.mini-table-head { height: 76px; border-bottom: 1px solid var(--mini-line); color: var(--mini-subtle); font-size: 23px; font-weight: 600; }
+.mini-table-th { display: block; flex-shrink: 0; padding: 0 12px; }
+.mini-table-cell { display: flex; flex-shrink: 0; align-items: center; padding: 0 12px; overflow: hidden; }
+.mini-table-row { padding: 26px 24px; border-bottom: 1px solid var(--mini-line-faint); }
+.mini-table-row:last-child { border-bottom: 0; }
+.mini-table-cell-text { display: block; overflow: hidden; color: var(--mini-text-2); font-size: 24px; text-overflow: ellipsis; white-space: nowrap; }
+.mini-table-cell-strong { color: var(--mini-ink); font-weight: 650; }
+.mini-mono { color: var(--mini-subtle); font-size: 22px; font-family: monospace; word-break: break-all; }
+
+/* 徽标：充值/消耗/订单状态 等（对齐网页端 rounded 徽标配色） */
+.mini-badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 14px; border-radius: 999px; font-size: 21px; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+.mini-badge-green { color: var(--mini-success); background: var(--mini-success-soft); }
+.mini-badge-red { color: var(--mini-danger); background: var(--mini-danger-soft); }
+.mini-badge-amber { color: var(--mini-warn); background: var(--mini-warn-soft); }
+.mini-badge-gray { color: var(--mini-subtle); background: var(--mini-soft); }
+.mini-badge-purple { color: var(--mini-accent); background: var(--mini-accent-soft); }
+
+/* 算力变动金额配色：充值涨（绿）消耗跌（红） */
+.mini-amount-up { color: var(--mini-success); font-size: 24px; font-weight: 650; }
+.mini-amount-down { color: var(--mini-danger); font-size: 24px; font-weight: 650; }
+
+/* ===== 算力记录 / 订单记录 页面外壳 ===== */
+.mini-record-toolbar { display: flex; gap: 16px; align-items: center; margin: 0 0 22px; flex-wrap: wrap; }
+.mini-record-toolbar .mini-asset-tabs { flex: 1; min-width: 0; margin: 0; }
+.mini-record-toolbar .mini-asset-tab-row { padding: 0; }
+.mini-record-panel { min-height: 440px; padding: 4px 0; overflow: hidden; border: 1px solid var(--mini-line); border-radius: 26px; background: var(--mini-surface); box-shadow: 0 12px 28px rgba(45, 80, 135, .06); }
+.mini-record-panel .state { background: transparent; }
+
+@media (max-width: 600px) {
+  .mini-record-toolbar { flex-direction: column; align-items: stretch; }
+  .mini-record-toolbar .mini-asset-search { width: 100%; max-width: 100%; }
+  .mini-table-th, .mini-table-cell-text, .mini-mono { font-size: 22px; }
+  .mini-amount-up, .mini-amount-down { font-size: 22px; }
+  .mini-badge { font-size: 18px; padding: 2px 10px; }
+}
