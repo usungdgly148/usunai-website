@@ -28,6 +28,8 @@ frontend/dist/
 frontend/.vite/
 miniapp/dist/
 miniapp/dist_backup*/
+miniapp/dist_broken*/
+miniapp/dist_stale*/
 miniapp/.swc/
 coverage/
 logs/
