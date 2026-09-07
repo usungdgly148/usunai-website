@@ -7,7 +7,9 @@ export const MINIAPP_VERSION = __MINIAPP_VERSION__;
 export const MINIAPP_BUILD = __MINIAPP_BUILD__;
 const TOKEN_KEY = 'usunai_miniapp_token';
 const BINDING_KEY = 'usunai_miniapp_binding_required';
-const CONTENT_CACHE_KEY = 'usunai_miniapp_content_v1';
+/** 用户主动退出登录标记（退出后不再静默登录，需点「微信一键登录」才重新进入） */
+const LOGGED_OUT_KEY = 'usunai_miniapp_logged_out';
+const CONTENT_CACHE_KEY = 'usunai_miniapp_content_v2';
 const CONTENT_TTL = 5 * 60 * 1000;
 const LAYOUT_TTL = 60 * 1000;
 let loginPromise: Promise<string> | null = null;
@@ -82,7 +84,19 @@ async function rawRequest<T>(path: string, options: RequestOptions = {}): Promis
   return body;
 }
 
+/** 是否处于主动退出登录状态（此时需登录的请求不再静默登录，改为提示先登录） */
+export function isLoggedOut() {
+  return Taro.getStorageSync<boolean>(LOGGED_OUT_KEY) === true;
+}
+
+export function clearLoggedOut() {
+  Taro.removeStorageSync(LOGGED_OUT_KEY);
+}
+
 export async function ensureMiniappSession(force = false): Promise<string> {
+  if (isLoggedOut() && !force) {
+    throw new ApiError('AUTH_REQUIRED', '请先登录后再使用该功能', 401);
+  }
   const stored = Taro.getStorageSync<string>(TOKEN_KEY);
   if (stored && !force) return stored;
   if (loginPromise) return loginPromise;
@@ -103,13 +117,35 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   try {
     return await rawRequest<T>(path, options);
   } catch (error) {
-    if (options.auth !== false && error instanceof ApiError && error.statusCode === 401) {
+    if (options.auth !== false && error instanceof ApiError && error.statusCode === 401 && !isLoggedOut()) {
       Taro.removeStorageSync(TOKEN_KEY);
       await ensureMiniappSession(true);
       return rawRequest<T>(path, options);
     }
     throw error;
   }
+}
+
+/** 退出登录：服务端吊销当前会话 + 清理本地登录态（此后需「微信一键登录」重新进入） */
+export async function logoutSession() {
+  const token = getMiniappToken();
+  if (token) {
+    try {
+      await rawRequest<unknown>('/api/auth/logout', {
+        method: 'POST', auth: false, header: { Authorization: `Bearer ${token}` },
+      });
+    } catch { /* 吊销失败不阻塞本地登出 */ }
+  }
+  Taro.removeStorageSync(TOKEN_KEY);
+  Taro.removeStorageSync(BINDING_KEY);
+  Taro.setStorageSync(LOGGED_OUT_KEY, true);
+}
+
+/** 微信一键登录：清除退出标记并强制刷新会话（获取新的登录 token） */
+export async function loginWithWechat() {
+  clearLoggedOut();
+  await ensureMiniappSession(true);
+  return getMiniappToken();
 }
 
 export async function getPublicContent(force = false): Promise<PublicContent> {

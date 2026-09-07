@@ -7,6 +7,7 @@ import { Pagination } from '../../components/pagination';
 import { HScrollTable, type TableColumn } from '../../components/h-scroll-table';
 import { useRecordList } from '../../hooks/use-record-list';
 import { useThemePage } from '../../hooks/use-theme-page';
+import { isLoggedOut } from '../../services/api';
 import { formatTime, orderStatusInfo, orderTypeLabel, paginateClient } from '../../utils/record-format';
 
 const PAGE_SIZE = 12;
@@ -104,7 +105,14 @@ export default function OrdersPage() {
     </View>
 
     <View className='mini-record-panel'>
-      <PageState loading={loading} error={error} empty={!loading && !error && filtered.length === 0} onRetry={reload} />
+      <PageState
+        loading={loading}
+        error={error}
+        empty={!loading && !error && filtered.length === 0}
+        loginFallback={!!error && isLoggedOut()}
+        onGoLogin={() => Taro.reLaunch({ url: '/pages/profile/index' })}
+        onRetry={reload}
+      />
       {!loading && !error && items.length > 0 && (
         <HScrollTable
           columns={COLUMNS}

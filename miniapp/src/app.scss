@@ -564,3 +564,52 @@ button::after { border: 0; }
 .mini-edit-sheet-ok { background: var(--mini-primary); color: #fff; }
 .mini-edit-sheet-cancel::after, .mini-edit-sheet-ok::after { border: 0; }
 
+/* ===== 个人中心：算力充值入口 + 充值弹窗 ===== */
+.mini-recharge-entry { display: flex; align-items: center; gap: 18px; margin-bottom: 22px; padding: 24px 26px; border: 1px solid var(--mini-primary-border); border-radius: 24px; background: linear-gradient(135deg, var(--mini-primary-pale), var(--mini-primary-border)); box-shadow: 0 12px 28px rgba(43, 95, 212, .08); }
+.mini-recharge-entry-icon { display: flex; width: 64px; height: 64px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 18px; background: linear-gradient(135deg, #255be5, #7663ed); color: #fff; font-size: 34px; font-weight: 700; box-shadow: 0 8px 18px rgba(48, 92, 224, .25); }
+.mini-recharge-entry-main { min-width: 0; flex: 1; }
+.mini-recharge-entry-title { display: block; color: var(--mini-ink); font-size: 30px; font-weight: 700; }
+.mini-recharge-entry-desc { display: block; margin-top: 6px; overflow: hidden; color: var(--mini-subtle); font-size: 22px; text-overflow: ellipsis; white-space: nowrap; }
+.mini-recharge-entry .mini-settings-arrow { flex-shrink: 0; color: var(--mini-primary); }
+
+.mini-recharge-sheet { box-sizing: border-box; padding: 30px 30px 44px; border-radius: 32px 32px 0 0; background: var(--mini-surface); }
+.mini-recharge-sheet-head { display: flex; align-items: center; justify-content: space-between; }
+.mini-recharge-sheet-title { color: var(--mini-ink); font-size: 36px; font-weight: 750; }
+.mini-recharge-sheet-close { display: flex; width: 56px; height: 56px; align-items: center; justify-content: center; border-radius: 50%; background: var(--mini-soft); color: var(--mini-subtle); font-size: 26px; line-height: 1; }
+.mini-recharge-sheet-sub { display: block; margin: 14px 2px 4px; color: var(--mini-subtle); font-size: 23px; line-height: 1.5; }
+.mini-recharge-scroll { height: 62vh; margin-top: 18px; }
+.mini-recharge-label { display: block; margin: 6px 2px 14px; color: var(--mini-ink); font-size: 26px; font-weight: 700; }
+.mini-recharge-empty { padding: 46px 20px; border: 1px dashed var(--mini-line-strong); border-radius: 20px; color: var(--mini-subtle-2); font-size: 24px; text-align: center; }
+.mini-recharge-list { display: flex; flex-direction: column; gap: 16px; }
+.mini-recharge-card { padding: 24px 26px; border: 1px solid var(--mini-line); border-radius: 22px; background: var(--mini-soft); }
+.mini-recharge-card-main { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.mini-recharge-card-left { min-width: 0; }
+.mini-recharge-card-name { display: block; overflow: hidden; color: var(--mini-ink); font-size: 29px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.mini-recharge-card-points { display: block; margin-top: 8px; color: var(--mini-subtle); font-size: 23px; }
+.mini-recharge-card-price { flex-shrink: 0; color: var(--mini-primary); font-size: 40px; font-weight: 800; line-height: 1.1; }
+.mini-recharge-card-foot { display: flex; align-items: center; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--mini-line-faint); }
+.mini-recharge-card-validity { color: var(--mini-subtle-2); font-size: 21px; }
+.mini-recharge-grid { display: flex; flex-direction: column; gap: 18px; margin-top: 28px; }
+.mini-recharge-panel { padding: 24px 26px; border-radius: 22px; background: var(--mini-soft); }
+.mini-recharge-qr { display: block; width: 220px; height: 220px; margin: 0 auto; border: 1px solid var(--mini-line); border-radius: 16px; background: #fff; }
+.mini-recharge-qr--empty { display: flex; align-items: center; justify-content: center; color: var(--mini-subtle-2); font-size: 22px; text-align: center; }
+.mini-recharge-qr-tip { display: block; margin-top: 14px; color: var(--mini-subtle-2); font-size: 20px; text-align: center; }
+.mini-recharge-lines { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--mini-line-faint); }
+.mini-recharge-line { display: block; padding: 3px 2px; color: var(--mini-text-2); font-size: 22px; line-height: 1.5; }
+.mini-recharge-info { display: block; color: var(--mini-text-2); font-size: 23px; line-height: 1.7; white-space: pre-line; }
+.mini-recharge-note { display: block; color: var(--mini-subtle-2); font-size: 22px; }
+
+/* ===== 个人中心：未登录卡片 + 退出登录 ===== */
+.mini-login-card { display: flex; align-items: center; flex-direction: column; margin: 30px 0 26px; padding: 54px 36px; border: 1px solid var(--mini-line); border-radius: 30px; background: var(--mini-surface); box-shadow: 0 12px 28px rgba(45, 80, 135, .06); }
+.mini-login-avatar { display: flex; width: 132px; height: 132px; align-items: center; justify-content: center; border-radius: 50%; background: linear-gradient(135deg, var(--mini-primary-soft), var(--mini-primary-pale)); color: var(--mini-primary); font-size: 56px; font-weight: 800; }
+.mini-login-title { display: block; margin-top: 24px; color: var(--mini-ink); font-size: 34px; font-weight: 750; }
+.mini-login-desc { display: block; margin-top: 12px; color: var(--mini-subtle); font-size: 23px; line-height: 1.6; text-align: center; }
+.mini-login-button { width: 100%; margin: 30px 0 0; height: 88px; border-radius: 22px; background: linear-gradient(135deg, #255be5, #7663ed); color: #fff; font-size: 29px; font-weight: 650; line-height: 88px; box-shadow: 0 12px 24px rgba(48, 92, 224, .24); }
+.mini-login-button::after { border: 0; }
+.mini-login-button[disabled] { opacity: .7; }
+.mini-login-hint { display: block; margin-top: 18px; color: var(--mini-subtle-2); font-size: 19px; text-align: center; }
+
+.mini-logout-wrap { margin: 6px 0 22px; }
+.mini-logout-button { width: 100%; margin: 0; height: 92px; border-radius: 24px; background: var(--mini-surface); color: #ff4d4f; font-size: 29px; font-weight: 600; line-height: 92px; box-shadow: 0 8px 24px rgba(45, 80, 135, .06); }
+.mini-logout-button::after { border: 0; }
+

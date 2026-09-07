@@ -83,6 +83,20 @@ export interface CategoryItem {
   miniappImage?: string;
   miniappLink?: string;
 }
+export interface ComputePackage {
+  id: string;
+  name: string;
+  points: number;
+  price: number;
+  validDays: number;
+  validFrom: string | null;
+  sortOrder: number;
+}
+export interface CustomerService {
+  enabled: boolean;
+  qr: string;
+  lines: string[];
+}
 export interface PublicContent {
   agents: ContentItem[];
   workflows: ContentItem[];
@@ -91,6 +105,9 @@ export interface PublicContent {
   banners: Array<Record<string, unknown>>;
   announcements: Array<Record<string, unknown>>;
   recommended: string[];
+  computePackages: ComputePackage[];
+  rechargeInfo: string;
+  customerService: CustomerService;
 }
 
 export type MiniappLayoutBlockType = 'carousel' | 'announcements' | 'search' | 'categories' | 'featured-agents' | 'featured-workflows' | 'quick-links' | 'spacer';

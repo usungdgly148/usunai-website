@@ -31,6 +31,9 @@ const EMPTY_CONTENT: PublicContent = {
   banners: [],
   announcements: [],
   recommended: [],
+  computePackages: [],
+  rechargeInfo: '',
+  customerService: { enabled: false, qr: '', lines: [] },
 };
 
 export default function HomePage() {

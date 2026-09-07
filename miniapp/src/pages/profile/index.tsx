@@ -3,32 +3,18 @@ import { Button, Image, Input, Text, View } from '@tarojs/components';
 import { useState } from 'react';
 import { MiniappTabBar } from '../../components/miniapp-tab-bar';
 import { PageState } from '../../components/page-state';
+import { RechargeSheet } from '../../components/recharge-sheet';
 import { useLoad } from '../../hooks/use-load';
-import { changePassword, getMe, isBindingRequired, updateProfile } from '../../services/api';
+import { changePassword, getMe, isBindingRequired, isLoggedOut, loginWithWechat, logoutSession, updateProfile } from '../../services/api';
 import { useThemePage } from '../../hooks/use-theme-page';
 import { type ThemeMode, readMode, resolveTheme, setMode } from '../../utils/theme';
-import { toast } from '../../utils/feedback';
+import { confirmDialog, toast } from '../../utils/feedback';
 
 const validDate = (value: string | null) => value ? new Date(value).toLocaleDateString('zh-CN') : '有效期未设置';
 const maskPhone = (phone?: string) => {
   if (!phone) return '';
   return phone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2');
 };
-
-const shortcuts = [
-  { icon: '▣', label: '我的资产', url: '/pages/assets/index' },
-  { icon: 'ϟ', label: '算力充值', url: '/pages/compute/index' },
-  { icon: '◉', label: '订单记录', url: '/pages/orders/index' },
-  { icon: '◎', label: 'AI工具', url: '/pages/category/index?type=agent&title=AI智能体' },
-];
-
-const links = [
-  { label: '我的资产', url: '/pages/assets/index' },
-  { label: '算力记录', url: '/pages/compute/index' },
-  { label: '订单记录', url: '/pages/orders/index' },
-  { label: '使用协议', url: '/pages/webview/index?url=https%3A%2F%2Fwww.usunai.top%2Flegal-agreements' },
-  { label: '隐私政策', url: '/pages/webview/index?url=https%3A%2F%2Fwww.usunai.top%2Flegal-agreements' },
-];
 
 const MODE_OPTIONS: { value: ThemeMode; label: string; hint: string }[] = [
   { value: 'light', label: '浅色', hint: '始终使用明亮外观' },
@@ -40,7 +26,10 @@ const modeLabel = (mode: ThemeMode) => MODE_OPTIONS.find((item) => item.value ==
 
 export default function ProfilePage() {
   const { pageStyle } = useThemePage();
-  const state = useLoad(() => getMe(), []);
+  // 主动退出登录后进入未登录视图；重新「微信一键登录」后回到已登录视图
+  const [signedOut, setSignedOut] = useState<boolean>(() => isLoggedOut());
+  const [loginBusy, setLoginBusy] = useState(false);
+  const state = useLoad(async () => (isLoggedOut() ? null : getMe()), []);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => readMode());
   const [showThemeSheet, setShowThemeSheet] = useState(false);
   // 昵称编辑
@@ -53,7 +42,9 @@ export default function ProfilePage() {
   const [newPwd, setNewPwd] = useState('');
   const [confirmPwd, setConfirmPwd] = useState('');
   const [pwdBusy, setPwdBusy] = useState(false);
-  usePullDownRefresh(async () => { await state.reload(); Taro.stopPullDownRefresh(); });
+  // 算力充值弹窗
+  const [rechargeOpen, setRechargeOpen] = useState(false);
+  usePullDownRefresh(async () => { if (!isLoggedOut()) await state.reload(); Taro.stopPullDownRefresh(); });
 
   const pickMode = (mode: ThemeMode) => {
     setMode(mode);
@@ -64,6 +55,34 @@ export default function ProfilePage() {
   const copyId = () => {
     if (!state.data?.id) return;
     Taro.setClipboardData({ data: state.data.id }).then(() => toast('已复制用户 ID', 'success')).catch(() => {});
+  };
+
+  // 微信一键登录（登出后重新进入）
+  const startWechatLogin = async () => {
+    if (loginBusy) return;
+    setLoginBusy(true);
+    try {
+      await loginWithWechat();
+      setSignedOut(false);
+      await state.reload();
+      toast('登录成功', 'success');
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '登录失败，请稍后重试', 'error');
+    } finally {
+      setLoginBusy(false);
+    }
+  };
+
+  // 退出登录：服务端吊销会话 + 清理本地登录态
+  const confirmLogout = async () => {
+    const yes = await confirmDialog({
+      title: '退出登录',
+      content: '确定要退出当前账号吗？退出后可随时通过「微信一键登录」重新进入。',
+      confirmText: '退出',
+    });
+    if (!yes) return;
+    try { await logoutSession(); } finally { setSignedOut(true); }
+    toast('已退出登录', 'success');
   };
 
   // 头像：选择图片 → 读 base64 → 更新 → 刷新
@@ -140,9 +159,100 @@ export default function ProfilePage() {
     { icon: '🔒', label: '登录密码', value: state.data?.hasPassword ? '已设置' : '未设置', action: openPwd, actionText: '修改' },
   ];
 
+  const shortcuts: Array<{ icon: string; label: string; url?: string; onClick?: () => void }> = [
+    { icon: '▣', label: '我的资产', url: '/pages/assets/index' },
+    { icon: 'ϟ', label: '算力充值', onClick: () => setRechargeOpen(true) },
+    { icon: '◉', label: '订单记录', url: '/pages/orders/index' },
+    { icon: '◎', label: 'AI工具', url: '/pages/category/index?type=agent&title=AI%E6%99%BA%E8%83%BD%E4%BD%93' },
+  ];
+
+  const links = [
+    { label: '我的资产', url: '/pages/assets/index' },
+    { label: '算力记录', url: '/pages/compute/index' },
+    { label: '订单记录', url: '/pages/orders/index' },
+    { label: '使用协议', url: '/pages/webview/index?url=https%3A%2F%2Fwww.usunai.top%2Flegal-agreements' },
+    { label: '隐私政策', url: '/pages/webview/index?url=https%3A%2F%2Fwww.usunai.top%2Flegal-agreements' },
+  ];
+
   return <View className='page mini-profile-page' style={pageStyle}>
-    <View className='mini-page-topbar'><Text className='mini-page-heading'>我的</Text><Text className='mini-page-caption'>账户、算力与创作资产</Text></View>
-    <PageState loading={state.loading} error={state.error} onRetry={state.reload} />
+    <PageState loading={!signedOut && state.loading} error={!signedOut ? state.error : ''} onRetry={state.reload} />
+
+    {signedOut ? (
+      /* ===== 未登录视图（退出登录后） ===== */
+      <View className='mini-login-card'>
+        <View className='mini-login-avatar'><Text>友</Text></View>
+        <Text className='mini-login-title'>未登录</Text>
+        <Text className='mini-login-desc'>登录后可查看可用算力、算力记录与账号资产，使用全部 AI 智能体与工作流。</Text>
+        <Button className='mini-login-button' loading={loginBusy} disabled={loginBusy} onClick={startWechatLogin}>微信一键登录</Button>
+        <Text className='mini-login-hint'>登录即代表同意平台服务协议与隐私政策</Text>
+      </View>
+    ) : state.data ? (
+      /* ===== 已登录主内容 ===== */
+      <>
+        {/* 基本信息：头像 + 昵称 + 用户 ID（可编辑） */}
+        <View className='mini-profile-head'>
+          <View className='mini-profile-avatar' onClick={pickAvatar}>
+            {state.data.avatar
+              ? <Image className='mini-profile-avatar-img' src={state.data.avatar} mode='aspectFill' />
+              : <Text>{String(state.data.nickname || state.data.name || '友').slice(0, 1)}</Text>}
+            <View className='mini-profile-avatar-badge'>📷</View>
+          </View>
+          <View className='mini-profile-head-main'>
+            <View className='mini-profile-name-row'>
+              <Text className='mini-profile-name'>{state.data.nickname || state.data.name || '微信用户'}</Text>
+              <Text className='mini-profile-edit' onClick={openNick}>编辑</Text>
+            </View>
+            <View className='mini-profile-id-row' onClick={copyId}>
+              <Text className='muted'>用户 ID：{state.data.id}</Text>
+              <Text className='mini-profile-copy'>复制</Text>
+            </View>
+            <Text className='mini-profile-avatar-hint' onClick={pickAvatar}>点击头像更换</Text>
+          </View>
+        </View>
+
+        <View className='mini-membership-card'>
+          <View><Text className='mini-membership-kicker'>我的算力</Text><Text className='mini-membership-title'>可用点数</Text><Text className='mini-membership-desc'>有效期至 {validDate(state.data.validTo)}</Text></View>
+          <View className='mini-membership-points'><Text>{state.data.points}</Text><Text>点</Text></View>
+        </View>
+
+        {/* 算力充值入口（弹窗展示套餐，客服人工办理） */}
+        <View className='mini-recharge-entry' onClick={() => setRechargeOpen(true)}>
+          <View className='mini-recharge-entry-icon'><Text>ϟ</Text></View>
+          <View className='mini-recharge-entry-main'>
+            <Text className='mini-recharge-entry-title'>算力充值</Text>
+            <Text className='mini-recharge-entry-desc'>查看算力套餐 · 联系客服人工开通</Text>
+          </View>
+          <Text className='mini-settings-arrow'>›</Text>
+        </View>
+
+        {/* 账号安全 */}
+        <View className='mini-security-section'>
+          <Text className='mini-section-heading'>账号安全</Text>
+          <View className='mini-security-list'>
+            {securityRows.map((row) => (
+              <View key={row.label} className='mini-security-row'>
+                <View className='mini-security-left'>
+                  <View className='mini-security-icon'><Text>{row.icon}</Text></View>
+                  <View className='mini-security-info'>
+                    <Text className='mini-security-label'>{row.label}</Text>
+                    <Text className='mini-security-value'>{row.value}</Text>
+                  </View>
+                </View>
+                {row.action && <Text className='mini-security-action' onClick={row.action}>{row.actionText}</Text>}
+              </View>
+            ))}
+          </View>
+        </View>
+
+        {isBindingRequired() && <View className='mini-bind-card'><View><Text className='mini-bind-title'>绑定已有网站账号</Text><Text className='mini-bind-desc'>同步已有算力、资产和历史记录</Text></View><Button className='mini-bind-button' onClick={() => Taro.navigateTo({ url: '/pages/bind/index' })}>去绑定</Button></View>}
+      </>
+    ) : null}
+
+    {/* 快捷入口与常用链接（未登录也可见） */}
+    <View className='mini-profile-shortcuts'>{shortcuts.map(item => <View className='mini-profile-shortcut' key={item.label} onClick={() => (item.onClick ? item.onClick() : Taro.navigateTo({ url: item.url || '' }))}><Text className='mini-profile-shortcut-icon'>{item.icon}</Text><Text>{item.label}</Text></View>)}</View>
+    <View className='mini-settings-list'>{links.map(item => <View className='mini-settings-row' key={item.label} onClick={() => Taro.navigateTo({ url: item.url })}><Text>{item.label}</Text><Text className='mini-settings-arrow'>›</Text></View>)}</View>
+
+    {/* 深色模式 */}
     <View className='mini-settings-list mini-settings-list--theme'>
       <View className='mini-settings-row' onClick={() => setShowThemeSheet(true)}>
         <Text>深色模式</Text>
@@ -152,56 +262,13 @@ export default function ProfilePage() {
         </View>
       </View>
     </View>
-    {state.data && <>
-      {/* 基本信息：头像 + 昵称 + 用户 ID（可编辑） */}
-      <View className='mini-profile-head'>
-        <View className='mini-profile-avatar' onClick={pickAvatar}>
-          {state.data.avatar
-            ? <Image className='mini-profile-avatar-img' src={state.data.avatar} mode='aspectFill' />
-            : <Text>{String(state.data.nickname || state.data.name || '友').slice(0, 1)}</Text>}
-          <View className='mini-profile-avatar-badge'>📷</View>
-        </View>
-        <View className='mini-profile-head-main'>
-          <View className='mini-profile-name-row'>
-            <Text className='mini-profile-name'>{state.data.nickname || state.data.name || '微信用户'}</Text>
-            <Text className='mini-profile-edit' onClick={openNick}>编辑</Text>
-          </View>
-          <View className='mini-profile-id-row' onClick={copyId}>
-            <Text className='muted'>用户 ID：{state.data.id}</Text>
-            <Text className='mini-profile-copy'>复制</Text>
-          </View>
-          <Text className='mini-profile-avatar-hint' onClick={pickAvatar}>点击头像更换</Text>
-        </View>
-      </View>
 
-      <View className='mini-membership-card'>
-        <View><Text className='mini-membership-kicker'>我的算力</Text><Text className='mini-membership-title'>可用点数</Text><Text className='mini-membership-desc'>有效期至 {validDate(state.data.validTo)}</Text></View>
-        <View className='mini-membership-points'><Text>{state.data.points}</Text><Text>点</Text></View>
+    {!signedOut && (
+      <View className='mini-logout-wrap'>
+        <Button className='mini-logout-button' onClick={confirmLogout}>退出登录</Button>
       </View>
+    )}
 
-      {/* 账号安全 */}
-      <View className='mini-security-section'>
-        <Text className='mini-section-heading'>账号安全</Text>
-        <View className='mini-security-list'>
-          {securityRows.map((row) => (
-            <View key={row.label} className='mini-security-row'>
-              <View className='mini-security-left'>
-                <View className='mini-security-icon'><Text>{row.icon}</Text></View>
-                <View className='mini-security-info'>
-                  <Text className='mini-security-label'>{row.label}</Text>
-                  <Text className='mini-security-value'>{row.value}</Text>
-                </View>
-              </View>
-              {row.action && <Text className='mini-security-action' onClick={row.action}>{row.actionText}</Text>}
-            </View>
-          ))}
-        </View>
-      </View>
-
-      {isBindingRequired() && <View className='mini-bind-card'><View><Text className='mini-bind-title'>绑定已有网站账号</Text><Text className='mini-bind-desc'>同步已有算力、资产和历史记录</Text></View><Button className='mini-bind-button' onClick={() => Taro.navigateTo({ url: '/pages/bind/index' })}>去绑定</Button></View>}
-      <View className='mini-profile-shortcuts'>{shortcuts.map(item => <View className='mini-profile-shortcut' key={item.label} onClick={() => Taro.navigateTo({ url: item.url })}><Text className='mini-profile-shortcut-icon'>{item.icon}</Text><Text>{item.label}</Text></View>)}</View>
-      <View className='mini-settings-list'>{links.map(item => <View className='mini-settings-row' key={item.label} onClick={() => Taro.navigateTo({ url: item.url })}><Text>{item.label}</Text><Text className='mini-settings-arrow'>›</Text></View>)}</View>
-    </>}
     <MiniappTabBar active='profile' />
 
     {/* 深色模式选择 */}
@@ -262,6 +329,11 @@ export default function ProfilePage() {
         </View>
       </View>
     </t-popup>
+
+    {/* 算力充值弹窗（套餐展示 + 联系客服） */}
+    <RechargeSheet visible={rechargeOpen} onClose={() => setRechargeOpen(false)} />
+
+    <t-dialog id='t-dialog' title='' />
     <t-toast id='t-toast' theme='info' />
   </View>;
 }

@@ -103,6 +103,34 @@ export function sanitizePublicContent(config = {}) {
       .sort((a, b) => String(b.updatedAt || b.createdAt || b.startAt || '').localeCompare(String(a.updatedAt || a.createdAt || a.startAt || '')))
       .map((item) => pickPublic(item, ANNOUNCEMENT_PUBLIC_FIELDS)).filter(Boolean),
     recommended: asCollection(config.recommended).map(String).filter((id) => publishedIds.has(id)),
+    // 算力充值套餐（个人中心「算力充值」弹窗）：仅已上架、按 sortOrder；供展示，不含支付
+    computePackages: asCollection(config.computePackages)
+      .filter(isPublished)
+      .sort(bySortOrder)
+      .map((item) => ({
+        id: String(item?.id || ''),
+        name: String(item?.name || ''),
+        points: Number(item?.points) || 0,
+        price: Number(item?.price) || 0,
+        validDays: Number(item?.validDays) || 0,
+        validFrom: item?.validFrom || null,
+        sortOrder: Number(item?.sortOrder) || 0,
+      }))
+      .filter((item) => item.id && item.name),
+    // 充值须知（多行文本，pre-line 展示）
+    rechargeInfo: typeof config.rechargeInfo === 'string' ? config.rechargeInfo : '',
+    // 联系客服（人工充值）：二维码相对路径由客户端拼 API_BASE，lines 为说明文案
+    customerService: config.customerService && typeof config.customerService === 'object'
+      ? {
+          enabled: config.customerService.enabled !== false,
+          qr: typeof config.customerService.qr === 'string'
+            ? (/^(https?:\/\/|\/)/.test(config.customerService.qr) ? config.customerService.qr : '')
+            : '',
+          lines: Array.isArray(config.customerService.lines)
+            ? config.customerService.lines.map(String).filter(Boolean).slice(0, 8)
+            : [],
+        }
+      : { enabled: false, qr: '', lines: [] },
   };
 }
 
@@ -302,7 +330,7 @@ export async function handleMiniappApi(req, res, url, deps) {
   }
 
   if (path === '/api/miniapp/v1/content') {
-    const keys = ['agents', 'workflows', 'categories', 'categoryGroups', 'banners', 'announcements', 'recommended'];
+    const keys = ['agents', 'workflows', 'categories', 'categoryGroups', 'banners', 'announcements', 'recommended', 'computePackages', 'rechargeInfo', 'customerService'];
     const values = await Promise.all(keys.map((key) => KV.kvGet(key)));
     const config = Object.fromEntries(keys.map((key, index) => [key, values[index]]));
     sendJson(res, 200, successEnvelope(sanitizePublicContent(config), requestId), requestId, 'public, max-age=30');

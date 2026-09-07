@@ -6,7 +6,7 @@ import { PageState } from '../../components/page-state';
 import { AssetRow } from '../../components/asset-row';
 import { Pagination } from '../../components/pagination';
 import { TaskDetail } from '../../components/task-detail';
-import { getPagedRecords } from '../../services/api';
+import { getPagedRecords, isLoggedOut } from '../../services/api';
 import { useThemePage } from '../../hooks/use-theme-page';
 
 /**
@@ -141,7 +141,14 @@ export default function AssetsPage() {
 
     {/* 表格区 */}
     <View className='mini-asset-panel'>
-      <PageState loading={loading} error={error} empty={!loading && !error && items.length === 0} onRetry={() => void reload(1)} />
+      <PageState
+        loading={loading}
+        error={error}
+        empty={!loading && !error && items.length === 0}
+        loginFallback={!!error && isLoggedOut()}
+        onGoLogin={() => Taro.reLaunch({ url: '/pages/profile/index' })}
+        onRetry={() => void reload(1)}
+      />
       {!loading && !error && items.length > 0 && (
         <>
           <Text className='mini-asset-swipe-hint'>左右滑动查看更多列</Text>
