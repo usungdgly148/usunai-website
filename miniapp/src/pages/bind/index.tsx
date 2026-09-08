@@ -36,8 +36,7 @@ export default function BindPage() {
   };
 
   return <View className='page' style={pageStyle}>
-    <Text className='page-title'>绑定网站账户</Text>
-    <Text className='page-subtitle'>用网站已注册的手机号绑定，继承已有算力、资产和订单，不会创建重复余额。</Text>
+    <Text className='page-title'>绑定手机号</Text>
     <View className='section'>
       <Text className='form-label'>手机号</Text><Input className='form-input' type='number' maxlength={11} value={phone} onInput={(event) => setPhone(event.detail.value)} placeholder='请输入网站注册手机号' />
       <Text className='form-label'>验证码</Text><Input className='form-input' type='number' value={code} onInput={(event) => setCode(event.detail.value)} placeholder='请输入短信验证码' />
