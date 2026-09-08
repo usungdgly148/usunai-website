@@ -363,11 +363,67 @@ button::after { border: 0; }
 
 /* 智能体/工作流列表页内的内嵌搜索框（src/pages/category/index） */
 .mini-category-search { margin: 8rpx 0 24rpx; }
-.mini-announcement-list { min-height: 100vh; padding: 28rpx; background: var(--mini-primary-pale); }
-.mini-announcement-list__header { margin-bottom: 28rpx; color: var(--mini-ink); font-size: 40rpx; font-weight: 800; }
-.mini-announcement-list__item { margin-bottom: 18rpx; padding: 28rpx; border: 1rpx solid var(--mini-line-strong); border-radius: 22rpx; background: var(--mini-surface); box-shadow: 0 8rpx 22rpx rgba(15, 50, 91, .06); }
-.mini-announcement-list__title { display: block; color: var(--mini-ink); font-size: 30rpx; font-weight: 700; }
-.mini-announcement-list__content { display: block; margin-top: 14rpx; color: var(--mini-subtle); font-size: 26rpx; line-height: 1.7; }
+/* 首页公告通知栏：铃铛 + 红点 + 跑马灯（四角圆角） */
+.mini-announce-bar {
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  min-height: 88rpx;
+  padding: 18rpx 26rpx;
+  border-radius: 26rpx;               /* 四个角圆角 */
+  background: var(--mini-primary-soft);
+  overflow: hidden;
+}
+.mini-announce-bell { position: relative; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.mini-announce-bell-icon { width: 42rpx; height: 42rpx; }
+.mini-announce-dot {
+  position: absolute;
+  top: -4rpx;
+  right: -6rpx;
+  width: 16rpx;
+  height: 16rpx;
+  border-radius: 50%;
+  border: 3rpx solid var(--mini-primary-soft);
+  background: var(--mini-danger);
+}
+.mini-announce-marquee { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
+.mini-announce-marquee-inner {
+  display: inline-block;
+  white-space: nowrap;
+  color: var(--mini-primary-strong);
+  font-size: 26rpx;
+  animation: mini-announce-marquee 16s linear infinite;
+}
+@keyframes mini-announce-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+/* 公告通知列表页：折叠卡片（类型标签 / 版本号 / 标题 / 时间 / 展开箭头） */
+.mini-announce-list { margin-top: 24rpx; }
+.mini-announce-card {
+  margin-bottom: 18rpx;
+  border: 1rpx solid var(--mini-line);
+  border-radius: 22rpx;
+  background: var(--mini-surface);
+  box-shadow: 0 8rpx 22rpx rgba(15, 50, 91, .05);
+  overflow: hidden;
+}
+.mini-announce-card-head { display: flex; align-items: center; gap: 16rpx; padding: 24rpx 26rpx; }
+.mini-announce-type { flex-shrink: 0; padding: 4rpx 14rpx; border-radius: 999px; font-size: 21rpx; font-weight: 600; }
+.mini-announce-type-feature { color: var(--mini-success); background: var(--mini-success-soft); }
+.mini-announce-type-optimize { color: var(--mini-primary-strong); background: var(--mini-primary-soft); }
+.mini-announce-type-fix { color: var(--mini-warn); background: var(--mini-warn-soft); }
+.mini-announce-type-other { color: var(--mini-subtle); background: var(--mini-soft); }
+.mini-announce-title-wrap { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10rpx; }
+.mini-announce-version { flex-shrink: 0; color: var(--mini-subtle-2); font-size: 22rpx; font-family: monospace; }
+.mini-announce-title { overflow: hidden; color: var(--mini-ink); font-size: 28rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.mini-announce-time { flex-shrink: 0; color: var(--mini-subtle-2); font-size: 22rpx; }
+.mini-announce-arrow { flex-shrink: 0; color: var(--mini-subtle-2); font-size: 30rpx; line-height: 1; transition: transform .2s; }
+.mini-announce-arrow-open { transform: rotate(90deg); }
+.mini-announce-body { padding: 6rpx 28rpx 28rpx; border-top: 1rpx solid var(--mini-line-faint); }
+.mini-announce-body .mini-markdown { color: var(--mini-text-2); font-size: 26rpx; }
+.mini-announce-empty-content { display: block; color: var(--mini-subtle-2); font-size: 24rpx; }
 
 /* 智能体内页补充：建议问题、消息操作条、思考过程折叠、新对话 */
 .header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }

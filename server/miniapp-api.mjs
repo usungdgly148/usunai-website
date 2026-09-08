@@ -23,7 +23,7 @@ const WORKFLOW_PUBLIC_FIELDS = [
 const CATEGORY_PUBLIC_FIELDS = ['id', 'key', 'name', 'label', 'icon', 'color', 'miniappImage', 'miniappLink', 'sortOrder', 'published', 'groupId'];
 const CATEGORY_GROUP_PUBLIC_FIELDS = ['id', 'key', 'name', 'label', 'sortOrder', 'published'];
 const BANNER_PUBLIC_FIELDS = ['id', 'title', 'subtitle', 'image', 'imageUrl', 'link', 'linkUrl', 'sortOrder', 'published'];
-const ANNOUNCEMENT_PUBLIC_FIELDS = ['id', 'title', 'content', 'type', 'link', 'linkUrl', 'startAt', 'endAt', 'createdAt', 'updatedAt', 'published'];
+const ANNOUNCEMENT_PUBLIC_FIELDS = ['id', 'version', 'title', 'content', 'type', 'link', 'linkUrl', 'startAt', 'endAt', 'publishedAt', 'createdAt', 'updatedAt', 'published'];
 
 const NESTED_BLOCKED_FIELDS = new Set([
   'apikey', 'apikeyencrypted', 'privatekey', 'clientsecret', 'password', 'token',
@@ -100,7 +100,7 @@ export function sanitizePublicContent(config = {}) {
     banners: asCollection(config.banners).filter(isPublished)
       .map((item) => pickPublic(item, BANNER_PUBLIC_FIELDS)).filter(Boolean).sort(bySortOrder),
     announcements: asCollection(config.announcements).filter(isPublished)
-      .sort((a, b) => String(b.updatedAt || b.createdAt || b.startAt || '').localeCompare(String(a.updatedAt || a.createdAt || a.startAt || '')))
+      .sort((a, b) => String(b.publishedAt || b.updatedAt || b.createdAt || b.startAt || '').localeCompare(String(a.publishedAt || a.updatedAt || a.createdAt || a.startAt || '')))
       .map((item) => pickPublic(item, ANNOUNCEMENT_PUBLIC_FIELDS)).filter(Boolean),
     recommended: asCollection(config.recommended).map(String).filter((id) => publishedIds.has(id)),
     // 算力充值套餐（个人中心「算力充值」弹窗）：仅已上架、按 sortOrder；供展示，不含支付

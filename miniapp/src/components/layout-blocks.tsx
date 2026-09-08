@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { ContentCard } from './content-card';
 import { SearchBar, gotoGlobalSearch } from './search-bar';
 import { API_BASE } from '../services/api';
+import { ANN_SEEN_EVENT, announcementTime, getAnnouncementSeen, sortAnnouncements, type Announcement } from '../services/announcements';
 import type { ContentItem, MiniappLayout, MiniappLayoutBlock, PublicContent } from '../types';
 
 function absoluteImageUrl(value: string) {
@@ -120,6 +121,34 @@ function SearchBlock({ block, className, style }: { block: MiniappLayoutBlock; c
   />;
 }
 
+/** 首页公告通知栏：左侧固定铃铛（有未读显示红点）+ 右侧跑马灯，点击进公告列表二级页 */
+function AnnouncementBar({ announcements }: { announcements: Announcement[] }) {
+  const [seen, setSeen] = useState(() => getAnnouncementSeen());
+  // 列表页标记已读后会广播事件，首页监听后刷新红点状态（返回首页时红点消失）
+  useEffect(() => {
+    const refresh = () => setSeen(getAnnouncementSeen());
+    Taro.eventCenter.on(ANN_SEEN_EVENT, refresh);
+    return () => { Taro.eventCenter.off(ANN_SEEN_EVENT, refresh); };
+  }, []);
+  const latest = sortAnnouncements(announcements)[0];
+  if (!latest) return null;
+  const newest = announcementTime(latest);
+  const hasUnread = !!newest && newest > seen;
+  const marqueeText = String(latest.title || latest.content || '');
+  return (
+    <View className='mini-announce-bar' onClick={() => Taro.navigateTo({ url: '/pages/announcements/index' })}>
+      <View className='mini-announce-bell'>
+        <View className='ui-icon-bell mini-announce-bell-icon' />
+        {hasUnread && <View className='mini-announce-dot' />}
+      </View>
+      <View className='mini-announce-marquee'>
+        {/* 两段相同文字 + translateX(-50%) 实现无缝跑马灯 */}
+        <Text className='mini-announce-marquee-inner'>{marqueeText}{marqueeText ? '\u3000\u3000' : ''}{marqueeText}</Text>
+      </View>
+    </View>
+  );
+}
+
 export function LayoutBlocks({ layout, content, category = '', type = '' }: { layout: MiniappLayout; content: PublicContent; category?: string; type?: string }) {
   return <>{layout.blocks.filter(block => block.visible !== false).map(block => {
     const style = blockStyle(block);
@@ -144,17 +173,9 @@ export function LayoutBlocks({ layout, content, category = '', type = '' }: { la
       </View>;
     }
     if (block.type === 'announcements') {
-      const latest = content.announcements[0];
-      if (!latest) return null;
+      if (!content.announcements?.length) return null;
       return <View key={block.id} className={`section ${className}`} style={style}>
-        <t-notice-bar
-          visible
-          theme='info'
-          prefixIcon={false}
-          content={String(latest.title || latest.content || '')}
-          marquee
-          onClick={() => Taro.navigateTo({ url: '/pages/announcements/index' })}
-        />
+        <AnnouncementBar announcements={content.announcements} />
       </View>;
     }
     if (block.type === 'search') return <SearchBlock key={block.id} block={block} className={className} style={style} />;

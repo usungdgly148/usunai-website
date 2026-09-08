@@ -28,7 +28,6 @@ export default {
     't-date-time-picker': 'tdesign-miniprogram/date-time-picker/date-time-picker',
     't-picker': 'tdesign-miniprogram/picker/picker',
     't-picker-item': 'tdesign-miniprogram/picker-item/picker-item',
-    't-notice-bar': 'tdesign-miniprogram/notice-bar/notice-bar',
     't-image-viewer': 'tdesign-miniprogram/image-viewer/image-viewer',
     't-empty': 'tdesign-miniprogram/empty/empty',
   },
