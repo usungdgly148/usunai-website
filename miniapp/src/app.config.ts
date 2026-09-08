@@ -12,6 +12,8 @@ export default {
     'pages/assets/index',
     'pages/orders/index',
     'pages/bind/index',
+    'pages/account-security/index',
+    'pages/legal/index',
     'pages/webview/index'
   ],
   usingComponents: {

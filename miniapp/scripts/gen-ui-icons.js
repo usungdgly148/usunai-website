@@ -27,6 +27,24 @@ const ICONS = {
     `<circle cx='12' cy='12' r='9' fill='#c3ccd8' stroke='none'/>` +
     `<path d='M8.9 8.9 L15.1 15.1' stroke='#ffffff'/>` +
     `<path d='M15.1 8.9 L8.9 15.1' stroke='#ffffff'/>`,
+
+  // 我的资产：包裹 / 盒子（Feather package）
+  assets: () =>
+    `<path d='M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z'/>` +
+    `<path d='M3.27 6.96L12 12.01l8.73-5.05'/>` +
+    `<path d='M12 22.08V12'/>`,
+
+  // 算力记录：闪电（Feather zap）
+  compute: () =>
+    `<path d='M13 2L3 14h9l-1 8 10-12h-9l1-8z'/>`,
+
+  // 订单记录：文件清单（Feather file-text）
+  orders: () =>
+    `<path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/>` +
+    `<path d='M14 2v6h6'/>` +
+    `<path d='M16 13H8'/>` +
+    `<path d='M16 17H8'/>` +
+    `<path d='M10 9H8'/>`,
 };
 
 const STROKE_COLOR = '#8a98ad';

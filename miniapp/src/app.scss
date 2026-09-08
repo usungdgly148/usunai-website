@@ -273,6 +273,46 @@ button::after { border: 0; }
 .mini-membership-points { color: var(--mini-primary-strong); font-size: 49px; }
 .mini-settings-list, .mini-asset-panel { border: 1px solid var(--mini-line); border-radius: 26px; box-shadow: 0 12px 28px rgba(45, 80, 135, .06); }
 .mini-settings-row { min-height: 92px; padding: 0 26px; color: var(--mini-text-2); font-size: 26px; }
+
+/* ===== 个人中心重排（P32）：账号行 / 算力卡 / 常用功能 / 协议入口 ===== */
+.mini-account-row {
+  display: flex; align-items: center; gap: 18px;
+  min-height: 112px; margin: 6px 0 22px; padding: 18px;
+  border: 1px solid var(--mini-line); border-radius: 26px;
+  background: var(--mini-glass); box-shadow: 0 10px 24px rgba(45, 79, 135, .05);
+}
+.mini-account-row .mini-settings-arrow { flex-shrink: 0; color: var(--mini-subtle-2); }
+
+.mini-membership-left { min-width: 0; flex: 1; }
+.mini-membership-right { display: flex; flex-direction: column; align-items: flex-end; gap: 14px; }
+.mini-membership-recharge {
+  margin: 0; padding: 0 26px; height: 58px; line-height: 58px;
+  border-radius: 999px; background: var(--mini-primary); color: #fff;
+  font-size: 24px; font-weight: 650; box-shadow: 0 8px 18px rgba(48, 92, 224, .25);
+}
+.mini-membership-recharge::after { border: 0; }
+
+.mini-common-section { margin-bottom: 22px; }
+.mini-common-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.mini-common-item {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  min-height: 168px; border: 1px solid var(--mini-line); border-radius: 26px;
+  background: var(--mini-surface); box-shadow: 0 12px 28px rgba(45, 80, 135, .06);
+}
+.mini-common-icon { width: 68px; height: 68px; }
+.mini-common-label { color: var(--mini-text-2); font-size: 25px; font-weight: 600; }
+
+/* 账号与安全头像图标圆底 */
+.mini-security-icon--avatar { overflow: hidden; border-radius: 50%; background: linear-gradient(135deg, #2e67e9, #765fe8); color: #fff; font-size: 24px; font-weight: 700; }
+.mini-security-icon--avatar .mini-profile-avatar-img { width: 100%; height: 100%; border-radius: 50%; }
+
+/* 使用协议 / 隐私政策 内容页 */
+.mini-legal-card {
+  padding: 30px 28px; border: 1px solid var(--mini-line); border-radius: 26px;
+  background: var(--mini-surface); box-shadow: 0 12px 28px rgba(45, 80, 135, .06);
+}
+.mini-legal-empty { color: var(--mini-subtle); font-size: 26px; }
+
 .mini-asset-tabs { margin: 0 -28px 20px; }
 .mini-asset-tab-row { gap: 12px; padding: 0 28px; }
 .mini-asset-tab { padding: 13px 24px; border: 1px solid var(--mini-line-strong); background: var(--mini-glass); color: var(--mini-subtle); font-size: 24px; }

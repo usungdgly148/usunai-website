@@ -259,6 +259,26 @@ export function getMiniappToken() {
   return Taro.getStorageSync<string>(TOKEN_KEY);
 }
 
+export interface LegalAgreement { title?: string; content?: string; }
+
+/** 拉取协议/条款内容（与网页端同源：/api/data/get-config → legalAgreements.{privacy,terms}）。 */
+export async function getLegalAgreements(): Promise<{ privacy?: LegalAgreement; terms?: LegalAgreement }> {
+  const response = await Taro.request<{ ok?: boolean; data?: { legalAgreements?: Record<string, LegalAgreement> } }>({
+    url: `${API_BASE}/api/data/get-config`,
+    method: 'GET',
+    timeout: 15000,
+    header: { 'Content-Type': 'application/json', ...requestHeaders() },
+  });
+  let body: { ok?: boolean; data?: { legalAgreements?: Record<string, LegalAgreement> } } | null = response.data;
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body) as typeof response.data; } catch { body = null; }
+  }
+  if (response.statusCode < 200 || response.statusCode >= 300 || !body?.ok) {
+    throw new ApiError('CONFIG_FAILED', '协议内容加载失败，请稍后重试', response.statusCode);
+  }
+  return body?.data?.legalAgreements || {};
+}
+
 export async function uploadRuntimeFile(payload: {
   targetType: 'agent' | 'workflow'; targetId: string; dataUrl: string; fileName: string; fileType: string;
 }) {
