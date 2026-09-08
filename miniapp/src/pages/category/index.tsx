@@ -1,14 +1,26 @@
 import Taro, { usePullDownRefresh, useRouter } from '@tarojs/taro';
 import { useMemo, useState } from 'react';
-import { Text, View } from '@tarojs/components';
+import { Image, Text, View } from '@tarojs/components';
 import { ContentCard } from '../../components/content-card';
 import { MiniappTabBar } from '../../components/miniapp-tab-bar';
 import { PageState } from '../../components/page-state';
 import { SearchBar, gotoGlobalSearch } from '../../components/search-bar';
 import { useLoad } from '../../hooks/use-load';
-import { getPublicContent } from '../../services/api';
+import { getPublicContent, API_BASE } from '../../services/api';
 import type { ContentItem } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
+
+function isAllCategory(item: { id: string; key?: string; name?: string; label?: string }) {
+  const key = String(item.key || item.id || '').toLowerCase();
+  const name = String(item.label || item.name || '').trim();
+  return key === 'all' || name === '全部';
+}
+
+function categoryPictureUrl(value: string) {
+  const source = String(value || '').trim();
+  if (!source || /^(?:https?:)?\/\//i.test(source) || /^data:/i.test(source)) return source;
+  return source.startsWith('/') ? `${API_BASE.replace(/\/+$/, '')}${source}` : source;
+}
 
 function matchesCategory(item: ContentItem, category: string) {
   if (!category || category.toLowerCase() === 'all') return true;
@@ -30,12 +42,24 @@ function matchesKeyword(item: ContentItem, normalized: string) {
 export default function CategoryPage() {
   const { pageStyle } = useThemePage();
   const { params } = useRouter();
-  const title = decodeURIComponent(params.title || '分类工具');
+  // Taro 4 useRouter 不会自动 decodeURL，这里手动解一次并防御非法编码。
+  const rawTitle = (() => {
+    const raw = String(params.title || '');
+    if (!raw) return '';
+    try { return decodeURIComponent(raw); } catch { return raw; }
+  })();
   const category = params.category || '';
   const type = params.type || '';
   const [keyword, setKeyword] = useState('');
   const state = useLoad(getPublicContent, []);
   usePullDownRefresh(async () => { await state.reload(); Taro.stopPullDownRefresh(); });
+
+  // 「全部分类」浏览模式：不带 type/category 进入时，展示后台全部可见分类，点分类再进列表。
+  const browseMode = !type && !category;
+  const title = browseMode ? (rawTitle || '全部分类') : (rawTitle || '分类工具');
+  const visibleCategories = (state.data?.categories || []).filter(
+    (item) => !isAllCategory(item) && (item as { published?: boolean }).published !== false,
+  );
 
   const normalized = keyword.trim().toLowerCase();
   const showAgents = type !== 'workflow';
@@ -55,6 +79,52 @@ export default function CategoryPage() {
   const totalShown = (showAgents ? agents.length : 0) + (showWorkflows ? workflows.length : 0);
   const hasKeyword = normalized.length > 0;
   const filteredEmpty = hasKeyword && !state.loading && !state.error && totalShown === 0 && state.data;
+
+  // 浏览模式：渲染全部分类卡片
+  if (browseMode) {
+    return (
+      <View className='page mini-home-page mini-category-page' style={pageStyle}>
+        <View className='mini-page-topbar'>
+          <Text className='mini-page-heading'>{title}</Text>
+          <Text className='mini-page-caption'>共 {visibleCategories.length} 个分类</Text>
+        </View>
+        <SearchBar
+          className='mini-category-search'
+          value={keyword}
+          onInput={setKeyword}
+          onSubmit={() => gotoGlobalSearch(keyword)}
+          onTapIcon={() => gotoGlobalSearch(keyword)}
+          onClear={() => setKeyword('')}
+          placeholder='搜索智能体和工作流'
+        />
+        <PageState loading={state.loading} error={state.error} onRetry={state.reload} />
+        {state.data && (
+          <View className='mini-category-browse'>
+            {visibleCategories.map((item) => {
+              const name = item.label || item.name || '分类';
+              const image = item.miniappImage || '';
+              const fallbackStyle = { backgroundColor: item.color || 'var(--mini-primary-soft)' };
+              return (
+                <View
+                  key={item.id}
+                  className='mini-category-browse-item'
+                  onClick={() => Taro.navigateTo({
+                    url: `/pages/category/index?category=${encodeURIComponent(item.key || item.id)}&title=${encodeURIComponent(name)}`,
+                  })}
+                >
+                  {image
+                    ? <Image className='mini-category-browse-image' mode='aspectFill' src={categoryPictureUrl(image)} lazyLoad />
+                    : <View className='mini-category-browse-fallback' style={fallbackStyle} />}
+                  <View className='mini-category-browse-cover'><Text className='mini-category-browse-label'>{name}</Text></View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+        <MiniappTabBar active='home' />
+      </View>
+    );
+  }
 
   return (
     <View className='page mini-home-page mini-category-page' style={pageStyle}>

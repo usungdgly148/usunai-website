@@ -100,10 +100,10 @@ function filtered(items: ContentItem[], block: MiniappLayoutBlock, content: Publ
   return result.slice(0, Math.max(1, Math.min(24, Number(block.limit) || 8)));
 }
 
-function SectionTitle({ title, count, onMore }: { title: string; count?: number; onMore?: () => void }) {
+function SectionTitle({ title, more, onMore, headingClass }: { title: string; more?: string; onMore?: () => void; headingClass?: string }) {
   return <View className='section-title mini-section-title'>
-    <View><Text className='mini-section-eyebrow'>友尚 AI</Text><Text className='mini-section-heading'>{title}</Text></View>
-    {typeof count === 'number' && <Text className='mini-section-more' onClick={onMore}>{count} 个应用 →</Text>}
+    <Text className={headingClass || 'mini-block-heading'}>{title}</Text>
+    {onMore && more && <Text className='mini-section-more' onClick={onMore}>{more}</Text>}
   </View>;
 }
 
@@ -159,7 +159,11 @@ export function LayoutBlocks({ layout, content, category = '', type = '' }: { la
     }
     if (block.type === 'search') return <SearchBlock key={block.id} block={block} className={className} style={style} />;
     if (block.type === 'categories') return <View key={block.id} className={`section ${className}`} style={style}>
-      <SectionTitle title={heading} count={content.categories.filter((item) => !isAllCategory(item)).length} />
+      <SectionTitle
+        title={heading}
+        more='更多>>'
+        onMore={() => Taro.navigateTo({ url: `/pages/category/index?title=${encodeURIComponent('全部分类')}` })}
+      />
       <View className='mini-category-nav'>{content.categories.filter((item) => !isAllCategory(item)).slice(0, block.limit || 12).map((item) => {
         const title = item.label || item.name || '分类';
         const destination = String(item.miniappLink || `/pages/category/index?category=${encodeURIComponent(item.key || item.id)}&title=${encodeURIComponent(title)}`);
@@ -177,7 +181,7 @@ export function LayoutBlocks({ layout, content, category = '', type = '' }: { la
       const items = filtered(content.agents, block, content, category);
       if (!items.length) return null;
       return <View key={block.id} className={`section ${className}`} style={style}>
-        <SectionTitle title={heading} count={items.length} onMore={() => Taro.navigateTo({ url: '/pages/category/index?type=agent&title=AI智能体' })} />
+        <SectionTitle title={heading} more='更多>>' onMore={() => Taro.navigateTo({ url: `/pages/category/index?type=agent&title=${encodeURIComponent('AI智能体')}` })} />
         <View className='mini-content-grid'>{items.map(item => <ContentCard item={item} type='agent' key={item.id} />)}</View>
       </View>;
     }
@@ -186,7 +190,7 @@ export function LayoutBlocks({ layout, content, category = '', type = '' }: { la
       const items = filtered(content.workflows, block, content, category);
       if (!items.length) return null;
       return <View key={block.id} className={`section ${className}`} style={style}>
-        <SectionTitle title={heading} count={items.length} onMore={() => Taro.navigateTo({ url: '/pages/category/index?type=workflow&title=AI工作流' })} />
+        <SectionTitle title={heading} more='更多>>' onMore={() => Taro.navigateTo({ url: `/pages/category/index?type=workflow&title=${encodeURIComponent('AI工作流')}` })} />
         <View className='mini-content-grid'>{items.map(item => <ContentCard item={item} type='workflow' key={item.id} />)}</View>
       </View>;
     }
