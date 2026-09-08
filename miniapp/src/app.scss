@@ -1,6 +1,10 @@
 /* TDesign 图标字体子集（本地内嵌，微信离线可渲染） */
 @font-face { font-family: 'td-icons'; src: url("data:font/woff;charset=utf-8;base64,d09GRgABAAAAAAVcAAsAAAAAB9AAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAABHU1VCAAAFMAAAACkAAAAquPq49E9TLzIAAAQ8AAAAQAAAAFY2hEtjY21hcAAABHwAAABNAAAAbJyvjh1nbHlmAAABCAAAApgAAATohQgzjGhlYWQAAAPUAAAANgAAADYmj6b6aGhlYQAABBwAAAAdAAAAJAgDBCJobXR4AAAEDAAAAA8AAAAWBAAAAGxvY2EAAAPAAAAAFAAAABQEeAWjbWF4cAAAA6AAAAAfAAAAIAEmAS9uYW1lAAAEzAAAAFQAAAB0A6ccKXBvc3QAAAUgAAAAEAAAACAADQAAeJytlE9M03AUx3/v96utzNGu5dcVCX/cmCvpkvFvXTPYWFD+ZAGn4mhYSFSIeDAavRgSIYZ4MVHjQSOJ8eTBxKAnE6M39QIHb8AWPELiFfQu1V+7AfG+X15f2t/vvdf3ec23CBBbxCY28iMEakgNyb1yyAzJ7VByymDYYDhlG399YVefUCUjQAJehqAJmqVZuqULOkit6+vpjY205/Hv1oNb5hHivLxtUkZhNIrG0UWWHRZ4QSSCCEGtFZglrQFgFtXjoLuusstMpbwbCgLvncXBTHixSSsZFNRes11We1nL27wyPhbpz8SUqNhlSilaWFst0JSYjcWyYopeuycOnZt4HK9r5E/4FBovnsy1FVbOdg9LPKfQ8N1ch+nL2O4im/h4RDEG0pHz79+M0pSUNbwKhbU1t95YAONifXFE6pZP9Ue68sblfrmNb+iworfSjR3NbGPkeqN4DPCXmO18fw2DVfoSo9cP6StAAk81Dz+oBXusA6qEfjSEyil1o90Ejz9RHRXjJy665vFvPb0jmf6cwnFKjnU7u6BOqAuzrOGcQoiS85vS3H06nO9L2rclQuqnRptG2ibfPoxSRaHN032hQcOXKS8tMSOb4pTfCswsHlU4LEoLdHEmYPkvKAQX65qMl1fUIfXSo065hY3gZt7IX80bfdPNAYUD7DwowUqJXYj8N4F8DflpTyQaCdcE/hsHr8CZI7XD39vFu1XN1OE9xDPuar83qu/CyIvBXsxf8hnVoyaEGlxqHlOUQHqUB46iaBabnZDQRBg3NbJMfv1p8WGAH3Bmfx4MY2encJp85LaWh3zOJIZPGD5wAE75CXZ+4vl5sGEPAtWvcKDCfO00yP4BtRLgu8yzmglw/zmrBvgfLUL3jXicY2BkYGDgZFRmEGYAASYg5gJCBob/YD4DAA53AVcAAAAAAAAZADUAtAE1AbMBxQH4AnQAAQAAAAEAAMQM50NfDzz1AAsEAAAAAADht7EAAAAAAOG3sQD/7//2BBIEBwAAAAgAAgAAAAAAAHicY2BgYGBhQAcAAF4ABQB4nGNgZGBgYQABFq3/7/9/ZRFiYGRABUwAXmYELwAAAHicY2BkYWCcwMDKwMC0hOkMAwNDP4RmfM1gxMgBFGVgZWbACgLSXFMYHB7wvjBhAXFjWNgZuIA0I4gDAMUdCWJ4nGNgYGBiYGBgBmIRIMkIplkYIoC0EIMAUITpAe8jlSfzn5U9W/ps1XPlFyb//zMwYIrJf5G9J50i2SeZIBkj8UT8CtgkNAAAGTUe4QAAAHicTcixCsIwAEXRkyYGXIpTZ7+g6I90cHB3KFIoFVL9f4N26PDgvItsEIV0FDRsbrR1f8ddTzsfdE6b86+/3YyePmYPxb2+YjV5WZxd9S5f5x4H6XicY2BmgAAuBqwAAAFjAA54nGNgZGBg4GJQY9BgYHJx8wlh4MtJLMljkGBgAYoz/P/PAAcAbZcFXQAAAA==") format('woff'); font-weight: 400; font-style: normal; }
 
+/* 底部导航图标：base64 内联 SVG（小程序 WXML 不渲染 <svg> 标签）
+   由 scripts/gen-tab-icons.js 生成，勿手改 */
+@import './styles/tab-icons';
+
 page {
   min-height: 100%;
   background: var(--mini-page);
@@ -666,9 +670,7 @@ button::after { border: 0; }
   align-items: center;
   justify-content: center;
   height: 44rpx;
-  color: var(--mini-tab-text);
 }
-.mini-tab-svg { display: block; }
 .mini-tab-label {
   margin-top: 4rpx;
   font-size: 24rpx;
@@ -686,7 +688,6 @@ button::after { border: 0; }
   transition: opacity .2s ease, transform .2s ease;
 }
 .mini-tab-item-active { color: var(--mini-tab-text-active); }
-.mini-tab-item-active .mini-tab-icon { color: var(--mini-tab-text-active); }
 .mini-tab-item-active .mini-tab-label { color: var(--mini-tab-text-active); font-weight: 650; }
 .mini-tab-item-active .mini-tab-indicator { opacity: 1; transform: scaleX(1); }
 
