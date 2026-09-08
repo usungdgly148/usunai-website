@@ -25,7 +25,14 @@ function matchesQuery(item: ContentItem, normalized: string) {
 export default function SearchPage() {
   const { pageStyle } = useThemePage();
   const router = useRouter();
-  const [query, setQuery] = useState(String(router.params.q || ''));
+  // Taro 4 的 useRouter 不会自动 decodeURL，所以小程序的 `?q=中文` 拿到的是 %E5%... 形式，
+  // 这里防御性解析一次；非法编码时退回到原值。
+  const initialQuery = (() => {
+    const raw = String(router.params.q || '');
+    if (!raw) return '';
+    try { return decodeURIComponent(raw); } catch { return raw; }
+  })();
+  const [query, setQuery] = useState(initialQuery);
   const state = useLoad(() => getPublicContent(), []);
 
   usePullDownRefresh(async () => { await state.reload(); Taro.stopPullDownRefresh(); });
@@ -42,8 +49,7 @@ export default function SearchPage() {
   }, [state.data, normalized]);
 
   const total = matchedAgents.length + matchedWorkflows.length;
-  const showEmpty = hasQuery && !state.loading && !state.error && total === 0;
-  const showResults = state.data && (hasQuery ? total > 0 : true);
+  const showResults = state.data && (hasQuery ? true : true);
 
   return (
     <View className='page mini-search-page' style={pageStyle}>
@@ -60,12 +66,7 @@ export default function SearchPage() {
         autoFocus={!hasQuery}
         placeholder='输入关键词搜索智能体和工作流'
       />
-      <PageState
-        loading={state.loading}
-        error={state.error}
-        empty={showEmpty}
-        onRetry={state.reload}
-      />
+      <PageState loading={state.loading} error={state.error} onRetry={state.reload} />
       {showResults && hasQuery && (
         <View className='mini-search-results'>
           {matchedAgents.length > 0 && (
@@ -92,6 +93,13 @@ export default function SearchPage() {
                   <ContentCard key={`workflow-${item.id}`} item={item} type='workflow' />
                 ))}
               </View>
+            </View>
+          )}
+          {total === 0 && (
+            <View className='mini-search-empty'>
+              <Text className='mini-search-empty-icon'>🔍</Text>
+              <Text className='mini-search-empty-title'>没有匹配「{query.trim()}」的工具</Text>
+              <Text className='mini-search-empty-hint'>试试用「小红书」「文案」「获客」等更短的关键词</Text>
             </View>
           )}
         </View>

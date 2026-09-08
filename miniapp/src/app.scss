@@ -321,6 +321,10 @@ button::after { border: 0; }
 .mini-search-group-count { color: var(--mini-subtle); font-size: 22rpx; }
 .mini-search-tip { padding: 80rpx 32rpx; text-align: center; }
 .mini-search-tip-text { color: var(--mini-subtle); font-size: 26rpx; }
+.mini-search-empty { padding: 120rpx 32rpx; text-align: center; }
+.mini-search-empty-icon { display: block; font-size: 64rpx; line-height: 1; margin-bottom: 24rpx; opacity: .7; }
+.mini-search-empty-title { display: block; color: var(--mini-ink); font-size: 30rpx; font-weight: 600; }
+.mini-search-empty-hint { display: block; margin-top: 12rpx; color: var(--mini-subtle); font-size: 24rpx; }
 
 /* 智能体/工作流列表页内的内嵌搜索框（src/pages/category/index） */
 .mini-category-search { margin: 8rpx 0 24rpx; }
