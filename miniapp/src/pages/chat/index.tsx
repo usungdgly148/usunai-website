@@ -5,14 +5,14 @@ import { PageState } from '../../components/page-state';
 import { MarkdownContent } from '../../components/markdown-content';
 import { EntityInfoCard, SideDrawer, timeAgo } from '../../components/inner-ui';
 import { TdIcon } from '../../components/td-icon';
-import { getPagedRecords, getPublicContent, saveRuntimeAsset, saveRuntimeHistory, streamAgentChat, uploadRuntimeFile } from '../../services/api';
+import { fetchAllRecords, getPublicContent, saveRuntimeAsset, saveRuntimeHistory, streamAgentChat, uploadRuntimeFile } from '../../services/api';
 import { collectMediaUrls, fileToDataUrl, runtimeId } from '../../services/runtime';
 import { confirmDialog, toast } from '../../utils/feedback';
 import type { ContentItem } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
 
 type ChatMessage = { id: string; role: 'user' | 'assistant'; text: string; reasoning?: string; images?: string[] };
-type HistoryRecord = Record<string, unknown> & { id?: string; title?: string; createdAt?: string; agentId?: string; messages?: ChatMessage[] };
+type HistoryRecord = Record<string, unknown> & { id?: string; title?: string; createdAt?: string; agentId?: string; messages?: Array<Record<string, unknown>> };
 
 const ASSET_TYPE_NAMES: Record<string, string> = { copy: '文案', image: '图片', video: '视频', audio: '音频', article: '文章' };
 const sessionKey = (agentId?: string) => `usunai_miniapp_chat_session_${agentId || 'unknown'}`;
@@ -163,8 +163,9 @@ export default function ChatPage() {
   const openHistory = () => {
     setHistoryOpen(true);
     setHistoryLoading(true);
-    getPagedRecords('history', 1, 50).then(({ items }) => {
-      setHistoryList(items.filter((item) => item.type === 'agent' && item.agentId === agentId) as HistoryRecord[]);
+    // 与网页端同源：历史记录按 agentId 聚合（网页端记录无 type 字段，不能用 type 过滤）
+    fetchAllRecords('history').then((items) => {
+      setHistoryList(items.filter((item) => item.agentId === agentId) as HistoryRecord[]);
       setHistoryLoading(false);
     }).catch(() => {
       setHistoryLoading(false);
@@ -174,7 +175,17 @@ export default function ChatPage() {
 
   const selectHistory = (record: HistoryRecord) => {
     if (sending) return;
-    const msgs = Array.isArray(record.messages) ? record.messages.filter((m) => m && typeof m.text === 'string') : [];
+    // 兼容两种消息结构：小程序自写 {role,text} 与网页端 {role,content}
+    const raw = Array.isArray(record.messages) ? record.messages : [];
+    const msgs: ChatMessage[] = raw
+      .filter((m) => m && typeof m === 'object' && (typeof m.text === 'string' || typeof m.content === 'string'))
+      .map((m) => ({
+        id: typeof m.id === 'string' ? m.id : runtimeId('msg'),
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        text: typeof m.text === 'string' ? m.text : String(m.content || ''),
+        reasoning: typeof m.reasoning === 'string' ? m.reasoning : undefined,
+        images: Array.isArray(m.images) ? (m.images as string[]) : undefined,
+      }));
     setMessages(msgs);
     if (record.id) setSessionId(record.id);
     setError('');

@@ -4,7 +4,7 @@ import { Button, Image, Input, ScrollView, Text, Textarea, Video, View } from '@
 import { PageState } from '../../components/page-state';
 import { EntityInfoCard, SideDrawer, timeAgo } from '../../components/inner-ui';
 import { TdIcon } from '../../components/td-icon';
-import { getPagedRecords, getPublicContent, getRuntimeTask, saveRuntimeAsset, saveRuntimeHistory, submitWorkflowTask, uploadRuntimeFile } from '../../services/api';
+import { fetchAllRecords, getPublicContent, getRuntimeTask, saveRuntimeAsset, saveRuntimeHistory, submitWorkflowTask, uploadRuntimeFile } from '../../services/api';
 import { fileToDataUrl, runtimeId } from '../../services/runtime';
 import { hideFeedbackToast, loadingToast, toast } from '../../utils/feedback';
 import type { ContentItem, FormField, FormFieldOption, RuntimeTask } from '../../types';
@@ -249,8 +249,9 @@ function WorkflowPage() {
   const openHistory = () => {
     setHistoryOpen(true);
     setHistoryLoading(true);
-    getPagedRecords('history', 1, 50).then(({ items }) => {
-      setHistoryList(items.filter((item) => item.type === 'workflow' && item.workflowId === params.id) as HistoryRecord[]);
+    // 与网页端同源：历史记录按 workflowId 聚合（网页端记录无 type 字段，不能用 type 过滤）
+    fetchAllRecords('history').then((items) => {
+      setHistoryList(items.filter((item) => item.workflowId === params.id) as HistoryRecord[]);
       setHistoryLoading(false);
     }).catch(() => {
       setHistoryLoading(false);
@@ -259,10 +260,22 @@ function WorkflowPage() {
   };
 
   const selectHistory = (record: HistoryRecord) => {
-    const taskId = String(record.taskId || '');
-    if (!taskId) { toast('该记录缺少任务信息', 'warning'); return; }
     setHistoryOpen(false);
     setError('');
+    // 网页端记录直接带 result（无 taskId），小程序自写记录带 taskId；优先用 result 直出结果
+    if (record.result && typeof record.result === 'object') {
+      setTask({
+        id: String(record.id || ''),
+        workflowId: String(record.workflowId || params.id || ''),
+        name: String(record.title || '工作流任务'),
+        status: 'succeeded',
+        result: record.result as RuntimeTask['result'],
+        createdAt: String(record.createdAt || ''),
+      });
+      return;
+    }
+    const taskId = String(record.taskId || '');
+    if (!taskId) { toast('该记录缺少结果信息', 'warning'); return; }
     loadingToast('加载中…');
     getRuntimeTask(taskId).then((current) => {
       hideFeedbackToast();

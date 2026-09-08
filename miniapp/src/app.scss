@@ -302,7 +302,7 @@ button::after { border: 0; }
   background: var(--mini-surface); box-shadow: 0 12px 28px rgba(45, 80, 135, .06);
 }
 .mini-common-icon { width: 48px; height: 48px; }
-.mini-common-label { color: var(--mini-text-2); font-size: 25px; font-weight: 600; }
+.mini-common-label { color: var(--mini-text-2); font-size: 25px; }
 
 /* 账号与安全头像图标圆底 */
 .mini-security-icon--avatar { overflow: hidden; border-radius: 50%; background: linear-gradient(135deg, #2e67e9, #765fe8); color: #fff; font-size: 24px; font-weight: 700; }
