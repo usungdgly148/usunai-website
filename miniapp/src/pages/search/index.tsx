@@ -1,41 +1,107 @@
 import Taro, { usePullDownRefresh, useRouter } from '@tarojs/taro';
 import { useMemo, useState } from 'react';
-import { Input, Text, View } from '@tarojs/components';
+import { Text, View } from '@tarojs/components';
 import { ContentCard } from '../../components/content-card';
 import { PageState } from '../../components/page-state';
+import { MiniappTabBar } from '../../components/miniapp-tab-bar';
+import { SearchBar } from '../../components/search-bar';
 import { useLoad } from '../../hooks/use-load';
 import { getPublicContent } from '../../services/api';
+import type { ContentItem } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
+
+function matchesQuery(item: ContentItem, normalized: string) {
+  if (!normalized) return true;
+  const haystack = [
+    item.name,
+    item.description || '',
+    item.desc || '',
+    item.category || '',
+    (item.tags || []).join(' '),
+  ].join(' ').toLowerCase();
+  return haystack.includes(normalized);
+}
 
 export default function SearchPage() {
   const { pageStyle } = useThemePage();
   const router = useRouter();
   const [query, setQuery] = useState(String(router.params.q || ''));
   const state = useLoad(() => getPublicContent(), []);
-  usePullDownRefresh(async () => { await state.reload(); Taro.stopPullDownRefresh(); });
-  const entries = useMemo(() => {
-    if (!state.data || !query.trim()) return [];
-    const normalized = query.trim().toLowerCase();
-    return [
-      ...state.data.agents.map((item) => ({ item, type: 'agent' as const })),
-      ...state.data.workflows.map((item) => ({ item, type: 'workflow' as const })),
-    ].filter(({ item }) => `${item.name} ${item.description || ''} ${(item.tags || []).join(' ')}`.toLowerCase().includes(normalized));
-  }, [state.data, query]);
 
-  return <View className='page' style={pageStyle}>
-    <Text className='page-title'>全局搜索</Text>
-    <View className='search-box'>
-      <Input
-        className='search-input'
+  usePullDownRefresh(async () => { await state.reload(); Taro.stopPullDownRefresh(); });
+
+  const normalized = query.trim().toLowerCase();
+  const hasQuery = normalized.length > 0;
+
+  const { matchedAgents, matchedWorkflows } = useMemo(() => {
+    if (!state.data) return { matchedAgents: [], matchedWorkflows: [] };
+    return {
+      matchedAgents: state.data.agents.filter((item) => matchesQuery(item, normalized)),
+      matchedWorkflows: state.data.workflows.filter((item) => matchesQuery(item, normalized)),
+    };
+  }, [state.data, normalized]);
+
+  const total = matchedAgents.length + matchedWorkflows.length;
+  const showEmpty = hasQuery && !state.loading && !state.error && total === 0;
+  const showResults = state.data && (hasQuery ? total > 0 : true);
+
+  return (
+    <View className='page mini-search-page' style={pageStyle}>
+      <View className='mini-page-topbar'>
+        <Text className='mini-page-heading'>全局搜索</Text>
+        <Text className='mini-page-caption'>
+          {hasQuery ? `共匹配 ${total} 个工具` : '搜索智能体和工作流'}
+        </Text>
+      </View>
+      <SearchBar
+        className='mini-search-page-bar'
         value={query}
-        autoFocus
-        confirmType='search'
-        placeholder='输入关键词搜索智能体和工作流...'
-        onInput={(event) => setQuery(event.detail.value)}
-        onConfirm={() => Taro.hideKeyboard()}
+        onInput={setQuery}
+        autoFocus={!hasQuery}
+        placeholder='输入关键词搜索智能体和工作流'
       />
+      <PageState
+        loading={state.loading}
+        error={state.error}
+        empty={showEmpty}
+        onRetry={state.reload}
+      />
+      {showResults && hasQuery && (
+        <View className='mini-search-results'>
+          {matchedAgents.length > 0 && (
+            <View className='mini-search-group'>
+              <View className='mini-search-group-head'>
+                <Text className='mini-search-group-title'>智能体</Text>
+                <Text className='mini-search-group-count'>{matchedAgents.length} 个</Text>
+              </View>
+              <View className='mini-content-grid'>
+                {matchedAgents.map((item) => (
+                  <ContentCard key={`agent-${item.id}`} item={item} type='agent' />
+                ))}
+              </View>
+            </View>
+          )}
+          {matchedWorkflows.length > 0 && (
+            <View className='mini-search-group'>
+              <View className='mini-search-group-head'>
+                <Text className='mini-search-group-title'>工作流</Text>
+                <Text className='mini-search-group-count'>{matchedWorkflows.length} 个</Text>
+              </View>
+              <View className='mini-content-grid'>
+                {matchedWorkflows.map((item) => (
+                  <ContentCard key={`workflow-${item.id}`} item={item} type='workflow' />
+                ))}
+              </View>
+            </View>
+          )}
+        </View>
+      )}
+      {showResults && !hasQuery && state.data && (
+        <View className='mini-search-tip'>
+          <Text className='mini-search-tip-text'>输入关键词开始全站搜索</Text>
+        </View>
+      )}
+      <MiniappTabBar active='home' />
     </View>
-    <PageState loading={state.loading} error={state.error} empty={!!query && !state.loading && !state.error && entries.length === 0} onRetry={state.reload} />
-    <View className='section'>{entries.map(({ item, type }) => <ContentCard item={item} type={type} key={`${type}-${item.id}`} />)}</View>
-  </View>;
+  );
 }

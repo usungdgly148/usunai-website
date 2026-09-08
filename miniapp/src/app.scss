@@ -4,6 +4,8 @@
 /* 底部导航图标：base64 内联 SVG（小程序 WXML 不渲染 <svg> 标签）
    由 scripts/gen-tab-icons.js 生成，勿手改 */
 @import './styles/tab-icons';
+/* 通用 UI 图标（搜索 / 清除 等），同机制，由 scripts/gen-ui-icons.js 生成 */
+@import './styles/ui-icons';
 
 page {
   min-height: 100%;
@@ -205,10 +207,38 @@ button::after { border: 0; }
 .mini-hero-image { background: linear-gradient(135deg, #264ca8, #617fee); }
 .layout-banner-title { position: static; max-width: 78%; margin-top: 20px; font-size: 39px; font-weight: 750; letter-spacing: -.8px; line-height: 1.25; text-shadow: none; }
 .mini-hero-action { margin-top: 22px; color: #fff; font-size: 23px; font-weight: 650; }
-.mini-search-wrap { margin-top: 24px; }
-.mini-search-box { height: 88px; margin: 0; padding: 0 22px; border: 1px solid var(--mini-line-strong); border-radius: 24px; box-shadow: 0 10px 22px rgba(43, 83, 150, .06); }
-.mini-search-icon { margin-right: 12px; color: var(--mini-subtle); font-size: 38px; }
-.mini-search-box .search-input { height: 86px; color: var(--mini-subtle); font-size: 25px; }
+/* 全局搜索框（src/components/search-bar.tsx）。
+   旧 SearchBlock 用 ⌕ 字符（U+2315）做图标，iOS/Android 系统字体几乎不渲染，
+   现在改为 PNG 放大镜（scripts/gen-ui-icons.js 生成），左侧图标 + 中间输入框 + 右侧清除按钮。 */
+.mini-searchbar {
+  display: flex; align-items: center;
+  height: 88rpx; padding: 0 22rpx;
+  margin: 0;
+  border: 1rpx solid var(--mini-line-strong);
+  border-radius: 24rpx;
+  background: var(--mini-surface);
+  box-shadow: 0 10rpx 22rpx rgba(43, 83, 150, .06);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.mini-searchbar-focus { border-color: var(--mini-primary); box-shadow: 0 12rpx 26rpx rgba(40, 100, 234, .12); }
+.mini-searchbar-icon {
+  width: 36rpx; height: 36rpx; flex-shrink: 0; margin-right: 14rpx;
+  opacity: .9;
+  transition: opacity .12s ease;
+}
+.mini-searchbar-icon-hover { opacity: .55; }
+.mini-searchbar-input {
+  flex: 1; min-width: 0; height: 86rpx;
+  color: var(--mini-ink); font-size: 26rpx;
+  padding: 0;
+}
+.mini-searchbar-placeholder { color: var(--mini-subtle); }
+.mini-searchbar-clear {
+  width: 36rpx; height: 36rpx; flex-shrink: 0; margin-left: 4rpx;
+  transition: opacity .12s ease;
+}
+.mini-searchbar-clear-hover { opacity: .55; }
+.mini-searchbar-block { margin-top: 24rpx; }
 .mini-section-title { align-items: flex-end; margin-bottom: 18px; }
 .mini-section-title > View { display: flex; flex-direction: column; }
 .mini-section-eyebrow { color: var(--mini-subtle); font-size: 18px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
@@ -276,6 +306,24 @@ button::after { border: 0; }
 .mini-category-tool-section + .mini-category-tool-section { margin-top: 40rpx; }
 .mini-category-tool-section > .section-title { display: block; margin: 0 0 18rpx; color: var(--mini-ink); font-size: 34rpx; font-weight: 800; }
 .mini-category-empty { padding: 88rpx 32rpx; border: 1rpx dashed var(--mini-line-strong); border-radius: 24rpx; background: var(--mini-surface); color: var(--mini-subtle); text-align: center; }
+.mini-category-filtered-empty { padding: 64rpx 32rpx; color: var(--mini-subtle); font-size: 26rpx; text-align: center; }
+
+/* 全局搜索页（src/pages/search/index） */
+.mini-search-page { padding-bottom: 24rpx; }
+.mini-search-page-bar { margin: 0 0 24rpx; }
+.mini-search-results { display: flex; flex-direction: column; gap: 36rpx; }
+.mini-search-group { display: block; }
+.mini-search-group-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin: 0 4rpx 18rpx;
+}
+.mini-search-group-title { color: var(--mini-ink); font-size: 30rpx; font-weight: 700; letter-spacing: -.2px; }
+.mini-search-group-count { color: var(--mini-subtle); font-size: 22rpx; }
+.mini-search-tip { padding: 80rpx 32rpx; text-align: center; }
+.mini-search-tip-text { color: var(--mini-subtle); font-size: 26rpx; }
+
+/* 智能体/工作流列表页内的内嵌搜索框（src/pages/category/index） */
+.mini-category-search { margin: 8rpx 0 24rpx; }
 .mini-announcement-list { min-height: 100vh; padding: 28rpx; background: var(--mini-primary-pale); }
 .mini-announcement-list__header { margin-bottom: 28rpx; color: var(--mini-ink); font-size: 40rpx; font-weight: 800; }
 .mini-announcement-list__item { margin-bottom: 18rpx; padding: 28rpx; border: 1rpx solid var(--mini-line-strong); border-radius: 22rpx; background: var(--mini-surface); box-shadow: 0 8rpx 22rpx rgba(15, 50, 91, .06); }

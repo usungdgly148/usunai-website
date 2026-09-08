@@ -1,7 +1,8 @@
 import Taro from '@tarojs/taro';
-import { Image, Input, Swiper, SwiperItem, Text, View } from '@tarojs/components';
+import { Image, Swiper, SwiperItem, Text, View } from '@tarojs/components';
 import { useEffect, useState } from 'react';
 import { ContentCard } from './content-card';
+import { SearchBar, gotoGlobalSearch } from './search-bar';
 import { API_BASE } from '../services/api';
 import type { ContentItem, MiniappLayout, MiniappLayoutBlock, PublicContent } from '../types';
 
@@ -108,24 +109,15 @@ function SectionTitle({ title, count, onMore }: { title: string; count?: number;
 
 function SearchBlock({ block, className, style }: { block: MiniappLayoutBlock; className: string; style: Record<string, string | undefined> }) {
   const [keyword, setKeyword] = useState('');
-  const openSearch = () => {
-    const query = keyword.trim();
-    void Taro.navigateTo({ url: `/pages/search/index${query ? `?q=${encodeURIComponent(query)}` : ''}` });
-  };
-
-  return <View className={`${className} mini-search-wrap`} style={style}>
-    <View className='search-box mini-search-box'>
-      <Text className='mini-search-icon' onClick={openSearch}>⌕</Text>
-      <Input
-        className='search-input'
-        value={keyword}
-        placeholder='输入关键词搜索智能体和工作流...'
-        confirmType='search'
-        onInput={event => setKeyword(event.detail.value)}
-        onConfirm={openSearch}
-      />
-    </View>
-  </View>;
+  return <SearchBar
+    className={`${className} mini-searchbar-block`}
+    value={keyword}
+    onInput={setKeyword}
+    onTapIcon={() => gotoGlobalSearch(keyword)}
+    onSubmit={() => gotoGlobalSearch(keyword)}
+    onClear={() => setKeyword('')}
+    placeholder='输入关键词搜索智能体和工作流'
+  />;
 }
 
 export function LayoutBlocks({ layout, content, category = '', type = '' }: { layout: MiniappLayout; content: PublicContent; category?: string; type?: string }) {
