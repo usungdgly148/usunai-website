@@ -307,45 +307,6 @@ button::after { border: 0; }
 .mini-category-empty { padding: 88rpx 32rpx; border: 1rpx dashed var(--mini-line-strong); border-radius: 24rpx; background: var(--mini-surface); color: var(--mini-subtle); text-align: center; }
 .mini-category-filtered-empty { padding: 64rpx 32rpx; color: var(--mini-subtle); font-size: 26rpx; text-align: center; }
 
-/* 「全部分类」浏览页（category 页 browse 模式：无 type/category 参数进入） */
-.mini-category-browse {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18rpx;
-}
-.mini-category-browse-item {
-  position: relative;
-  aspect-ratio: 16 / 9;
-  overflow: hidden;
-  border-radius: 24rpx;
-  background: linear-gradient(135deg, var(--mini-primary-pale), var(--mini-primary-soft));
-  box-shadow: 0 12rpx 30rpx rgba(15, 50, 91, .1);
-}
-.mini-category-browse-image,
-.mini-category-browse-fallback { width: 100%; height: 100%; }
-.mini-category-browse-image { display: block; }
-.mini-category-browse-cover {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  padding: 0 24rpx;
-  background: linear-gradient(180deg, rgba(9, 35, 70, .04) 40%, rgba(9, 35, 70, .38));
-}
-.mini-category-browse-label {
-  max-width: 100%;
-  overflow: hidden;
-  color: #fff;
-  font-size: 32rpx;
-  font-weight: 700;
-  line-height: 1.3;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-shadow: 0 2rpx 10rpx rgba(0, 0, 0, .35);
-}
-
 /* 全局搜索页（src/pages/search/index） */
 .mini-search-page { padding-bottom: 24rpx; }
 .mini-search-page-bar { margin: 0 0 24rpx; }

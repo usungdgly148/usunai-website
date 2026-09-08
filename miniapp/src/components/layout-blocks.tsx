@@ -18,7 +18,7 @@ function optimizedImageUrl(source: string, width: number, height: number) {
   return `${source}${separator}format=webp&w=${width}&h=${height}`;
 }
 
-function ResilientImage({
+export function ResilientImage({
   src,
   className,
   width,

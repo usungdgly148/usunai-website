@@ -1,12 +1,13 @@
 import Taro, { usePullDownRefresh, useRouter } from '@tarojs/taro';
-import { useMemo, useState } from 'react';
-import { Image, Text, View } from '@tarojs/components';
+import { useEffect, useMemo, useState } from 'react';
+import { Text, View } from '@tarojs/components';
 import { ContentCard } from '../../components/content-card';
 import { MiniappTabBar } from '../../components/miniapp-tab-bar';
 import { PageState } from '../../components/page-state';
+import { ResilientImage } from '../../components/layout-blocks';
 import { SearchBar, gotoGlobalSearch } from '../../components/search-bar';
 import { useLoad } from '../../hooks/use-load';
-import { getPublicContent, API_BASE } from '../../services/api';
+import { getPublicContent, getMiniappLayout } from '../../services/api';
 import type { ContentItem } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
 
@@ -16,10 +17,8 @@ function isAllCategory(item: { id: string; key?: string; name?: string; label?: 
   return key === 'all' || name === '全部';
 }
 
-function categoryPictureUrl(value: string) {
-  const source = String(value || '').trim();
-  if (!source || /^(?:https?:)?\/\//i.test(source) || /^data:/i.test(source)) return source;
-  return source.startsWith('/') ? `${API_BASE.replace(/\/+$/, '')}${source}` : source;
+function categoryRef(item: { id: string; key?: string }) {
+  return String(item.key || item.id || '');
 }
 
 function matchesCategory(item: ContentItem, category: string) {
@@ -61,6 +60,22 @@ export default function CategoryPage() {
     (item) => !isAllCategory(item) && (item as { published?: boolean }).published !== false,
   );
 
+  // 分类卡片背景图与首页一致：优先取 home layout 里 categories 区块配置的 categoryImages（按分类 key），
+  // 其次是分类自身的 miniappImage。否则首页的 16:9 图卡（后台配图）与全部分类页会不一致。
+  const [categoryImages, setCategoryImages] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!browseMode) return;
+    let cancelled = false;
+    getMiniappLayout('home')
+      .then((layout) => {
+        if (cancelled) return;
+        const block = layout.blocks.find((b) => b.type === 'categories');
+        if (block?.categoryImages) setCategoryImages(block.categoryImages);
+      })
+      .catch(() => { /* 兜底：无配图时走 fallback 色块 */ });
+    return () => { cancelled = true; };
+  }, [browseMode]);
+
   const normalized = keyword.trim().toLowerCase();
   const showAgents = type !== 'workflow';
   const showWorkflows = type !== 'agent';
@@ -99,23 +114,22 @@ export default function CategoryPage() {
         />
         <PageState loading={state.loading} error={state.error} onRetry={state.reload} />
         {state.data && (
-          <View className='mini-category-browse'>
+          <View className='mini-category-nav'>
             {visibleCategories.map((item) => {
               const name = item.label || item.name || '分类';
-              const image = item.miniappImage || '';
-              const fallbackStyle = { backgroundColor: item.color || 'var(--mini-primary-soft)' };
+              const image = categoryImages[categoryRef(item)] || item.miniappImage || '';
               return (
                 <View
                   key={item.id}
-                  className='mini-category-browse-item'
+                  className='mini-category-item'
                   onClick={() => Taro.navigateTo({
                     url: `/pages/category/index?category=${encodeURIComponent(item.key || item.id)}&title=${encodeURIComponent(name)}`,
                   })}
                 >
                   {image
-                    ? <Image className='mini-category-browse-image' mode='aspectFill' src={categoryPictureUrl(image)} lazyLoad />
-                    : <View className='mini-category-browse-fallback' style={fallbackStyle} />}
-                  <View className='mini-category-browse-cover'><Text className='mini-category-browse-label'>{name}</Text></View>
+                    ? <ResilientImage className='mini-category-picture' src={image} width={640} height={480} lazyLoad />
+                    : <View className='mini-category-fallback' />}
+                  <View className='mini-category-cover'><Text className='mini-category-label'>{name}</Text></View>
                 </View>
               );
             })}
