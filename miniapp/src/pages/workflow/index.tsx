@@ -4,7 +4,7 @@ import { Button, Image, Input, ScrollView, Text, Textarea, Video, View } from '@
 import { PageState } from '../../components/page-state';
 import { EntityInfoCard, SideDrawer, timeAgo } from '../../components/inner-ui';
 import { TdIcon } from '../../components/td-icon';
-import { fetchAllRecords, getPublicContent, getRuntimeTask, saveRuntimeAsset, saveRuntimeHistory, submitWorkflowTask, uploadRuntimeFile } from '../../services/api';
+import { fetchAllRecords, getHistoryDetail, getPublicContent, getRuntimeTask, saveRuntimeAsset, saveRuntimeHistory, submitWorkflowTask, uploadRuntimeFile } from '../../services/api';
 import { fileToDataUrl, runtimeId } from '../../services/runtime';
 import { hideFeedbackToast, loadingToast, toast } from '../../utils/feedback';
 import type { ContentItem, FormField, FormFieldOption, RuntimeTask } from '../../types';
@@ -249,7 +249,7 @@ function WorkflowPage() {
   const openHistory = () => {
     setHistoryOpen(true);
     setHistoryLoading(true);
-    // 与网页端同源：历史记录按 workflowId 聚合（网页端记录无 type 字段，不能用 type 过滤）
+    // 列表阶段只拉轻量元数据（服务端已剥离 result 等大字段），正文在 selectHistory 点开时按 id 加载。
     fetchAllRecords('history').then((items) => {
       setHistoryList(items.filter((item) => item.workflowId === params.id) as HistoryRecord[]);
       setHistoryLoading(false);
@@ -259,31 +259,35 @@ function WorkflowPage() {
     });
   };
 
-  const selectHistory = (record: HistoryRecord) => {
-    setHistoryOpen(false);
-    setError('');
-    // 网页端记录直接带 result（无 taskId），小程序自写记录带 taskId；优先用 result 直出结果
-    if (record.result && typeof record.result === 'object') {
-      setTask({
-        id: String(record.id || ''),
-        workflowId: String(record.workflowId || params.id || ''),
-        name: String(record.title || '工作流任务'),
-        status: 'succeeded',
-        result: record.result as RuntimeTask['result'],
-        createdAt: String(record.createdAt || ''),
-      });
-      return;
-    }
-    const taskId = String(record.taskId || '');
-    if (!taskId) { toast('该记录缺少结果信息', 'warning'); return; }
+  const selectHistory = async (record: HistoryRecord) => {
+    const id = String(record.id || '');
+    if (!id) { toast('该记录无效', 'warning'); return; }
     loadingToast('加载中…');
-    getRuntimeTask(taskId).then((current) => {
+    try {
+      const detail = await getHistoryDetail(id);
       hideFeedbackToast();
+      setHistoryOpen(false);
+      setError('');
+      // 网页端记录直接带 result（无 taskId），小程序自写记录带 taskId；优先用 result 直出结果
+      if (detail.result && typeof detail.result === 'object') {
+        setTask({
+          id: String(detail.id || ''),
+          workflowId: String(detail.workflowId || params.id || ''),
+          name: String(detail.title || '工作流任务'),
+          status: 'succeeded',
+          result: detail.result as RuntimeTask['result'],
+          createdAt: String(detail.createdAt || ''),
+        });
+        return;
+      }
+      const taskId = String(detail.taskId || '');
+      if (!taskId) { toast('该记录缺少结果信息', 'warning'); return; }
+      const current = await getRuntimeTask(taskId);
       setTask(current);
-    }).catch(() => {
+    } catch (reason) {
       hideFeedbackToast();
-      toast('任务记录加载失败', 'error');
-    });
+      toast(reason instanceof Error ? reason.message : '历史记录加载失败', 'error');
+    }
   };
 
   const toggleAudio = (url: string) => {

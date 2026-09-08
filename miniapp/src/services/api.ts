@@ -305,6 +305,11 @@ export async function getRuntimeTask(taskId: string) {
   return (await apiRequest<import('../types').RuntimeTask>(`/api/miniapp/v1/tasks/${encodeURIComponent(taskId)}`)).data;
 }
 
+/** 按 id 拉取单条历史记录完整内容（消息/结果）。列表接口只返回轻量元数据，点开时才请求详情。 */
+export async function getHistoryDetail(id: string) {
+  return (await apiRequest<Record<string, unknown>>(`/api/miniapp/v1/history/${encodeURIComponent(id)}`)).data;
+}
+
 type StreamEvent = { event: string; data: unknown };
 
 function decodeUtf8(bytes: ArrayBuffer, decoder?: TextDecoder) {

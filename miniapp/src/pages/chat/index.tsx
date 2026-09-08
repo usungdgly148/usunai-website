@@ -5,9 +5,9 @@ import { PageState } from '../../components/page-state';
 import { MarkdownContent } from '../../components/markdown-content';
 import { EntityInfoCard, SideDrawer, timeAgo } from '../../components/inner-ui';
 import { TdIcon } from '../../components/td-icon';
-import { fetchAllRecords, getPublicContent, saveRuntimeAsset, saveRuntimeHistory, streamAgentChat, uploadRuntimeFile } from '../../services/api';
+import { fetchAllRecords, getHistoryDetail, getPublicContent, saveRuntimeAsset, saveRuntimeHistory, streamAgentChat, uploadRuntimeFile } from '../../services/api';
 import { collectMediaUrls, fileToDataUrl, runtimeId } from '../../services/runtime';
-import { confirmDialog, toast } from '../../utils/feedback';
+import { confirmDialog, hideFeedbackToast, loadingToast, toast } from '../../utils/feedback';
 import type { ContentItem } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
 
@@ -163,7 +163,7 @@ export default function ChatPage() {
   const openHistory = () => {
     setHistoryOpen(true);
     setHistoryLoading(true);
-    // 与网页端同源：历史记录按 agentId 聚合（网页端记录无 type 字段，不能用 type 过滤）
+    // 列表阶段只拉轻量元数据（服务端已剥离 messages 等大字段），正文在 selectHistory 点开时按 id 加载。
     fetchAllRecords('history').then((items) => {
       setHistoryList(items.filter((item) => item.agentId === agentId) as HistoryRecord[]);
       setHistoryLoading(false);
@@ -173,23 +173,33 @@ export default function ChatPage() {
     });
   };
 
-  const selectHistory = (record: HistoryRecord) => {
+  const selectHistory = async (record: HistoryRecord) => {
     if (sending) return;
-    // 兼容两种消息结构：小程序自写 {role,text} 与网页端 {role,content}
-    const raw = Array.isArray(record.messages) ? record.messages : [];
-    const msgs: ChatMessage[] = raw
-      .filter((m) => m && typeof m === 'object' && (typeof m.text === 'string' || typeof m.content === 'string'))
-      .map((m) => ({
-        id: typeof m.id === 'string' ? m.id : runtimeId('msg'),
-        role: m.role === 'assistant' ? 'assistant' : 'user',
-        text: typeof m.text === 'string' ? m.text : String(m.content || ''),
-        reasoning: typeof m.reasoning === 'string' ? m.reasoning : undefined,
-        images: Array.isArray(m.images) ? (m.images as string[]) : undefined,
-      }));
-    setMessages(msgs);
-    if (record.id) setSessionId(record.id);
-    setError('');
-    setHistoryOpen(false);
+    const id = String(record.id || '');
+    if (!id) { toast('该记录无效', 'warning'); return; }
+    loadingToast('加载中…');
+    try {
+      const detail = await getHistoryDetail(id);
+      hideFeedbackToast();
+      // 兼容两种消息结构：小程序自写 {role,text} 与网页端 {role,content}
+      const raw = Array.isArray(detail.messages) ? detail.messages : [];
+      const msgs: ChatMessage[] = raw
+        .filter((m) => m && typeof m === 'object' && (typeof m.text === 'string' || typeof m.content === 'string'))
+        .map((m) => ({
+          id: typeof m.id === 'string' ? m.id : runtimeId('msg'),
+          role: m.role === 'assistant' ? 'assistant' : 'user',
+          text: typeof m.text === 'string' ? m.text : String(m.content || ''),
+          reasoning: typeof m.reasoning === 'string' ? m.reasoning : undefined,
+          images: Array.isArray(m.images) ? (m.images as string[]) : undefined,
+        }));
+      setMessages(msgs);
+      if (detail.id) setSessionId(String(detail.id));
+      setError('');
+      setHistoryOpen(false);
+    } catch (reason) {
+      hideFeedbackToast();
+      toast(reason instanceof Error ? reason.message : '历史记录加载失败', 'error');
+    }
   };
 
   const addAsset = async (message: ChatMessage) => {

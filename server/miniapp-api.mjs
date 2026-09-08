@@ -208,6 +208,13 @@ async function loadUserRecords(KV, prefix, userId) {
   return rows.filter((item) => item && String(item.userId || '') === String(userId)).sort((a, b) => timestampOf(b) - timestampOf(a));
 }
 
+// 历史列表只返回轻量元数据：剥离消息全文/结果等大字段，正文走 /api/miniapp/v1/history/:id 详情。
+const HISTORY_LIST_STRIP_KEYS = new Set(['messages', 'result', 'content', 'userPrompt', 'inputs', 'reasoning', 'usage', 'billingHistory']);
+function stripHistoryForList(record) {
+  if (!record || typeof record !== 'object') return record;
+  return Object.fromEntries(Object.entries(record).filter(([key]) => !HISTORY_LIST_STRIP_KEYS.has(key)));
+}
+
 function filterItems(items, searchParams) {
   // 小程序客户端用 category（分类 tab）与 keyword（搜索词）过滤；兼容网页端 type / q 的旧命名。
   const category = String(searchParams.get('category') || searchParams.get('type') || '').trim().toLowerCase();
@@ -361,12 +368,27 @@ export async function handleMiniappApi(req, res, url, deps) {
   } else if (path === '/api/miniapp/v1/orders') {
     items = await loadUserRecords(KV, 'order_', userId);
   } else if (path === '/api/miniapp/v1/history') {
-    items = await loadUserRecords(KV, 'hist_', userId);
+    // 历史列表只返回轻量元数据（标题/时间/归属 id），正文消息/结果等大字段走详情接口，避免列表一次性传输全量内容。
+    items = (await loadUserRecords(KV, 'hist_', userId)).map(stripHistoryForList);
   }
 
   if (items) {
     const page = paginate(filterItems(items, url.searchParams), parsePagination(url.searchParams));
     sendJson(res, 200, successEnvelope(page.items, requestId, page.pagination), requestId);
+    return true;
+  }
+
+  // 历史详情：点击某条记录时才拉取该条完整内容（消息/结果），列表阶段不传输大字段。
+  const historyDetailMatch = path.match(/^\/api\/miniapp\/v1\/history\/([^/]+)$/);
+  if (historyDetailMatch) {
+    let historyId = historyDetailMatch[1];
+    try { historyId = decodeURIComponent(historyId); } catch { /* 保留原始值 */ }
+    const record = await KV.kvGet('hist_' + sanitizeId(historyId));
+    if (!record || String(record.userId || '') !== userId) {
+      sendJson(res, 404, errorEnvelope('NOT_FOUND', '历史记录不存在', requestId), requestId);
+      return true;
+    }
+    sendJson(res, 200, successEnvelope(record, requestId), requestId);
     return true;
   }
 
