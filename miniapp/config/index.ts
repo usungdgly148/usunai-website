@@ -22,7 +22,7 @@ export default defineConfig(async (merge, { command, mode }) => {
   const TDESIGN_DST = 'dist/miniprogram_npm/tdesign-miniprogram/';
   const TDESIGN_COMPONENTS = [
     // 直接使用（app.config.ts usingComponents）
-    'chat-message', 'toast', 'dialog', 'skeleton', 'tab-bar', 'tab-bar-item', 'popup',
+    'chat-message', 'toast', 'dialog', 'skeleton', 'popup',
     'switch', 'slider', 'date-time-picker', 'picker', 'picker-item', 'notice-bar',
     'image-viewer', 'empty',
     // 传递依赖（各组件 index.json 内 usingComponents 递归引用）

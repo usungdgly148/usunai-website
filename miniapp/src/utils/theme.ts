@@ -82,6 +82,13 @@ const DARK_VARS: Record<string, string> = {
   '--td-tab-bar-bg-color': 'rgba(23, 33, 51, .94)',
   '--td-tab-bar-border-color': 'var(--mini-line-faint)',
   '--td-tab-bar-round-shadow': '0 8px 24px rgba(0, 0, 0, .3)',
+  /* 自绘胶囊导航栏（深色覆盖）：深底半透明 + 细白边 + 浅色指示 */
+  '--mini-tab-bg': 'rgba(30, 41, 59, .62)',
+  '--mini-tab-border': 'rgba(255, 255, 255, .1)',
+  '--mini-tab-shadow': '0 10rpx 36rpx rgba(0, 0, 0, .42)',
+  '--mini-tab-text': '#7c8ba3',
+  '--mini-tab-text-active': '#eef3fb',
+  '--mini-tab-indicator': '#7ca4ff',
 };
 
 type ThemeListener = () => void;

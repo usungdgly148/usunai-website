@@ -19,8 +19,6 @@ export default {
     't-toast': 'tdesign-miniprogram/toast/toast',
     't-dialog': 'tdesign-miniprogram/dialog/dialog',
     't-skeleton': 'tdesign-miniprogram/skeleton/skeleton',
-    't-tab-bar': 'tdesign-miniprogram/tab-bar/tab-bar',
-    't-tab-bar-item': 'tdesign-miniprogram/tab-bar-item/tab-bar-item',
     't-popup': 'tdesign-miniprogram/popup/popup',
     't-switch': 'tdesign-miniprogram/switch/switch',
     't-slider': 'tdesign-miniprogram/slider/slider',
