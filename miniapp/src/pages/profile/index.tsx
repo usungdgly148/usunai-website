@@ -3,7 +3,6 @@ import { Button, Image, Text, View } from '@tarojs/components';
 import { useState } from 'react';
 import { MiniappTabBar } from '../../components/miniapp-tab-bar';
 import { PageState } from '../../components/page-state';
-import { RechargeSheet } from '../../components/recharge-sheet';
 import { useLoad } from '../../hooks/use-load';
 import { getMe, isBindingRequired, isLoggedOut, loginWithWechat } from '../../services/api';
 import { useThemePage } from '../../hooks/use-theme-page';
@@ -34,8 +33,6 @@ export default function ProfilePage() {
   const state = useLoad(async () => (isLoggedOut() ? null : getMe()), []);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => readMode());
   const [showThemeSheet, setShowThemeSheet] = useState(false);
-  // 算力充值弹窗
-  const [rechargeOpen, setRechargeOpen] = useState(false);
   usePullDownRefresh(async () => { if (!isLoggedOut()) await state.reload(); Taro.stopPullDownRefresh(); });
 
   const pickMode = (mode: ThemeMode) => {
@@ -100,7 +97,7 @@ export default function ProfilePage() {
           </View>
           <View className='mini-membership-right'>
             <View className='mini-membership-points'><Text>{state.data.points}</Text><Text>点</Text></View>
-            <Button className='mini-membership-recharge' onClick={() => setRechargeOpen(true)}>充值</Button>
+            <Button className='mini-membership-recharge' onClick={() => Taro.navigateTo({ url: '/pages/recharge/index' })}>充值</Button>
           </View>
         </View>
 
@@ -117,22 +114,27 @@ export default function ProfilePage() {
           </View>
         </View>
 
-        {/* 使用协议 / 隐私政策 */}
+        {/* 使用协议 / 隐私政策 / 模式切换（同一容器） */}
         <View className='mini-settings-list'>
           <View className='mini-settings-row' onClick={() => Taro.navigateTo({ url: '/pages/legal/index?type=terms' })}>
-            <Text>使用协议</Text>
+            <View className='mini-settings-left'>
+              <View className='mini-settings-icon ui-icon-terms' />
+              <Text>使用协议</Text>
+            </View>
             <Text className='mini-settings-arrow'>›</Text>
           </View>
           <View className='mini-settings-row' onClick={() => Taro.navigateTo({ url: '/pages/legal/index?type=privacy' })}>
-            <Text>隐私政策</Text>
+            <View className='mini-settings-left'>
+              <View className='mini-settings-icon ui-icon-privacy' />
+              <Text>隐私政策</Text>
+            </View>
             <Text className='mini-settings-arrow'>›</Text>
           </View>
-        </View>
-
-        {/* 模式切换 */}
-        <View className='mini-settings-list mini-settings-list--theme'>
           <View className='mini-settings-row' onClick={() => setShowThemeSheet(true)}>
-            <Text>模式切换</Text>
+            <View className='mini-settings-left'>
+              <View className='mini-settings-icon ui-icon-theme' />
+              <Text>模式切换</Text>
+            </View>
             <View className='mini-settings-pick'>
               <Text className='mini-settings-current'>{themeMode === 'auto' ? '跟随系统' : modeLabel(themeMode)}</Text>
               <Text className='mini-settings-arrow'>›</Text>
@@ -176,8 +178,7 @@ export default function ProfilePage() {
       </View>
     </t-popup>
 
-    {/* 算力充值弹窗（套餐展示 + 联系客服） */}
-    <RechargeSheet visible={rechargeOpen} onClose={() => setRechargeOpen(false)} />
+    {/* 算力充值已改为二级页 /pages/recharge/index */}
 
     <t-dialog id='t-dialog' title='' />
     <t-toast id='t-toast' theme='info' />

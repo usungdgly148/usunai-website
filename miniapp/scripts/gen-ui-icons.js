@@ -45,14 +45,31 @@ const ICONS = {
     `<path d='M16 13H8'/>` +
     `<path d='M16 17H8'/>` +
     `<path d='M10 9H8'/>`,
+
+  // 使用协议：文件 + 对勾（Feather file-check）
+  terms: () =>
+    `<path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/>` +
+    `<path d='M14 2v6h6'/>` +
+    `<path d='M9 15l2 2 4-4'/>`,
+
+  // 隐私政策：盾牌（Feather shield）
+  privacy: () =>
+    `<path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/>`,
+
+  // 模式切换：月亮（Feather moon）
+  theme: () =>
+    `<path d='M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z'/>`,
 };
 
 const STROKE_COLOR = '#8a98ad';
+/** 深灰色线性图标（个人中心「使用协议 / 隐私政策 / 模式切换」入口） */
+const DARK_ICONS = new Set(['terms', 'privacy', 'theme']);
+const DARK_STROKE_COLOR = '#5a6b7e';
 
-function buildSvg(render) {
+function buildSvg(render, color) {
   return (
     `<svg xmlns='http://www.w3.org/2000/svg' width='${RASTER_SIZE}' height='${RASTER_SIZE}' viewBox='0 0 24 24' fill='none'>` +
-    `<g stroke='${STROKE_COLOR}' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round' fill='none'>` +
+    `<g stroke='${color}' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round' fill='none'>` +
     render() +
     `</g></svg>`
   );
@@ -66,8 +83,8 @@ try {
 }
 const mode = sharp ? 'PNG' : 'SVG(fallback, sharp 不可用)';
 
-async function toDataUri(render) {
-  const svg = buildSvg(render);
+async function toDataUri(render, color) {
+  const svg = buildSvg(render, color);
   if (!sharp) return `data:image/svg+xml;base64,${Buffer.from(svg, 'utf8').toString('base64')}`;
   const buf = await sharp(Buffer.from(svg, 'utf8'), { density: 288 })
     .resize(RASTER_SIZE, RASTER_SIZE)
@@ -79,7 +96,7 @@ async function toDataUri(render) {
 (async () => {
   const keys = Object.keys(ICONS);
   const uri = {};
-  for (const key of keys) uri[key] = await toDataUri(ICONS[key]);
+  for (const key of keys) uri[key] = await toDataUri(ICONS[key], DARK_ICONS.has(key) ? DARK_STROKE_COLOR : STROKE_COLOR);
 
   const lines = [
     '/* 自动生成，请勿手改 —— 改图标请编辑 scripts/gen-ui-icons.js 后重新运行。 */',

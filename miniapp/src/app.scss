@@ -273,6 +273,8 @@ button::after { border: 0; }
 .mini-membership-points { color: var(--mini-primary-strong); font-size: 49px; }
 .mini-settings-list, .mini-asset-panel { border: 1px solid var(--mini-line); border-radius: 26px; box-shadow: 0 12px 28px rgba(45, 80, 135, .06); }
 .mini-settings-row { min-height: 92px; padding: 0 26px; color: var(--mini-text-2); font-size: 26px; }
+.mini-settings-left { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.mini-settings-icon { width: 42px; height: 42px; flex-shrink: 0; }
 
 /* ===== 个人中心重排（P32）：账号行 / 算力卡 / 常用功能 / 协议入口 ===== */
 .mini-account-row {
@@ -299,7 +301,7 @@ button::after { border: 0; }
   min-height: 168px; border: 1px solid var(--mini-line); border-radius: 26px;
   background: var(--mini-surface); box-shadow: 0 12px 28px rgba(45, 80, 135, .06);
 }
-.mini-common-icon { width: 68px; height: 68px; }
+.mini-common-icon { width: 48px; height: 48px; }
 .mini-common-label { color: var(--mini-text-2); font-size: 25px; font-weight: 600; }
 
 /* 账号与安全头像图标圆底 */
@@ -449,7 +451,6 @@ button::after { border: 0; }
 .td-icon { display: inline-block; font-family: 'td-icons'; font-style: normal; font-weight: 400; line-height: 1; vertical-align: -2px; }
 
 /* 深色模式设置：我的页 外观弹层（theme-sheet）与设置行取值区 */
-.mini-settings-list--theme { margin-bottom: 22px; }
 .mini-settings-pick { display: flex; align-items: center; gap: 6px; }
 .mini-settings-current { color: var(--mini-subtle); font-size: 24px; }
 .theme-sheet { padding: 20px 28px calc(28px + env(safe-area-inset-bottom)); border-radius: 32px 32px 0 0; background: var(--mini-surface); }
@@ -666,12 +667,16 @@ button::after { border: 0; }
 .mini-recharge-entry-desc { display: block; margin-top: 6px; overflow: hidden; color: var(--mini-subtle); font-size: 22px; text-overflow: ellipsis; white-space: nowrap; }
 .mini-recharge-entry .mini-settings-arrow { flex-shrink: 0; color: var(--mini-primary); }
 
-.mini-recharge-sheet { box-sizing: border-box; padding: 30px 30px 44px; border-radius: 32px 32px 0 0; background: var(--mini-surface); }
-.mini-recharge-sheet-head { display: flex; align-items: center; justify-content: space-between; }
-.mini-recharge-sheet-title { color: var(--mini-ink); font-size: 36px; font-weight: 750; }
-.mini-recharge-sheet-close { display: flex; width: 56px; height: 56px; align-items: center; justify-content: center; border-radius: 50%; background: var(--mini-soft); color: var(--mini-subtle); font-size: 26px; line-height: 1; }
-.mini-recharge-sheet-sub { display: block; margin: 14px 2px 4px; color: var(--mini-subtle); font-size: 23px; line-height: 1.5; }
-.mini-recharge-scroll { height: 62vh; margin-top: 18px; }
+/* 算力充值二级页（pages/recharge/index）：内容与网页端弹窗同源，卡片式布局 */
+.mini-recharge-page { padding-bottom: 60px; }
+.mini-recharge-page .mini-recharge-panel {
+  margin-bottom: 18px;
+  border: 1px solid var(--mini-line);
+  border-radius: 26px;
+  background: var(--mini-surface);
+  box-shadow: 0 12px 28px rgba(45, 80, 135, .06);
+}
+.mini-recharge-page .mini-recharge-panel:last-child { margin-bottom: 0; }
 .mini-recharge-label { display: block; margin: 6px 2px 14px; color: var(--mini-ink); font-size: 26px; font-weight: 700; }
 .mini-recharge-empty { padding: 46px 20px; border: 1px dashed var(--mini-line-strong); border-radius: 20px; color: var(--mini-subtle-2); font-size: 24px; text-align: center; }
 .mini-recharge-list { display: flex; flex-direction: column; gap: 16px; }
@@ -683,7 +688,6 @@ button::after { border: 0; }
 .mini-recharge-card-price { flex-shrink: 0; color: var(--mini-primary); font-size: 40px; font-weight: 800; line-height: 1.1; }
 .mini-recharge-card-foot { display: flex; align-items: center; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--mini-line-faint); }
 .mini-recharge-card-validity { color: var(--mini-subtle-2); font-size: 21px; }
-.mini-recharge-grid { display: flex; flex-direction: column; gap: 18px; margin-top: 28px; }
 .mini-recharge-panel { padding: 24px 26px; border-radius: 22px; background: var(--mini-soft); }
 .mini-recharge-qr { display: block; width: 220px; height: 220px; margin: 0 auto; border: 1px solid var(--mini-line); border-radius: 16px; background: #fff; }
 .mini-recharge-qr--empty { display: flex; align-items: center; justify-content: center; color: var(--mini-subtle-2); font-size: 22px; text-align: center; }
