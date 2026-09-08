@@ -98,7 +98,7 @@ export default function ProfilePage() {
           </View>
           <View className='mini-membership-right'>
             <View className='mini-membership-points'><Text>{state.data.points}</Text><Text>点</Text></View>
-            {/* 充值入口暂时下线：置灰且不响应点击（二级页 /pages/recharge/index 内容保留） */}
+            {/* 充值入口已下线：置灰且不响应点击（充值二级页已删除） */}
             <Button className='mini-membership-recharge mini-membership-recharge-disabled' disabled>充值</Button>
           </View>
         </View>
@@ -179,8 +179,6 @@ export default function ProfilePage() {
         <Text className='theme-sheet-foot'>当前界面为{modeLabel(resolveTheme(themeMode))}外观{themeMode === 'auto' ? '（跟随系统）' : ''}，选择后立即生效</Text>
       </View>
     </t-popup>
-
-    {/* 算力充值已改为二级页 /pages/recharge/index */}
 
     <t-dialog id='t-dialog' title='' />
     <t-toast id='t-toast' theme='info' />
