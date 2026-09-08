@@ -176,7 +176,7 @@ export function LayoutBlocks({ layout, content, category = '', type = '' }: { la
           {image
             ? <ResilientImage className='mini-category-picture' src={image} width={640} height={480} lazyLoad />
             : <View className='mini-category-fallback' style={{ backgroundColor: item.color || undefined }} />}
-          <View className='mini-category-cover'><Text className='mini-category-label'>{title}</Text><Text className='mini-category-go'>→</Text></View>
+          <View className='mini-category-cover'><Text className='mini-category-label'>{title}</Text></View>
         </View>;
       })}</View>
     </View>;
