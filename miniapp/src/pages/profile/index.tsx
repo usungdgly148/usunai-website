@@ -23,6 +23,7 @@ const COMMON_ITEMS = [
   { label: '我的资产', url: '/pages/assets/index', iconClass: 'ui-icon-assets' },
   { label: '算力记录', url: '/pages/compute/index', iconClass: 'ui-icon-compute' },
   { label: '订单记录', url: '/pages/orders/index', iconClass: 'ui-icon-orders' },
+  { label: '联系客服', url: '/pages/service/index', iconClass: 'ui-icon-service' },
 ];
 
 export default function ProfilePage() {

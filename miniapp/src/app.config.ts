@@ -15,6 +15,7 @@ export default {
     'pages/account-security/index',
     'pages/legal/index',
     'pages/recharge/index',
+    'pages/service/index',
     'pages/webview/index'
   ],
   usingComponents: {

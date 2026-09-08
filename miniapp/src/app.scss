@@ -302,7 +302,7 @@ button::after { border: 0; }
 }
 
 .mini-common-section { margin-bottom: 22px; }
-.mini-common-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.mini-common-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 .mini-common-item {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
   min-height: 168px; border: 1px solid var(--mini-line); border-radius: 26px;
@@ -759,6 +759,45 @@ button::after { border: 0; }
 .mini-recharge-line { display: block; padding: 3px 2px; color: var(--mini-text-2); font-size: 22px; line-height: 1.5; }
 .mini-recharge-info { display: block; color: var(--mini-text-2); font-size: 23px; line-height: 1.7; white-space: pre-line; }
 .mini-recharge-note { display: block; color: var(--mini-subtle-2); font-size: 22px; }
+
+/* 联系客服二级页（pages/service/index）：客服微信二维码 + 「长按扫码，咨询客服」提示 */
+.mini-service-page { padding-bottom: 60px; }
+.mini-service-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 30px;
+  padding: 46px 32px 40px;
+  border: 1px solid var(--mini-line);
+  border-radius: 26px;
+  background: var(--mini-surface);
+  box-shadow: 0 12px 28px rgba(45, 80, 135, .06);
+}
+.mini-service-qr {
+  display: block;
+  width: 260px;
+  height: 260px;
+  border: 1px solid var(--mini-line);
+  border-radius: 18px;
+  background: #fff;
+}
+.mini-service-qr--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 20px;
+  color: var(--mini-subtle-2);
+  font-size: 24px;
+  text-align: center;
+}
+.mini-service-tip {
+  display: block;
+  margin-top: 30px;
+  color: var(--mini-text-2);
+  font-size: 27px;
+  font-weight: 600;
+  text-align: center;
+}
 
 /* ===== 个人中心：未登录卡片 + 退出登录 ===== */
 .mini-login-card { display: flex; align-items: center; flex-direction: column; margin: 30px 0 26px; padding: 54px 36px; border: 1px solid var(--mini-line); border-radius: 30px; background: var(--mini-surface); box-shadow: 0 12px 28px rgba(45, 80, 135, .06); }
