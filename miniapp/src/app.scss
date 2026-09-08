@@ -170,9 +170,6 @@ button::after { border: 0; }
 .mini-membership-points Text:last-child { margin-left: 5px; font-size: 22px; }
 .mini-bind-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 22px; padding: 22px; border: 1px solid var(--mini-primary-border); border-radius: 22px; background: var(--mini-surface); }
 .mini-bind-button { flex-shrink: 0; margin: 0; padding: 0 18px; border-radius: 16px; background: var(--mini-primary); color: #fff; font-size: 23px; }
-.mini-profile-shortcuts { display: grid; grid-template-columns: repeat(4, 1fr); margin-bottom: 22px; padding: 20px 8px; border-radius: 24px; background: var(--mini-surface); box-shadow: 0 8px 24px rgba(17, 42, 88, .05); }
-.mini-profile-shortcut { display: flex; align-items: center; flex-direction: column; gap: 10px; color: var(--mini-text-2); font-size: 20px; }
-.mini-profile-shortcut-icon { display: flex; width: 64px; height: 64px; align-items: center; justify-content: center; border-radius: 20px; background: var(--mini-primary-soft); color: var(--mini-primary); font-size: 30px; font-weight: 700; }
 .mini-settings-list, .mini-asset-panel { overflow: hidden; border-radius: 24px; background: var(--mini-surface); box-shadow: 0 8px 24px rgba(17, 42, 88, .05); }
 .mini-settings-row { display: flex; align-items: center; justify-content: space-between; padding: 28px; border-bottom: 1px solid var(--mini-line-faint); color: var(--mini-ink); font-size: 29px; }
 .mini-settings-row:last-child { border-bottom: 0; }
@@ -274,9 +271,6 @@ button::after { border: 0; }
 .mini-membership-kicker { display: block; color: var(--mini-primary-strong); font-size: 18px; font-weight: 700; letter-spacing: 1px; }
 .mini-membership-title { margin-top: 4px; color: var(--mini-ink); font-size: 31px; }
 .mini-membership-points { color: var(--mini-primary-strong); font-size: 49px; }
-.mini-profile-shortcuts { margin-bottom: 18px; padding: 20px 8px; border: 1px solid var(--mini-line-strong); border-radius: 26px; }
-.mini-profile-shortcut { min-height: 112px; justify-content: center; color: var(--mini-text-2); font-size: 19px; }
-.mini-profile-shortcut-icon { width: 58px; height: 58px; border-radius: 18px; background: linear-gradient(135deg, var(--mini-primary-soft), var(--mini-primary-border)); font-size: 27px; }
 .mini-settings-list, .mini-asset-panel { border: 1px solid var(--mini-line); border-radius: 26px; box-shadow: 0 12px 28px rgba(45, 80, 135, .06); }
 .mini-settings-row { min-height: 92px; padding: 0 26px; color: var(--mini-text-2); font-size: 26px; }
 .mini-asset-tabs { margin: 0 -28px 20px; }

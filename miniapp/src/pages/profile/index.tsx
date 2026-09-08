@@ -159,13 +159,6 @@ export default function ProfilePage() {
     { icon: '🔒', label: '登录密码', value: state.data?.hasPassword ? '已设置' : '未设置', action: openPwd, actionText: '修改' },
   ];
 
-  const shortcuts: Array<{ icon: string; label: string; url?: string; onClick?: () => void }> = [
-    { icon: '▣', label: '我的资产', url: '/pages/assets/index' },
-    { icon: 'ϟ', label: '算力充值', onClick: () => setRechargeOpen(true) },
-    { icon: '◉', label: '订单记录', url: '/pages/orders/index' },
-    { icon: '◎', label: 'AI工具', url: '/pages/category/index?type=agent&title=AI%E6%99%BA%E8%83%BD%E4%BD%93' },
-  ];
-
   const links = [
     { label: '我的资产', url: '/pages/assets/index' },
     { label: '算力记录', url: '/pages/compute/index' },
@@ -248,8 +241,7 @@ export default function ProfilePage() {
       </>
     ) : null}
 
-    {/* 快捷入口与常用链接（未登录也可见） */}
-    <View className='mini-profile-shortcuts'>{shortcuts.map(item => <View className='mini-profile-shortcut' key={item.label} onClick={() => (item.onClick ? item.onClick() : Taro.navigateTo({ url: item.url || '' }))}><Text className='mini-profile-shortcut-icon'>{item.icon}</Text><Text>{item.label}</Text></View>)}</View>
+    {/* 常用链接（未登录也可见） */}
     <View className='mini-settings-list'>{links.map(item => <View className='mini-settings-row' key={item.label} onClick={() => Taro.navigateTo({ url: item.url })}><Text>{item.label}</Text><Text className='mini-settings-arrow'>›</Text></View>)}</View>
 
     {/* 深色模式 */}
