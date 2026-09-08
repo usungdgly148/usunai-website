@@ -293,6 +293,13 @@ button::after { border: 0; }
   font-size: 24px; font-weight: 650; box-shadow: 0 8px 18px rgba(48, 92, 224, .25);
 }
 .mini-membership-recharge::after { border: 0; }
+/* 充值入口暂时下线：置灰、无阴影（二级页内容保留，恢复时删此类与按钮的 disabled/类名） */
+.mini-membership-recharge-disabled,
+.mini-membership-recharge-disabled[disabled] {
+  background: var(--mini-soft);
+  color: var(--mini-subtle-2);
+  box-shadow: none;
+}
 
 .mini-common-section { margin-bottom: 22px; }
 .mini-common-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }

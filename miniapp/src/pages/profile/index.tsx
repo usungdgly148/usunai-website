@@ -97,7 +97,8 @@ export default function ProfilePage() {
           </View>
           <View className='mini-membership-right'>
             <View className='mini-membership-points'><Text>{state.data.points}</Text><Text>点</Text></View>
-            <Button className='mini-membership-recharge' onClick={() => Taro.navigateTo({ url: '/pages/recharge/index' })}>充值</Button>
+            {/* 充值入口暂时下线：置灰且不响应点击（二级页 /pages/recharge/index 内容保留） */}
+            <Button className='mini-membership-recharge mini-membership-recharge-disabled' disabled>充值</Button>
           </View>
         </View>
 
