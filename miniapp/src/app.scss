@@ -732,12 +732,19 @@ button::after { border: 0; }
 .mini-recharge-card-main { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .mini-recharge-card-left { min-width: 0; flex: 1; }
 .mini-recharge-card-name { display: block; overflow: hidden; color: var(--mini-ink); font-size: 29px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-.mini-recharge-card-points { display: block; margin-top: 8px; color: var(--mini-subtle); font-size: 23px; }
-.mini-recharge-card-right { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
+.mini-recharge-card-points { display: block; margin-top: 8px; color: var(--mini-subtle); font-size: 27px; }
+.mini-recharge-card-right { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 16px; }
 .mini-recharge-card-price { color: var(--mini-primary); font-size: 40px; font-weight: 800; line-height: 1.1; }
-.mini-recharge-pay { margin: 0; padding: 0 26px; height: 58px; line-height: 58px; border-radius: 999px; background: linear-gradient(135deg, #255be5, #7663ed); color: #fff; font-size: 24px; font-weight: 650; box-shadow: 0 8px 18px rgba(48, 92, 224, .25); }
+.mini-recharge-radio { display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; border: 3px solid var(--mini-line-strong); border-radius: 50%; transition: border-color .2s; }
+.mini-recharge-radio-dot { width: 20px; height: 20px; border-radius: 50%; background: transparent; transition: background .2s; }
+.mini-recharge-card--selected { border-color: var(--mini-primary); }
+.mini-recharge-card--selected .mini-recharge-radio { border-color: var(--mini-primary); }
+.mini-recharge-card--selected .mini-recharge-radio-dot { background: var(--mini-primary); }
+.mini-recharge-pay { margin: 0; border-radius: 999px; background: linear-gradient(135deg, #255be5, #7663ed); color: #fff; font-weight: 650; box-shadow: 0 8px 18px rgba(48, 92, 224, .25); }
 .mini-recharge-pay::after { border: 0; }
 .mini-recharge-pay[disabled] { background: var(--mini-soft); color: var(--mini-subtle-2); box-shadow: none; }
+.mini-recharge-footer { margin-top: 24px; }
+.mini-recharge-pay--full { display: block; width: 100%; padding: 0 26px; height: 88px; line-height: 88px; font-size: 30px; }
 .mini-recharge-card-foot { display: flex; align-items: center; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--mini-line-faint); }
 .mini-recharge-card-validity { color: var(--mini-subtle-2); font-size: 21px; }
 .mini-recharge-panel { padding: 24px 26px; border-radius: 22px; background: var(--mini-soft); }

@@ -32,6 +32,7 @@ function validityText(pkg: ComputePackage) {
  */
 export default function RechargePage() {
   const { pageStyle } = useThemePage();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [payingId, setPayingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -60,8 +61,13 @@ export default function RechargePage() {
     }
   };
 
-  const handlePay = async (pkg: ComputePackage) => {
+  const handlePay = async () => {
     if (payingId) return;
+    const pkg = packages.find((item) => item.id === selectedId);
+    if (!pkg) {
+      Taro.showToast({ title: '请先选择套餐', icon: 'none' });
+      return;
+    }
     setPayingId(pkg.id);
     try {
       const order = await createRechargeOrder(pkg.id);
@@ -109,30 +115,43 @@ export default function RechargePage() {
             <View className='mini-recharge-empty'>后台暂未设置算力套餐</View>
           ) : (
             <View className='mini-recharge-list'>
-              {packages.map((pkg) => (
-                <View key={pkg.id} className='mini-recharge-card'>
-                  <View className='mini-recharge-card-main'>
-                    <View className='mini-recharge-card-left'>
-                      <Text className='mini-recharge-card-name'>{pkg.name}</Text>
-                      <Text className='mini-recharge-card-points'>{Number(pkg.points || 0).toLocaleString()} 点</Text>
+              {packages.map((pkg) => {
+                const selected = selectedId === pkg.id;
+                return (
+                  <View
+                    key={pkg.id}
+                    className={`mini-recharge-card${selected ? ' mini-recharge-card--selected' : ''}`}
+                    onClick={() => setSelectedId(pkg.id)}
+                  >
+                    <View className='mini-recharge-card-main'>
+                      <View className='mini-recharge-card-left'>
+                        <Text className='mini-recharge-card-name'>{pkg.name}</Text>
+                        <Text className='mini-recharge-card-points'>{Number(pkg.points || 0).toLocaleString()} 点</Text>
+                      </View>
+                      <View className='mini-recharge-card-right'>
+                        <Text className='mini-recharge-card-price'>¥{pkg.price}</Text>
+                        <View className='mini-recharge-radio'>
+                          <View className='mini-recharge-radio-dot' />
+                        </View>
+                      </View>
                     </View>
-                    <View className='mini-recharge-card-right'>
-                      <Text className='mini-recharge-card-price'>¥{pkg.price}</Text>
-                      <Button
-                        className='mini-recharge-pay'
-                        disabled={payingId !== null}
-                        loading={payingId === pkg.id}
-                        onClick={() => handlePay(pkg)}
-                      >{payingId === pkg.id ? '支付中' : '立即支付'}</Button>
+                    <View className='mini-recharge-card-foot'>
+                      <Text className='mini-recharge-card-validity'>{validityText(pkg)}</Text>
                     </View>
                   </View>
-                  <View className='mini-recharge-card-foot'>
-                    <Text className='mini-recharge-card-validity'>{validityText(pkg)}</Text>
-                  </View>
-                </View>
-              ))}
+                );
+              })}
             </View>
           )}
+        </View>
+
+        <View className='mini-recharge-footer'>
+          <Button
+            className='mini-recharge-pay mini-recharge-pay--full'
+            disabled={!selectedId || payingId !== null}
+            loading={payingId !== null}
+            onClick={handlePay}
+          >{payingId ? '支付中' : '立即支付'}</Button>
         </View>
 
         {data.rechargeInfo && data.rechargeInfo.trim() ? (

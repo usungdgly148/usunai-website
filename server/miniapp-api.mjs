@@ -386,6 +386,12 @@ async function createRechargeOrder(req, res, requestId, session, deps) {
       amountCents: Math.round(price * 100),
     });
   } catch (error) {
+    console.error('[recharge] createJsapiOrder 失败:', {
+      code: error?.code,
+      message: error?.message,
+      status: error?.status,
+      detail: error?.detail,
+    });
     sendJson(res, 502, errorEnvelope(error.code || 'WECHAT_PAY_ORDER_FAILED', error.message || '微信支付下单失败', requestId), requestId);
     return;
   }
