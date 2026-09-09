@@ -36,6 +36,11 @@ export default function AdminMiniappSettings() {
   useEffect(() => { load(); }, []);
 
   const save = async () => {
+    const key = apiV3Key.trim();
+    if (key && key.length !== 32) {
+      setMsg({ ok: false, msg: 'APIv3 密钥必须是 32 位（当前 ' + key.length + ' 位），请从微信商户平台「账户中心 → API 安全 → APIv3 密钥」获取' });
+      return;
+    }
     setSaving(true);
     setMsg(null);
     try {

@@ -3936,6 +3936,11 @@ const server = http.createServer(async (req, res) => {
       const serialNo = String((body && body.serialNo) || '').trim();
       const apiV3Key = String((body && body.apiV3Key) || '').trim();
       const privateKey = String((body && body.privateKey) || '').trim();
+      // APIv3 密钥必须是 32 位（微信规定），否则回调解密必然失败。
+      if (apiV3Key && apiV3Key.length !== 32) {
+        res.end(JSON.stringify({ ok: false, msg: 'APIv3 密钥必须是 32 位，请从微信商户平台「账户中心 → API 安全 → APIv3 密钥」获取' }));
+        return;
+      }
       // 空值保留原值（前端回显脱敏后保存，不应清空已配置的密钥/私钥）
       const next = {
         serialNo: serialNo || (typeof existing.serialNo === 'string' ? existing.serialNo : ''),

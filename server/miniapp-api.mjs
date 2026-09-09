@@ -421,8 +421,9 @@ async function handleRechargeNotify(req, res, requestId, deps) {
   let tx;
   try {
     tx = decryptNotifyResource(payload && payload.resource);
-  } catch {
+  } catch (error) {
     // 解密失败：密钥不符或报文被篡改，忽略并让微信按失败重试策略处理。
+    console.error('[recharge] notify 解密失败:', error?.message || error);
     reply(400, 'FAIL', 'decrypt failed');
     return;
   }
