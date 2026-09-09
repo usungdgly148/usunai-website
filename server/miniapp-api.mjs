@@ -1,4 +1,12 @@
 import crypto from 'node:crypto';
+import {
+  buildPayParams,
+  createJsapiOrder,
+  decryptNotifyResource,
+  queryOrderByOutTradeNo,
+  wechatPayConfigured,
+} from './wechat-pay.mjs';
+import { resolveMaxPlanValidity } from './plan-validity.mjs';
 
 const DEFAULT_PAGE_SIZE = 12;
 const MAX_PAGE_SIZE = 100;
@@ -310,6 +318,200 @@ async function changePassword(req, res, requestId, session, deps) {
   sendJson(res, 200, successEnvelope({ ok: true }, requestId), requestId);
 }
 
+// ============ 算力充值：微信在线支付 ============
+
+// 创建充值订单并调起微信支付（JSAPI 下单）。
+async function createRechargeOrder(req, res, requestId, session, deps) {
+  const { KV, sanitizeId } = deps;
+  if (!wechatPayConfigured()) {
+    sendJson(res, 503, errorEnvelope('WECHAT_PAY_NOT_CONFIGURED', '微信支付尚未配置，请稍后再试', requestId), requestId);
+    return;
+  }
+  const body = await deps.readBody(req);
+  const packageId = sanitizeId(String(body && body.packageId));
+  if (!packageId) {
+    sendJson(res, 400, errorEnvelope('INVALID_PACKAGE', '请选择充值套餐', requestId), requestId);
+    return;
+  }
+  const packages = await KV.kvGet('computePackages');
+  const pkg = (Array.isArray(packages) ? packages : []).find(
+    (item) => item && String(item.id) === packageId && item.published !== false,
+  );
+  if (!pkg) {
+    sendJson(res, 400, errorEnvelope('PACKAGE_NOT_FOUND', '套餐不存在或已下架', requestId), requestId);
+    return;
+  }
+  const points = Number(pkg.points);
+  const price = Number(pkg.price);
+  if (!Number.isFinite(points) || points <= 0 || !Number.isFinite(price) || price <= 0) {
+    sendJson(res, 400, errorEnvelope('INVALID_PACKAGE', '套餐配置无效，请稍后再试', requestId), requestId);
+    return;
+  }
+  const identity = await KV.kvGet(session.identityKey);
+  const openid = identity && identity.openid ? String(identity.openid) : '';
+  if (!openid) {
+    sendJson(res, 403, errorEnvelope('OPENID_MISSING', '缺少微信身份信息，请重新登录后重试', requestId), requestId);
+    return;
+  }
+  const outTradeNo = 'p' + Date.now() + crypto.randomBytes(6).toString('hex');
+  const now = new Date().toISOString();
+  const userId = String(session.userId || '');
+  const orderRecord = {
+    id: outTradeNo,
+    userId: sanitizeId(userId),
+    type: 'compute',
+    action: `在线充值（${pkg.name || ''}）`,
+    name: pkg.name || `充值 ${points} 点`,
+    amount: price,
+    status: 'pending',
+    createdAt: now,
+    meta: {
+      packageId: pkg.id,
+      packageName: pkg.name,
+      points,
+      price,
+      validDays: Object.prototype.hasOwnProperty.call(pkg, 'validDays') ? Number(pkg.validDays) : undefined,
+      validFrom: pkg.validFrom || undefined,
+    },
+  };
+  await KV.kvPut('order_' + sanitizeId(outTradeNo), orderRecord);
+  let prepayId;
+  try {
+    prepayId = await createJsapiOrder({
+      openid,
+      outTradeNo,
+      description: pkg.name ? `友尚AI算力充值-${pkg.name}` : '友尚AI算力充值',
+      amountCents: Math.round(price * 100),
+    });
+  } catch (error) {
+    sendJson(res, 502, errorEnvelope(error.code || 'WECHAT_PAY_ORDER_FAILED', error.message || '微信支付下单失败', requestId), requestId);
+    return;
+  }
+  sendJson(res, 200, successEnvelope({ orderId: outTradeNo, payParams: buildPayParams(prepayId) }, requestId), requestId);
+}
+
+// 微信支付结果通知回调（无登录态，由微信服务器直连）。
+async function handleRechargeNotify(req, res, requestId, deps) {
+  const { KV, sanitizeId } = deps;
+  const reply = (status, code, message) => {
+    res.statusCode = status;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({ code, message }));
+  };
+  if (!wechatPayConfigured()) {
+    reply(503, 'FAIL', 'wechat pay not configured');
+    return;
+  }
+  let payload;
+  try {
+    payload = await deps.readBody(req);
+  } catch {
+    reply(400, 'FAIL', 'invalid body');
+    return;
+  }
+  let tx;
+  try {
+    tx = decryptNotifyResource(payload && payload.resource);
+  } catch {
+    // 解密失败：密钥不符或报文被篡改，忽略并让微信按失败重试策略处理。
+    reply(400, 'FAIL', 'decrypt failed');
+    return;
+  }
+  const outTradeNo = String(tx.out_trade_no || '');
+  if (!outTradeNo) {
+    reply(400, 'FAIL', 'missing out_trade_no');
+    return;
+  }
+  // 主动查单二次确认（商户私钥签名，微信权威交易状态）。
+  let confirmed;
+  try {
+    confirmed = await queryOrderByOutTradeNo(outTradeNo);
+  } catch {
+    reply(502, 'FAIL', 'query failed');
+    return;
+  }
+  if (!confirmed || String(confirmed.trade_state) !== 'SUCCESS') {
+    // 未支付 / 处理中：返回 FAIL 让微信稍后重试，直到支付成功或超过重试窗口。
+    reply(200, 'FAIL', `trade_state=${confirmed && confirmed.trade_state}`);
+    return;
+  }
+  const order = await KV.kvGet('order_' + sanitizeId(outTradeNo));
+  if (!order) {
+    reply(200, 'SUCCESS', 'order not found');
+    return;
+  }
+  const userId = String(order.userId || '');
+  const points = Number(order.meta && order.meta.points);
+  if (!userId || !Number.isFinite(points) || points <= 0) {
+    reply(200, 'FAIL', 'invalid order');
+    return;
+  }
+  const now = new Date().toISOString();
+  const packageName = order.meta && order.meta.packageName ? String(order.meta.packageName) : '';
+  const validDays = order.meta && Object.prototype.hasOwnProperty.call(order.meta, 'validDays') ? Number(order.meta.validDays) : 0;
+  const validFrom = order.meta && order.meta.validFrom ? String(order.meta.validFrom) : '';
+  // 有效期处理：与后台手动充值同规则（不叠加时长，永久优先）。
+  const userPatch = {};
+  const existingUser = await KV.kvGet('user_' + sanitizeId(userId));
+  if (Number.isFinite(validDays) && validDays > 0) {
+    const resolved = resolveMaxPlanValidity(existingUser, {
+      validFrom,
+      validDays,
+      fallbackStart: now.slice(0, 10),
+    });
+    userPatch.planValidFrom = resolved.planValidFrom;
+    userPatch.planValidDays = resolved.planValidDays;
+    if (resolved.winner === 'incoming' && resolved.planValidFrom) {
+      const days = Number(resolved.planValidDays);
+      const startMs = new Date(resolved.planValidFrom).getTime();
+      const expireAt = days === 0
+        ? '长期有效'
+        : Number.isFinite(startMs) && days > 0
+          ? new Date(startMs + days * 86400000).toISOString().slice(0, 10)
+          : '';
+      if (expireAt) userPatch.membership = { plan: packageName, expireAt };
+    }
+  }
+  const transactionId = String(confirmed.transaction_id || '');
+  const computeRecord = {
+    id: outTradeNo,
+    userId: sanitizeId(userId),
+    type: 'recharge',
+    amount: points,
+    reason: packageName ? `微信支付购买「${packageName}」` : '微信支付充值',
+    title: packageName || '微信支付充值',
+    createdAt: now,
+    meta: {
+      payment: 'wechat',
+      packageId: order.meta && order.meta.packageId,
+      packageName,
+      outTradeNo,
+      transactionId,
+      validDays,
+      validFrom,
+    },
+  };
+  const paidOrder = {
+    ...order,
+    status: 'paid',
+    action: packageName ? `在线充值（${packageName}）` : '在线充值',
+    meta: { ...(order.meta || {}), transactionId, paidAt: now },
+  };
+  const result = await KV.kvAdminAdjustPoints({
+    userId,
+    amount: points,
+    userPatch,
+    computeRecord,
+    orderRecord: paidOrder,
+    requestId: outTradeNo,
+  });
+  if (!result.ok && result.reason !== 'duplicate') {
+    reply(500, 'FAIL', result.reason || 'adjust failed');
+    return;
+  }
+  reply(200, 'SUCCESS', 'ok');
+}
+
 export async function handleMiniappApi(req, res, url, deps) {
   const path = url.pathname;
   if (!path.startsWith('/api/miniapp/v1/')) return false;
@@ -323,6 +525,18 @@ export async function handleMiniappApi(req, res, url, deps) {
     if (!session) return true;
     if (path === '/api/miniapp/v1/profile') await updateProfile(req, res, requestId, session, deps);
     else await changePassword(req, res, requestId, session, deps);
+    return true;
+  }
+
+  if (req.method === 'POST' && path === '/api/miniapp/v1/recharge/order') {
+    const session = userSession(req, res, requestId, { getSession, isAdminSession });
+    if (!session) return true;
+    await createRechargeOrder(req, res, requestId, session, deps);
+    return true;
+  }
+
+  if (req.method === 'POST' && path === '/api/miniapp/v1/recharge/notify') {
+    await handleRechargeNotify(req, res, requestId, deps);
     return true;
   }
 
@@ -348,6 +562,27 @@ export async function handleMiniappApi(req, res, url, deps) {
   if (!session) return true;
   const userId = String(session.userId || '');
   const safeId = sanitizeId(userId);
+
+  if (path === '/api/miniapp/v1/recharge/status') {
+    const orderId = sanitizeId(String(url.searchParams.get('orderId') || ''));
+    if (!orderId) {
+      sendJson(res, 400, errorEnvelope('INVALID_ORDER', '缺少订单号', requestId), requestId);
+      return true;
+    }
+    const order = await KV.kvGet('order_' + orderId);
+    if (!order || String(order.userId || '') !== safeId) {
+      sendJson(res, 404, errorEnvelope('NOT_FOUND', '订单不存在', requestId), requestId);
+      return true;
+    }
+    sendJson(res, 200, successEnvelope({
+      orderId: order.id,
+      status: order.status,
+      points: order.meta && order.meta.points,
+      amount: order.amount,
+      name: order.name,
+    }, requestId), requestId);
+    return true;
+  }
 
   if (path === '/api/miniapp/v1/me') {
     const [reg, user] = await Promise.all([KV.kvGet('reg_' + safeId), KV.kvGet('user_' + safeId)]);

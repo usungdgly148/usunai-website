@@ -1,5 +1,5 @@
 import Taro from '@tarojs/taro';
-import type { ApiEnvelope, MiniappLayout, PublicContent, UserProfile } from '../types';
+import type { ApiEnvelope, MiniappLayout, PublicContent, RechargeOrderResult, RechargeStatus, UserProfile } from '../types';
 
 export const API_BASE = __MINIAPP_API_BASE__;
 export const MINIAPP_ENVIRONMENT = __MINIAPP_ENV__;
@@ -192,6 +192,18 @@ export async function updateProfile(patch: { name?: string; avatar?: string }) {
 /** 修改登录密码（无密码账号不支持）。 */
 export async function changePassword(payload: { oldPassword?: string; newPassword: string }) {
   return (await apiRequest<{ ok: boolean }>('/api/miniapp/v1/password', { method: 'POST', data: payload })).data;
+}
+
+/** 创建充值订单并返回微信支付调起参数。 */
+export async function createRechargeOrder(packageId: string) {
+  return (await apiRequest<RechargeOrderResult>('/api/miniapp/v1/recharge/order', {
+    method: 'POST', data: { packageId },
+  })).data;
+}
+
+/** 查询充值订单状态（支付成功后确认到账）。 */
+export async function getRechargeStatus(orderId: string) {
+  return (await apiRequest<RechargeStatus>(`/api/miniapp/v1/recharge/status?orderId=${encodeURIComponent(orderId)}`)).data;
 }
 
 export function isBindingRequired() {

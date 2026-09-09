@@ -91,6 +91,7 @@ export interface ComputePackage {
   validDays: number;
   validFrom: string | null;
   sortOrder: number;
+  published?: boolean;
 }
 export interface CustomerService {
   enabled: boolean;
@@ -155,4 +156,28 @@ export interface ApiEnvelope<T> {
   data: T;
   meta: { requestId: string; timestamp: string; page?: number; pageSize?: number; total?: number; totalPages?: number };
   error?: { code: string; message: string };
+}
+
+/** 微信支付 JSAPI 调起参数（传给 Taro.requestPayment）。 */
+export interface RechargePayParams {
+  timeStamp: string;
+  nonceStr: string;
+  package: string;
+  signType: 'RSA';
+  paySign: string;
+}
+
+/** 充值下单结果：订单号 + 支付参数。 */
+export interface RechargeOrderResult {
+  orderId: string;
+  payParams: RechargePayParams;
+}
+
+/** 充值订单状态（支付后查询）。 */
+export interface RechargeStatus {
+  orderId: string;
+  status: string;
+  points: number;
+  amount: number;
+  name: string;
 }
