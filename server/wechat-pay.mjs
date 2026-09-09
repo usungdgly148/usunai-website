@@ -142,9 +142,8 @@ export function buildPayParams(prepayId) {
 // 主动查单：返回微信权威交易结果（含 trade_state）。
 export async function queryOrderByOutTradeNo(outTradeNo) {
   const canonicalUrl = `${QUERY_PATH_PREFIX}${encodeURIComponent(outTradeNo)}?mchid=${encodeURIComponent(WECHAT_PAY.mchid)}`;
-  // 签名 canonicalUrl 只取 path，不含 query。
-  const signPath = `${QUERY_PATH_PREFIX}${encodeURIComponent(outTradeNo)}`;
-  const { authorization } = buildAuthorization('GET', signPath, null);
+  // 微信 APIv3 签名串的 URL 必须包含 query（path + query），否则查单验签失败返回 SIGN_ERROR。
+  const { authorization } = buildAuthorization('GET', canonicalUrl, null);
   const response = await fetch(`${API_HOST}${canonicalUrl}`, {
     method: 'GET',
     headers: { Authorization: authorization, Accept: 'application/json' },

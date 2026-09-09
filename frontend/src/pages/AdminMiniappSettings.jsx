@@ -96,6 +96,8 @@ export default function AdminMiniappSettings() {
             <label className="text-xs text-slate-500 mb-1 block">APIv3 密钥（32 位）</label>
             <input
               type="password"
+              autoComplete="new-password"
+              name="apiV3Key"
               value={apiV3Key}
               onChange={(e) => setApiV3Key(e.target.value)}
               placeholder={apiV3KeySet ? '已设置（留空则不修改）' : '输入 32 位 APIv3 密钥'}
