@@ -46,13 +46,17 @@ page {
   --td-brand-color: var(--mini-primary);
   --td-brand-color-light: var(--mini-primary-soft);
 
-  /* 底部导航栏（极简 iOS 毛玻璃胶囊） */
-  --mini-tab-bg: rgba(255, 255, 255, .58);
-  --mini-tab-border: rgba(255, 255, 255, .72);
-  --mini-tab-shadow: 0 10rpx 36rpx rgba(15, 50, 91, .14);
-  --mini-tab-text: #8a98ad;
-  --mini-tab-text-active: #1f2342;
-  --mini-tab-indicator: #3b82f6;
+  /* 底部导航栏（iOS Liquid Glass：80% 基础伪玻璃 + 20% 真毛玻璃增强） */
+  /* 基础玻璃渐变 + 淡蓝环境光（radial-gradient 多层），不依赖 backdrop-filter */
+  --mini-tab-bg: radial-gradient(circle at 80% 50%, rgba(70, 130, 255, .10), transparent 55%), linear-gradient(180deg, rgba(255, 255, 255, .82), rgba(245, 249, 255, .88));
+  --mini-tab-border: rgba(255, 255, 255, .88);        /* 半透明玻璃边 */
+  --mini-tab-shadow: 0 8rpx 30rpx rgba(60, 100, 160, .12), inset 0 1rpx 0 rgba(255, 255, 255, .95);
+  --mini-tab-text: rgba(138, 152, 173, .7);           /* 未选中灰蓝文字（0.7 透明度，低存在感） */
+  --mini-tab-text-active: #2878e8;                    /* 选中蓝色文字 */
+  /* 选中气泡：斜向玻璃渐变 + 内高光 + 轻微蓝光晕 */
+  --mini-tab-bubble: linear-gradient(145deg, rgba(255, 255, 255, .96), rgba(235, 244, 255, .80));
+  --mini-tab-bubble-border: rgba(255, 255, 255, .95);
+  --mini-tab-bubble-shadow: inset 0 1rpx 4rpx rgba(255, 255, 255, 1), 0 4rpx 16rpx rgba(50, 120, 240, .15);
 }
 
 view, text, input, textarea, button, image { box-sizing: border-box; }
@@ -115,6 +119,46 @@ button::after { border: 0; }
 .mini-markdown-token-link { color: var(--mini-primary); text-decoration: underline; }
 .mini-markdown-quote { padding: 12px 16px; border-left: 5px solid var(--mini-line-strong); border-radius: 0 10px 10px 0; background: var(--mini-soft); color: var(--mini-subtle); white-space: pre-line; }
 .mini-markdown-divider { height: 1px; margin: 18px 0; background: var(--mini-line-faint); }
+
+/* ===== markdown 文字横线溢出修复（对齐网页版 .md-render 的 word-break 做法） =====
+   根因：TDesign .t-chat-content 用 width:fit-content，父级 .t-chat-message__detail 是
+   display:contents（其 max-width:100% 失效），宽内容（长链接/代码块/表格/无空格长串）会把
+   整条消息撑宽、横向溢出。这里把内容宽度约束住，并对 markdown 文本强制可换行。 */
+.t-chat-message__content { min-width: 0; }
+.t-chat-content { max-width: 100%; min-width: 0; box-sizing: border-box; }
+/* TDesign chat-markdown 文本：长 URL / 长英文 / 连续字符强制换行 */
+.t-chat-markdown,
+.t-chat-markdown-p,
+.t-chat-markdown-text,
+.t-chat-markdown-h,
+.t-chat-markdown-h1,
+.t-chat-markdown-h2,
+.t-chat-markdown-h3,
+.t-chat-markdown-h4,
+.t-chat-markdown-h5,
+.t-chat-markdown-h6,
+.t-chat-markdown-strong,
+.t-chat-markdown-em,
+.t-chat-markdown-del,
+.t-chat-markdown-link,
+.t-chat-markdown-ref,
+.t-chat-markdown-blockquote,
+.t-chat-markdown-list,
+.t-chat-markdown-list-item {
+  word-break: break-all;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}
+/* 自绘 MarkdownContent 组件（开屏语/公告/协议等）同样补齐换行 */
+.mini-markdown,
+.mini-markdown-inline,
+.mini-markdown-paragraph,
+.mini-markdown-heading,
+.mini-markdown-quote {
+  word-break: break-all;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}
 .user-bubble { background: var(--mini-primary); color: #fff; }
 .reasoning-text { display: block; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid rgba(120, 140, 170, .2); color: var(--mini-subtle); font-size: 23px; }
 .composer { display: flex; flex-shrink: 0; align-items: flex-end; gap: 10px; margin-top: 14px; padding: 8px 10px; border: 0; border-radius: 28px; background: var(--mini-surface); box-shadow: 0 4px 14px rgba(17, 42, 88, .06); }
@@ -260,6 +304,64 @@ button::after { border: 0; }
 .mini-content-grid .tag-row { max-width: 68%; gap: 6px; margin: 0; overflow: hidden; flex-wrap: nowrap; }
 .mini-content-grid .tag { overflow: hidden; padding: 5px 8px; background: var(--mini-primary-soft); color: var(--mini-primary-strong); font-size: 17px; text-overflow: ellipsis; white-space: nowrap; }
 .mini-content-card-uses { flex-shrink: 0; max-width: 31%; overflow: hidden; color: var(--mini-subtle-2); font-size: 17px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+/* 首页热门区 / 热门二级页：单列毛玻璃大圆角紧凑卡（左圆形头像 + 右侧名称/简介）。
+   背景统一为毛玻璃（--mini-glass 浅色半透明白 / 深色半透明蓝灰），不再按 item 渐变着色。 */
+.mini-content-list { display: flex; flex-direction: column; gap: 20rpx; }
+.mini-content-card--compact {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+  min-height: 0;
+  margin-bottom: 0;
+  padding: 26rpx 30rpx;
+  border: 1rpx solid var(--mini-line-strong);
+  border-radius: 32rpx;
+  /* 统一毛玻璃：玻璃变量底 + backdrop-filter 增强（模拟器/低端机不支持时自动忽略） */
+  background: var(--mini-glass);
+  box-shadow: var(--mini-shadow-sm);
+  -webkit-backdrop-filter: blur(24rpx);
+  backdrop-filter: blur(24rpx);
+  overflow: hidden;
+}
+.mini-content-card-hover { opacity: .92; transition: opacity .15s ease; }
+.mini-content-card-compact-avatar {
+  flex-shrink: 0;
+  width: 116rpx;
+  height: 116rpx;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--mini-soft);
+  box-shadow: 0 4rpx 12rpx rgba(30, 60, 120, .12);
+}
+.mini-content-card-compact-img { width: 116rpx; height: 116rpx; border-radius: 50%; }
+.mini-content-card-compact-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 38rpx;
+  font-weight: 750;
+}
+.mini-content-card-compact-body { min-width: 0; flex: 1; }
+.mini-content-card-compact-name {
+  display: block;
+  color: var(--mini-ink);
+  font-size: 31rpx;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mini-content-card-compact-desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin-top: 10rpx;
+  color: var(--mini-subtle);
+  font-size: 24rpx;
+  line-height: 1.5;
+}
 .mini-page-topbar { display: block; margin: 10px 0 26px; }
 .mini-page-heading { margin: 0; color: var(--mini-ink); font-size: 44px; letter-spacing: -1px; text-align: left; }
 .mini-page-caption { display: block; margin-top: 8px; color: var(--mini-subtle); font-size: 23px; }
@@ -431,8 +533,10 @@ button::after { border: 0; }
 .suggestion-row { display: flex; flex-wrap: wrap; gap: 12px; margin: 18px 0 4px; }
 .suggestion-caption { width: 100%; color: var(--mini-subtle-2); font-size: 21px; }
 .suggestion-chip { max-width: 100%; overflow: hidden; padding: 13px 22px; border: 1px solid var(--mini-line-strong); border-radius: 999px; background: var(--mini-surface); color: var(--mini-text-2); font-size: 23px; text-overflow: ellipsis; white-space: nowrap; }
-.msg-actions { display: flex; gap: 28px; margin-top: 14px; }
-.msg-action { color: var(--mini-subtle); font-size: 22px; }
+.msg-actions { display: flex; align-items: center; gap: 20rpx; margin-top: 14px; }
+.msg-action { display: flex; align-items: center; justify-content: center; width: 56rpx; height: 56rpx; border-radius: 50%; }
+.msg-action-glyph { width: 32rpx; height: 32rpx; background-repeat: no-repeat; background-position: center; background-size: contain; }
+.msg-action-hover { opacity: .55; }
 .reasoning-toggle { display: block; margin-bottom: 12px; color: var(--mini-accent); font-size: 22px; }
 .chat-opening-bubble .msg-actions { display: none; }
 
@@ -752,6 +856,9 @@ button::after { border: 0; }
 
 /* 联系客服二级页（pages/service/index）：客服微信二维码 + 「长按扫码，咨询客服」提示 */
 .mini-service-page { padding-bottom: 60px; }
+/* 热门推荐二级页（无底部 TabBar，覆盖 .mini-home-page 的 210px 底部留白） */
+.mini-hot-page { padding-bottom: 60px; }
+.mini-hot-empty { padding: 140rpx 32rpx; color: var(--mini-subtle); font-size: 26rpx; text-align: center; }
 .mini-service-card {
   display: flex;
   flex-direction: column;
@@ -803,10 +910,9 @@ button::after { border: 0; }
 .mini-logout-button { width: 100%; margin: 0; height: 92px; border-radius: 24px; background: var(--mini-surface); color: #ff4d4f; font-size: 29px; font-weight: 600; line-height: 92px; box-shadow: 0 8px 24px rgba(45, 80, 135, .06); }
 .mini-logout-button::after { border: 0; }
 
-/* ===== 底部导航栏：极简 iOS 毛玻璃 + AI 科技感胶囊 ===== */
+/* ===== 底部导航栏：iOS Liquid Glass 悬浮胶囊（80% 基础伪玻璃 + 20% 真毛玻璃增强） ===== */
 .mini-tab-bar-spacer {
-  /* 高度 = 胶囊上外边距 16 + 胶囊高 110 + 胶囊下外边距 16 = 142；额外 padding-bottom 给安全区
-     （height 与 padding-bottom 单位一致都是 CSS 长度，content-box 下相加，无需 calc 混单位） */
+  /* 高度 = 胶囊上外边距 16 + 胶囊高 110 + 胶囊下外边距 16 = 142；额外 padding-bottom 给安全区 */
   height: 142rpx;
   padding-bottom: constant(safe-area-inset-bottom);
   padding-bottom: env(safe-area-inset-bottom);
@@ -821,54 +927,81 @@ button::after { border: 0; }
   padding-bottom: env(safe-area-inset-bottom);
   pointer-events: none; /* 胶囊外不挡点击，胶囊本身 pointer-events:auto 恢复 */
 }
+/* 悬浮液态玻璃胶囊底板 */
 .mini-tab-bar-inner {
+  position: relative;
   display: flex;
   align-items: stretch;
   height: 110rpx;
-  margin: 16rpx 24rpx 0;
-  padding: 8rpx 12rpx;
-  border: 1rpx solid var(--mini-tab-border);
+  margin: 16rpx 24rpx;
+  padding: 8rpx 10rpx;
+  border: 2rpx solid var(--mini-tab-border);
   border-radius: 999rpx;
+  /* 基础伪玻璃：斜向白→淡蓝渐变 + 淡蓝环境光，不依赖 backdrop-filter 也成立 */
   background: var(--mini-tab-bg);
   box-shadow: var(--mini-tab-shadow);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  /* 真毛玻璃增强：不支持时浏览器忽略，基础玻璃继续正常显示 */
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
   pointer-events: auto;
+}
+/* 顶部高光：模拟玻璃反光，柔和不留明显白线（高度约 27%） */
+.mini-tab-bar-inner::before {
+  content: '';
+  position: absolute;
+  left: 18rpx;
+  right: 18rpx;
+  top: 3rpx;
+  height: 30rpx;
+  border-radius: 999rpx;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .6), rgba(255, 255, 255, 0));
+  pointer-events: none;
 }
 .mini-tab-item {
   flex: 1;
   display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mini-tab-item-hover { opacity: .7; }
+/* 气泡容器：固定尺寸，未选中透明，选中浮现玻璃背景 */
+.mini-tab-bubble {
+  display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 6rpx 4rpx;
-  color: var(--mini-tab-text);
-  transition: color .15s ease;
+  width: 108rpx;
+  height: 92rpx;
+  border-radius: 999rpx;
+  border: 2rpx solid transparent;
+  transition: transform 220ms ease, background 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
 }
-.mini-tab-item-hover { opacity: .7; }
 .mini-tab-icon {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 44rpx;
   height: 44rpx;
+  opacity: .7; /* 未选中图标 0.7 透明度，低存在感 */
+  transition: opacity 220ms ease;
 }
 .mini-tab-label {
-  margin-top: 4rpx;
+  margin-top: 2rpx;
   font-size: 24rpx;
   line-height: 1.2;
   white-space: nowrap;
+  color: var(--mini-tab-text);
+  transition: color 220ms ease;
 }
-.mini-tab-indicator {
-  width: 36rpx;
-  height: 4rpx;
-  margin-top: 6rpx;
-  border-radius: 999rpx;
-  background: var(--mini-tab-indicator);
-  opacity: 0;
-  transform: scaleX(.4);
-  transition: opacity .2s ease, transform .2s ease;
+/* 选中态：独立玻璃气泡（斜向玻璃渐变 + 内高光 + 轻微蓝光晕 + 轻微上浮） */
+.mini-tab-item-active .mini-tab-bubble {
+  background: var(--mini-tab-bubble);
+  border-color: var(--mini-tab-bubble-border);
+  box-shadow: var(--mini-tab-bubble-shadow);
+  transform: translateY(-2rpx) scale(1.02);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
-.mini-tab-item-active { color: var(--mini-tab-text-active); }
+.mini-tab-item-active .mini-tab-icon { opacity: 1; }
 .mini-tab-item-active .mini-tab-label { color: var(--mini-tab-text-active); font-weight: 650; }
-.mini-tab-item-active .mini-tab-indicator { opacity: 1; transform: scaleX(1); }
 

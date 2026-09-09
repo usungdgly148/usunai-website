@@ -12,16 +12,22 @@ const tabs: Array<{ key: TabKey; label: string; url: string }> = [
 ];
 
 /**
- * 底部导航栏（自绘 · 极简 iOS 毛玻璃 + AI 科技感胶囊）。
+ * 底部导航栏（自绘 · iOS Liquid Glass 液态玻璃悬浮胶囊）。
  *
- * 视觉：半透明白色毛玻璃底板 + 极细白色边框 + 柔和悬浮阴影 + 5 等分，
- * 当前项为「蓝紫渐变图标 + 蓝色短指示线」。
+ * 视觉：悬浮式玻璃胶囊（左右留白、圆角 999rpx、淡蓝环境光 + 白→淡蓝渐变基础玻璃 +
+ * 顶部高光 + 半透明细边 + 柔和阴影），5 等分；
+ * 当前项为「独立玻璃气泡」（固定尺寸气泡，斜向玻璃渐变 + 内高光 + 轻微蓝光晕 + 上浮 2rpx，
+ * 蓝色图标 + 蓝色文字 #2878E8），未选中项为灰蓝细线图标（0.7 透明度）+ 灰蓝文字。
+ *
+ * 实现原则（80% 基础伪玻璃 + 20% 真毛玻璃增强）：
+ * 基础玻璃用渐变 + 高光 + 阴影，完全不依赖 backdrop-filter；
+ * backdrop-filter 只是增强（不支持时自动被忽略，基础玻璃照常显示）。
  *
  * ⚠️ 图标实现说明（踩坑记录，勿改回内联 SVG）：
  * 微信小程序 WXML 只渲染已注册的内置组件，Taro 生成的 dist/base.wxml 里没有
  * svg / path / rect / linearGradient 等模板，所以「内联 <svg> 图标」会被**静默丢弃**，
  * 表现就是——胶囊容器正常显示，但里面只剩文字、图标全没了。
- * 因此图标走 CSS background-image + base64 内联 SVG data URI，
+ * 因此图标走 CSS background-image + base64 内联 PNG data URI，
  * 由 src/styles/tab-icons.scss 提供（脚本 scripts/gen-tab-icons.js 生成）。
  */
 export function MiniappTabBar({ active }: { active: TabKey }) {
@@ -45,9 +51,10 @@ export function MiniappTabBar({ active }: { active: TabKey }) {
                 hoverClass='mini-tab-item-hover'
                 onClick={() => jump(tab.key)}
               >
-                <View className={`mini-tab-icon mini-tab-icon-${tab.key}`} />
-                <View className='mini-tab-label'>{tab.label}</View>
-                <View className='mini-tab-indicator' />
+                <View className='mini-tab-bubble'>
+                  <View className={`mini-tab-icon mini-tab-icon-${tab.key}`} />
+                  <View className='mini-tab-label'>{tab.label}</View>
+                </View>
               </View>
             );
           })}

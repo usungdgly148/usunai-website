@@ -259,9 +259,15 @@ export default function ChatPage() {
                 status={message.role === 'assistant' ? (streaming ? 'streaming' : 'complete') : undefined}
               />
               {message.role === 'assistant' && !!message.text && !sending && <View className='msg-actions'>
-                <Text className='msg-action' onClick={() => Taro.setClipboardData({ data: message.text })}>复制</Text>
-                <Text className='msg-action' onClick={() => regenerate(message.id)}>重新生成</Text>
-                <Text className='msg-action' onClick={() => addAsset(message)}>加入资产库</Text>
+                <View className='msg-action' hoverClass='msg-action-hover' aria-label='复制' onClick={() => Taro.setClipboardData({ data: message.text })}>
+                  <View className='msg-action-glyph ui-icon-copy' />
+                </View>
+                <View className='msg-action' hoverClass='msg-action-hover' aria-label='重新生成' onClick={() => regenerate(message.id)}>
+                  <View className='msg-action-glyph ui-icon-regenerate' />
+                </View>
+                <View className='msg-action' hoverClass='msg-action-hover' aria-label='加入资产库' onClick={() => addAsset(message)}>
+                  <View className='msg-action-glyph ui-icon-bookmark' />
+                </View>
               </View>}
             </View>
           );

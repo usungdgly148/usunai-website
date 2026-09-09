@@ -64,7 +64,8 @@ const ICONS = {
 };
 
 const NORMAL_COLOR = '#8a98ad';
-const ACTIVE_COLOR = `url(#${GRAD_ID})`;
+/* 选中态：纯蓝 #2878e8（iOS 27 Liquid Glass 主色，替代旧蓝紫渐变） */
+const ACTIVE_COLOR = '#2878e8';
 
 function buildSvg(render, color) {
   const defs = color.startsWith('url(') ? DEFS : '';

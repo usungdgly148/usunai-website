@@ -16,6 +16,7 @@ export default {
     'pages/legal/index',
     'pages/recharge/index',
     'pages/service/index',
+    'pages/hot/index',
     'pages/webview/index'
   ],
   usingComponents: {

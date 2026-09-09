@@ -101,6 +101,26 @@ function filtered(items: ContentItem[], block: MiniappLayoutBlock, content: Publ
   return result.slice(0, Math.max(1, Math.min(24, Number(block.limit) || 8)));
 }
 
+/**
+ * 网页版首页「热门智能体」的数据口径：按后台 recommended 数组顺序，
+ * 从已上架智能体 + 工作流里取推荐 id（智能体/工作流混排）。
+ * 小程序首页热门区只取前 6，热门二级页展示全部（对齐网页版）。
+ * 返回 null 表示该 id 未上架（跳过）。
+ */
+export function recommendedEntries(content: PublicContent): Array<{ item: ContentItem; kind: 'agent' | 'workflow' }> {
+  const agents = new Map((content.agents || []).map(item => [item.id, item]));
+  const workflows = new Map((content.workflows || []).map(item => [item.id, item]));
+  return (content.recommended || [])
+    .map(id => {
+      const agent = agents.get(id);
+      if (agent) return { item: agent, kind: 'agent' as const };
+      const workflow = workflows.get(id);
+      if (workflow) return { item: workflow, kind: 'workflow' as const };
+      return null;
+    })
+    .filter((entry): entry is { item: ContentItem; kind: 'agent' | 'workflow' } => !!entry);
+}
+
 function SectionTitle({ title, more, onMore, headingClass }: { title: string; more?: string; onMore?: () => void; headingClass?: string }) {
   return <View className='section-title mini-section-title'>
     <Text className={headingClass || 'mini-block-heading'}>{title}</Text>
@@ -199,20 +219,27 @@ export function LayoutBlocks({ layout, content, category = '', type = '' }: { la
     </View>;
     if (block.type === 'featured-agents') {
       if (type === 'workflow') return null;
-      const items = filtered(content.agents, block, content, category);
+      const recommended = recommendedEntries(content);
+      // 热门智能体首页默认展示 recommended 前 6（网页版同源：recommended 数组顺序）
+      const items = recommended.length
+        ? recommended.slice(0, Math.max(1, Math.min(6, Number(block.limit) || 6)))
+        : filtered(content.agents, block, content, category).map(item => ({ item, kind: 'agent' as const }));
       if (!items.length) return null;
       return <View key={block.id} className={`section ${className}`} style={style}>
-        <SectionTitle title={heading} more='更多>>' onMore={() => Taro.navigateTo({ url: `/pages/category/index?type=agent&title=${encodeURIComponent('AI智能体')}` })} />
-        <View className='mini-content-grid'>{items.map(item => <ContentCard item={item} type='agent' key={item.id} />)}</View>
+        <SectionTitle title={heading} more='更多>>' onMore={() => Taro.navigateTo({ url: '/pages/hot/index?type=agent' })} />
+        <View className='mini-content-list'>{items.map(entry => <ContentCard item={entry.item} type={entry.kind} variant='compact' key={entry.item.id} />)}</View>
       </View>;
     }
     if (block.type === 'featured-workflows') {
       if (type === 'agent') return null;
-      const items = filtered(content.workflows, block, content, category);
+      const recommended = recommendedEntries(content);
+      const items = recommended.length
+        ? recommended.filter(entry => entry.kind === 'workflow').slice(0, Math.max(1, Math.min(6, Number(block.limit) || 6)))
+        : filtered(content.workflows, block, content, category).map(item => ({ item, kind: 'workflow' as const }));
       if (!items.length) return null;
       return <View key={block.id} className={`section ${className}`} style={style}>
-        <SectionTitle title={heading} more='更多>>' onMore={() => Taro.navigateTo({ url: `/pages/category/index?type=workflow&title=${encodeURIComponent('AI工作流')}` })} />
-        <View className='mini-content-grid'>{items.map(item => <ContentCard item={item} type='workflow' key={item.id} />)}</View>
+        <SectionTitle title={heading} more='更多>>' onMore={() => Taro.navigateTo({ url: '/pages/hot/index?type=workflow' })} />
+        <View className='mini-content-list'>{items.map(entry => <ContentCard item={entry.item} type={entry.kind} variant='compact' key={entry.item.id} />)}</View>
       </View>;
     }
     // 底部导航已承担快捷入口职责，首页不重复展示旧的快捷入口区。

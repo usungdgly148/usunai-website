@@ -116,7 +116,11 @@ function getCoverBackground(item: ContentItem) {
   return `linear-gradient(${angle}deg, ${from}, ${to})`;
 }
 
-export function ContentCard({ item, type }: { item: ContentItem; type: 'agent' | 'workflow' }) {
+export function ContentCard({ item, type, variant = 'cover' }: {
+  item: ContentItem;
+  type: 'agent' | 'workflow';
+  variant?: 'cover' | 'compact';
+}) {
   const tags = (item.tags || []).filter(Boolean).slice(0, 2);
   const fallback = ICON_GLYPHS[item.icon || ''] || (type === 'agent' ? 'AI' : '流');
   const description = item.description || item.desc || (type === 'agent'
@@ -126,9 +130,32 @@ export function ContentCard({ item, type }: { item: ContentItem; type: 'agent' |
   const avatarUrl = toAvatarUrl(item.avatar);
   const fallbackStyle = { background: ICON_BACKGROUNDS[item.iconColor || ''] || ICON_BACKGROUNDS['bg-blue-600'] };
 
+  const handleOpen = () => Taro.navigateTo({ url: `${operationPath}?id=${encodeURIComponent(item.id)}` });
+
+  // 紧凑样式：左圆形头像 + 右名称/简介。用于首页「热门智能体/工作流」section。
+  // 背景统一为毛玻璃大圆角（由 .mini-content-card--compact 的 CSS 变量控制，浅/深色自适应），
+  // 不再按 item 的 iconColor 渐变着色。
+  if (variant === 'compact') {
+    return <View
+      className='card mini-content-card mini-content-card--compact'
+      hoverClass='mini-content-card-hover'
+      onClick={handleOpen}
+    >
+      <View className='mini-content-card-compact-avatar'>
+        {avatarUrl
+          ? <Image className='mini-content-card-compact-img' mode='aspectFill' src={avatarUrl} lazyLoad webp />
+          : <Text className='mini-content-card-compact-img mini-content-card-compact-fallback' style={fallbackStyle}>{fallback}</Text>}
+      </View>
+      <View className='mini-content-card-compact-body'>
+        <Text className='mini-content-card-compact-name'>{item.name}</Text>
+        <Text className='mini-content-card-compact-desc'>{description}</Text>
+      </View>
+    </View>;
+  }
+
   return <View
     className='card mini-content-card'
-    onClick={() => Taro.navigateTo({ url: `${operationPath}?id=${encodeURIComponent(item.id)}` })}
+    onClick={handleOpen}
   >
     <View className='mini-content-card-cover' style={{ background: getCoverBackground(item) }}>
       <Text className='mini-content-card-kind'>{type === 'agent' ? '智能体' : '工作流'}</Text>
