@@ -3,6 +3,7 @@ import {
   buildPayParams,
   createJsapiOrder,
   decryptNotifyResource,
+  loadPayConfig,
   queryOrderByOutTradeNo,
   wechatPayConfigured,
 } from './wechat-pay.mjs';
@@ -323,6 +324,7 @@ async function changePassword(req, res, requestId, session, deps) {
 // 创建充值订单并调起微信支付（JSAPI 下单）。
 async function createRechargeOrder(req, res, requestId, session, deps) {
   const { KV, sanitizeId } = deps;
+  await loadPayConfig(KV);
   if (!wechatPayConfigured()) {
     sendJson(res, 503, errorEnvelope('WECHAT_PAY_NOT_CONFIGURED', '微信支付尚未配置，请稍后再试', requestId), requestId);
     return;
@@ -398,6 +400,7 @@ async function handleRechargeNotify(req, res, requestId, deps) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.end(JSON.stringify({ code, message }));
   };
+  await loadPayConfig(KV);
   if (!wechatPayConfigured()) {
     reply(503, 'FAIL', 'wechat pay not configured');
     return;

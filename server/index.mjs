@@ -17,6 +17,7 @@ import * as KV from './kv-local.js';
 import nodemailer from 'nodemailer';
 import sharp from 'sharp';
 import { resolveMaxPlanValidity } from './plan-validity.mjs';
+import { PAY_CONFIG_KV_KEY } from './wechat-pay.mjs';
 import { handleMiniappApi } from './miniapp-api.mjs';
 import { handleMiniappAuth } from './miniapp-auth.mjs';
 import { handleMiniappRuntime } from './miniapp-runtime.mjs';
@@ -3908,6 +3909,44 @@ const server = http.createServer(async (req, res) => {
         return;
       }
     }
+
+    // 小程序设置：微信支付凭证（APIv3 密钥 / 证书序列号 / 商户私钥）。
+    // 专用接口，绝不走公开 get-config 链路（apiV3Key 不在脱敏名单，避免泄露）。
+    // 读回脱敏：只返回序列号明文 + 密钥/私钥「是否已设置」，不回传私钥原文。
+    if (p === '/api/admin/miniapp-pay-settings' && (req.method === 'GET' || req.method === 'POST')) {
+      res.setHeader('Content-Type', 'application/json');
+      if (!requireAdmin(req, res)) return;
+      const existing = (await KV.kvGet(PAY_CONFIG_KV_KEY)) || {};
+      if (req.method === 'GET') {
+        const serialNo = typeof existing.serialNo === 'string' ? existing.serialNo : '';
+        const apiV3KeySet = !!(existing.apiV3Key && String(existing.apiV3Key).trim());
+        const privateKeySet = !!(existing.privateKey && String(existing.privateKey).trim());
+        res.end(JSON.stringify({
+          ok: true,
+          data: {
+            serialNo,
+            apiV3KeySet,
+            privateKeySet,
+            configured: !!(serialNo && apiV3KeySet && privateKeySet),
+          },
+        }));
+        return;
+      }
+      const body = await readBody(req);
+      const serialNo = String((body && body.serialNo) || '').trim();
+      const apiV3Key = String((body && body.apiV3Key) || '').trim();
+      const privateKey = String((body && body.privateKey) || '').trim();
+      // 空值保留原值（前端回显脱敏后保存，不应清空已配置的密钥/私钥）
+      const next = {
+        serialNo: serialNo || (typeof existing.serialNo === 'string' ? existing.serialNo : ''),
+        apiV3Key: apiV3Key || (typeof existing.apiV3Key === 'string' ? existing.apiV3Key : ''),
+        privateKey: privateKey || (typeof existing.privateKey === 'string' ? existing.privateKey : ''),
+      };
+      await KV.kvPut(PAY_CONFIG_KV_KEY, next);
+      res.end(JSON.stringify({ ok: true, data: { configured: !!(next.serialNo && next.apiV3Key && next.privateKey) } }));
+      return;
+    }
+
     if ((p === '/api/data/get-records' || p === '/api/admin/data/get-records') && req.method === 'POST') {
       const adminRoute = p.startsWith('/api/admin/');
       let s;

@@ -32,6 +32,25 @@ export const WECHAT_PAY = {
   notifyUrl: String(process.env.WECHAT_PAY_NOTIFY_URL || 'https://usunai.top/api/miniapp/v1/recharge/notify').trim(),
 };
 
+// 小程序支付凭证的 KV key（管理后台「小程序设置」保存）。字段 { serialNo, privateKey, apiV3Key }。
+export const PAY_CONFIG_KV_KEY = 'miniappPaySettings';
+
+// 从 KV 加载支付凭证（KV 优先，环境变量兜底）。下单 / 回调前调用一次即可。
+// 凭证由管理员后台设置，后端运行时动态读取，避免重启服务。
+export async function loadPayConfig(KV) {
+  try {
+    const kv = await KV.kvGet(PAY_CONFIG_KV_KEY);
+    if (kv && typeof kv === 'object') {
+      if (String(kv.serialNo || '').trim()) WECHAT_PAY.serialNo = String(kv.serialNo).trim();
+      if (String(kv.privateKey || '').trim()) WECHAT_PAY.privateKey = normalizePrivateKey(kv.privateKey);
+      if (String(kv.apiV3Key || '').trim()) WECHAT_PAY.apiV3Key = String(kv.apiV3Key).trim();
+    }
+  } catch {
+    // KV 读取失败时保留环境变量兜底，不阻断下单。
+  }
+  return WECHAT_PAY;
+}
+
 export function wechatPayConfigured() {
   return !!(WECHAT_PAY.mchid && WECHAT_PAY.appId && WECHAT_PAY.serialNo && WECHAT_PAY.privateKey && WECHAT_PAY.apiV3Key && WECHAT_PAY.notifyUrl);
 }

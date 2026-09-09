@@ -38,6 +38,7 @@ const AdminAnnouncements = lazy(() => import('./pages/AdminAnnouncements.jsx'));
 const AdminLegalAgreements = lazy(() => import('./pages/AdminLegalAgreements.jsx'));
 const AdminKnowledgeBases = lazy(() => import('./pages/AdminKnowledgeBases.jsx'));
 const AdminMiniappDesign = lazy(() => import('./pages/AdminMiniappDesign.jsx'));
+const AdminMiniappSettings = lazy(() => import('./pages/AdminMiniappSettings.jsx'));
 
 function RouteLoading() {
   return (
@@ -201,6 +202,7 @@ function AdminLayout() {
               <Route path="/admin/auth-providers" element={<AdminAuthProviders />} />
               <Route path="/admin/knowledge-bases" element={<AdminKnowledgeBases />} />
               <Route path="/admin/miniapp-design" element={<AdminMiniappDesign />} />
+              <Route path="/admin/miniapp-settings" element={<AdminMiniappSettings />} />
               <Route path="/admin/workflows/new" element={<AdminWorkflowEdit isNew />} />
               <Route path="/admin/workflows/:id" element={<AdminWorkflowEdit />} />
               <Route path="/admin/categories" element={<AdminCategories />} />
