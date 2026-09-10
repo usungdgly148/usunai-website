@@ -2,6 +2,8 @@
 declare namespace JSX {
   interface IntrinsicElements {
     't-chat-message': any;
+    't-chat-sender': any;
+    't-chat-actionbar': any;
     't-toast': any;
     't-dialog': any;
     't-skeleton': any;

@@ -15,6 +15,8 @@ const GLYPHS: Record<string, string> = {
   'play': '\uE6AA',
   send: '\uE723',
   time: '\uE834',
+  /** 「加入资产库」：t-chat-actionbar 的 iconMap 不含自定义动作，图标由本组件自绘 */
+  'bookmark-add': '\uE0CD',
 };
 
 export function TdIcon({ name, className = '' }: { name: keyof typeof GLYPHS | string; className?: string }) {

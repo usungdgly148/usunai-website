@@ -1,23 +1,53 @@
 import { useEffect, useMemo, useState } from 'react';
 import Taro, { useRouter } from '@tarojs/taro';
-import { Button, Image, ScrollView, Text, Textarea, View } from '@tarojs/components';
+import { Button, ScrollView, Text, View } from '@tarojs/components';
 import { PageState } from '../../components/page-state';
 import { MarkdownContent } from '../../components/markdown-content';
 import { EntityInfoCard, SideDrawer, timeAgo } from '../../components/inner-ui';
 import { TdIcon } from '../../components/td-icon';
-import { fetchAllRecords, getHistoryDetail, getPublicContent, saveRuntimeAsset, saveRuntimeHistory, streamAgentChat, uploadRuntimeFile } from '../../services/api';
+import { fetchAllRecords, getHistoryDetail, getMe, getPublicContent, saveRuntimeAsset, saveRuntimeHistory, streamAgentChat, uploadRuntimeFile } from '../../services/api';
 import { collectMediaUrls, fileToDataUrl, runtimeId } from '../../services/runtime';
 import { confirmDialog, hideFeedbackToast, loadingToast, toast } from '../../utils/feedback';
 import type { ContentItem } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
 
-type ChatMessage = { id: string; role: 'user' | 'assistant'; text: string; reasoning?: string; images?: string[] };
+type ChatMessage = { id: string; role: 'user' | 'assistant'; text: string; reasoning?: string; images?: string[]; createdAt?: string };
 type HistoryRecord = Record<string, unknown> & { id?: string; title?: string; createdAt?: string; agentId?: string; messages?: Array<Record<string, unknown>> };
+/** t-chat-sender / attachments 的文件结构 */
+type AttachmentFile = { url?: string; name?: string; size?: number; fileType?: string };
 
 const ASSET_TYPE_NAMES: Record<string, string> = { copy: '文案', image: '图片', video: '视频', audio: '音频', article: '文章' };
 const sessionKey = (agentId?: string) => `usunai_miniapp_chat_session_${agentId || 'unknown'}`;
-/** 输入框自适应高度的最大行数，超过后固定高度并在框内滚动 */
-const COMPOSER_MAX_LINES = 10;
+const WEB_ORIGIN = 'https://www.usunai.top';
+const MAX_IMAGES = 4;
+/**
+ * 官方 t-chat-sender 的预设区：只保留官方发送按钮（右下角）。
+ * 加号不用官方内置的 upload 预设——它只能单张取图，且弹层从卡片底部展开；
+ * 这里自绘一个加号浮在卡片左下角，走系统 action-sheet + chooseMedia（一次最多 4 张）。
+ */
+const SENDER_PRESETS = [{ name: 'send', type: 'icon' }];
+/** textareaProps.autosize 的数字会被组件内 wxs 追加 rpx */
+const SENDER_TEXTAREA_PROPS = { autosize: { minHeight: 44, maxHeight: 264 } };
+/** 官方 chat-actionbar 的动作项；iconMap 只认这 6 个，自定义动作走 prefix 插槽自绘 */
+const MESSAGE_ACTIONS = ['copy', 'replay', 'good', 'bad'];
+
+/** 相对路径（/api/blob/serve/...）补全为小程序可加载的绝对地址 */
+function toAssetUrl(value?: string) {
+  if (!value) return '';
+  if (/^(https?:)?\/\//i.test(value) || value.startsWith('data:')) return value;
+  return `${WEB_ORIGIN}${value.startsWith('/') ? value : `/${value}`}`;
+}
+
+/** 消息时间戳：当天只显示 HH:mm，跨天补上 MM-DD */
+function formatStamp(iso?: string) {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const now = new Date();
+  return date.toDateString() === now.toDateString() ? time : `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${time}`;
+}
 
 /** ChatMessage → t-chat-message 的 content 数组（attachment/thinking/markdown） */
 function toTDesignContent(message: ChatMessage, streaming: boolean) {
@@ -46,15 +76,18 @@ export default function ChatPage() {
   const [error, setError] = useState('');
   const [input, setInput] = useState('');
   const [images, setImages] = useState<string[]>([]);
-  /** t-image-viewer 预览（发送前图片大图） */
-  const [viewer, setViewer] = useState<{ urls: string[]; current: number } | null>(null);
+  const [uploading, setUploading] = useState(false);
+  /** 输入框聚焦（编辑态）：蓝色描边 + 淡光晕的视觉反馈 */
+  const [focused, setFocused] = useState(false);
+  /** 用户头像/昵称（聊天气泡的 role=user 侧） */
+  const [userName, setUserName] = useState('我');
+  const [userAvatar, setUserAvatar] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [historyList, setHistoryList] = useState<HistoryRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [inputCapped, setInputCapped] = useState(false);
   const [sessionId, setSessionId] = useState(() => {
     const stored = agentId ? Taro.getStorageSync<string>(sessionKey(agentId)) : '';
     return stored || runtimeId('miniapp_chat');
@@ -72,27 +105,54 @@ export default function ChatPage() {
     }).catch((reason) => setError(reason.message || '加载失败')).finally(() => setLoading(false));
   }, [agentId]);
 
+  // 用户身份只用于消息体的头像/昵称，失败不影响对话
+  useEffect(() => {
+    getMe().then((profile) => {
+      if (profile.name) setUserName(profile.name);
+      setUserAvatar(toAssetUrl(profile.avatar));
+    }).catch(() => {});
+  }, []);
+
+  /** 加号上传：官方内置弹层只能单张取图，这里自建「拍摄 / 从相册选择」并支持一次多选 */
   const chooseImage = async () => {
-    if (!agent || !agent.supportsImages) return;
+    if (!agent || !agent.supportsImages || uploading) return;
+    const remaining = MAX_IMAGES - images.length;
+    if (remaining <= 0) { toast(`最多上传 ${MAX_IMAGES} 张图片`, 'warning'); return; }
+    let sourceType: Array<'album' | 'camera'> = ['album', 'camera'];
     try {
-      const selected = await Taro.chooseMedia({ count: Math.max(1, 4 - images.length), mediaType: ['image'], sourceType: ['album', 'camera'] });
+      const sheet = await Taro.showActionSheet({ itemList: ['拍摄', '从相册选择'] });
+      sourceType = sheet.tapIndex === 0 ? ['camera'] : ['album'];
+    } catch { return; }
+    setUploading(true);
+    try {
+      const selected = await Taro.chooseMedia({ count: remaining, mediaType: ['image'], sourceType });
       const next: string[] = [];
       for (const file of selected.tempFiles) {
-        const type = file.fileType === 'image' ? 'image/jpeg' : 'application/octet-stream';
+        const type = 'image/jpeg';
         const dataUrl = await fileToDataUrl(file.tempFilePath, type);
         const uploaded = await uploadRuntimeFile({ targetType: 'agent', targetId: agent.id, dataUrl, fileName: `image_${Date.now()}.jpg`, fileType: type });
         if (uploaded.dataUrl) next.push(uploaded.dataUrl);
       }
-      setImages((current) => [...current, ...next].slice(0, 4));
-    } catch (reason) { toast(reason instanceof Error ? reason.message : '图片上传失败', 'error'); }
+      if (next.length) setImages((current) => [...current, ...next].slice(0, MAX_IMAGES));
+    } catch (reason) {
+      const errMsg = String((reason as { errMsg?: string } | undefined)?.errMsg || '');
+      if (!/cancel/i.test(errMsg)) toast(reason instanceof Error ? reason.message : '图片上传失败', 'error');
+    } finally { setUploading(false); }
+  };
+
+  /** 官方 t-attachments 的删除：只回传被删项，按 url 过滤 */
+  const removeImage = (event: { detail?: { file?: AttachmentFile } }) => {
+    const url = String(event?.detail?.file?.url || '');
+    if (!url) return;
+    setImages((current) => current.filter((item) => item !== url));
   };
 
   const runTurn = async (userMessage: ChatMessage, baseMessages: ChatMessage[]) => {
     if (!agent) return;
     const snapshot = [...baseMessages, userMessage];
     const assistantId = runtimeId('msg');
-    setMessages([...snapshot, { id: assistantId, role: 'assistant', text: '' }]);
-    setInput(''); setImages([]); setSending(true); setError(''); setInputCapped(false);
+    setMessages([...snapshot, { id: assistantId, role: 'assistant', text: '', createdAt: new Date().toISOString() }]);
+    setInput(''); setImages([]); setSending(true); setError('');
     let answer = ''; let reasoning = '';
     try {
       await streamAgentChat(agent.id, {
@@ -132,7 +192,7 @@ export default function ChatPage() {
   const send = (override?: string) => {
     const text = String(override ?? input).trim();
     if (!agent || sending || (!text && images.length === 0)) return;
-    void runTurn({ id: runtimeId('msg'), role: 'user', text, images: [...images] }, messages);
+    void runTurn({ id: runtimeId('msg'), role: 'user', text, images: [...images], createdAt: new Date().toISOString() }, messages);
   };
 
   const regenerate = (assistantId: string) => {
@@ -144,8 +204,17 @@ export default function ChatPage() {
       if (messages[i].role === 'user') { userIdx = i; break; }
     }
     if (userIdx < 0) return;
-    const userMessage = { ...messages[userIdx], id: runtimeId('msg') };
+    const userMessage = { ...messages[userIdx], id: runtimeId('msg'), createdAt: new Date().toISOString() };
     void runTurn(userMessage, messages.slice(0, userIdx));
+  };
+
+  /** 官方 chat-actionbar 的动作回调：copy 由组件内部完成复制，这里只做反馈/重生成 */
+  const handleMessageAction = (event: { detail?: { name?: string } }, message: ChatMessage) => {
+    const name = String(event?.detail?.name || '');
+    if (name === 'copy') { toast('已复制到剪贴板', 'success'); return; }
+    if (name === 'replay') { regenerate(message.id); return; }
+    if (name === 'good') { toast('感谢反馈～', 'success'); return; }
+    if (name === 'bad') { toast('收到，会继续改进', 'info'); }
   };
 
   const startNewChat = async () => {
@@ -155,7 +224,7 @@ export default function ChatPage() {
       content: '当前对话已自动保存到历史记录，确定开始新对话吗？',
       confirmText: '开始新对话',
     }))) return;
-    setMessages([]); setInput(''); setImages([]); setError(''); setInputCapped(false);
+    setMessages([]); setInput(''); setImages([]); setError('');
     setSessionId(runtimeId('miniapp_chat'));
     setHistoryOpen(false);
   };
@@ -183,6 +252,7 @@ export default function ChatPage() {
       hideFeedbackToast();
       // 兼容两种消息结构：小程序自写 {role,text} 与网页端 {role,content}
       const raw = Array.isArray(detail.messages) ? detail.messages : [];
+      const stamp = (detail as { createdAt?: string }).createdAt;
       const msgs: ChatMessage[] = raw
         .filter((m) => m && typeof m === 'object' && (typeof m.text === 'string' || typeof m.content === 'string'))
         .map((m) => ({
@@ -191,6 +261,7 @@ export default function ChatPage() {
           text: typeof m.text === 'string' ? m.text : String(m.content || ''),
           reasoning: typeof m.reasoning === 'string' ? m.reasoning : undefined,
           images: Array.isArray(m.images) ? (m.images as string[]) : undefined,
+          createdAt: typeof m.createdAt === 'string' ? m.createdAt : stamp,
         }));
       setMessages(msgs);
       if (detail.id) setSessionId(String(detail.id));
@@ -222,6 +293,14 @@ export default function ChatPage() {
   };
 
   const suggestions = useMemo(() => (agent?.suggestedQuestions || []).filter((item) => typeof item === 'string' && item.trim()).slice(0, 6), [agent]);
+  /** 官方 t-attachments 的预览数据：发送前已上传的图片缩略图 + 可删除 */
+  const attachmentsProps = useMemo(
+    () => ({ items: images.map((url) => ({ url, name: 'image.jpg', size: 0, fileType: 'image' })), removable: true, imageViewer: true }),
+    [images],
+  );
+  const agentAvatar = toAssetUrl(agent?.avatar || agent?.icon);
+  /** 官方发送按钮在「有图无字」时是 disabled，这里补一个兜底入口 */
+  const imageOnlyReady = images.length > 0 && !input.trim() && !sending;
 
   return <View className='runtime-page chat-page' style={pageStyle}>
     <PageState loading={loading} error={error && !agent ? error : ''} empty={!loading && !error && !agent} />
@@ -249,49 +328,68 @@ export default function ChatPage() {
         {messages.map((message) => {
           const isLast = message.id === messages[messages.length - 1].id;
           const streaming = sending && message.role === 'assistant' && isLast;
+          const showActions = message.role === 'assistant' && !!message.text && !streaming;
           return (
             <View id={`message-${message.id}`} key={message.id} className='chat-row'>
+              {/* 官方消息体：头像 + 昵称 + 时间 + 内容（user/assistant 双角色） */}
               <t-chat-message
                 content={toTDesignContent(message, streaming)}
                 role={message.role}
                 placement={message.role === 'user' ? 'right' : 'left'}
                 variant='base'
                 status={message.role === 'assistant' ? (streaming ? 'streaming' : 'complete') : undefined}
+                avatar={message.role === 'user' ? userAvatar : agentAvatar}
+                name={message.role === 'user' ? (userName || '我') : agent.name}
+                datetime={formatStamp(message.createdAt)}
               />
-              {message.role === 'assistant' && !!message.text && !sending && <View className='msg-actions'>
-                <View className='msg-action' hoverClass='msg-action-hover' aria-label='复制' onClick={() => Taro.setClipboardData({ data: message.text })}>
-                  <View className='msg-action-glyph ui-icon-copy' />
+              {/* 官方 chat-actionbar（复制/重新生成/点赞/点踩）+ 自绘「加入资产库」
+                  注：Taro 的具名插槽只对第三方组件生效，View 拿不到 slot 属性，故这里用并排拼条而不是 prefix 插槽 */}
+              {showActions && <View className='msg-toolbar'>
+                <View className='msg-asset' hoverClass='msg-action-hover' aria-label='加入资产库' onClick={() => addAsset(message)}>
+                  <TdIcon name='bookmark-add' className='msg-asset-icon' />
                 </View>
-                <View className='msg-action' hoverClass='msg-action-hover' aria-label='重新生成' onClick={() => regenerate(message.id)}>
-                  <View className='msg-action-glyph ui-icon-regenerate' />
-                </View>
-                <View className='msg-action' hoverClass='msg-action-hover' aria-label='加入资产库' onClick={() => addAsset(message)}>
-                  <View className='msg-action-glyph ui-icon-bookmark' />
-                </View>
+                <t-chat-actionbar
+                  actionBar={MESSAGE_ACTIONS}
+                  content={message.text}
+                  chatId={message.id}
+                  placement='start'
+                  onActions={(event: { detail?: { name?: string } }) => handleMessageAction(event, message)}
+                />
               </View>}
             </View>
           );
         })}
       </ScrollView>
       {!!error && !!agent && <Text className='runtime-error'>{error}</Text>}
-      {!!images.length && <View className='image-grid composer-images'>{images.map((url, imageIndex) => <Image key={url} src={url} mode='aspectFill' className='upload-thumb' onClick={() => setViewer({ urls: images, current: imageIndex })} />)}</View>}
-      <View className='composer'>
-        {agent.supportsImages && <Button className='composer-add' onClick={chooseImage}><TdIcon name='add' /></Button>}
-        <Textarea
-          className={`composer-input ${inputCapped ? 'composer-input-capped' : ''}`}
+      {/* 输入框：官方 t-chat-sender（左下角只浮一个加号上传图片，不加官方深度思考/联网） */}
+      <View className={`composer-shell${focused ? ' composer-shell-focus' : ''}`}>
+        <t-chat-sender
           value={input}
-          autoHeight={!inputCapped}
-          maxlength={2000}
-          cursorSpacing={20}
-          showConfirmBar={false}
-          disableDefaultPadding
           placeholder='请输入你的需求'
-          confirmType='send'
-          onInput={(event) => setInput(event.detail.value)}
-          onLineChange={(event) => setInputCapped((event.detail.lineCount || 1) > COMPOSER_MAX_LINES)}
-          onConfirm={() => send()}
+          loading={sending}
+          adjustPosition
+          renderPresets={SENDER_PRESETS}
+          textareaProps={SENDER_TEXTAREA_PROPS}
+          attachmentsProps={attachmentsProps}
+          onChange={(event: { detail?: { value?: string } }) => setInput(String(event?.detail?.value || ''))}
+          onSend={(event: { detail?: { value?: string } }) => send(event?.detail?.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          onFileDelete={removeImage}
         />
-        <Button className='composer-send' loading={sending} disabled={sending} onClick={() => send()}><TdIcon name='send' /></Button>
+        {agent.supportsImages && <View
+          className='composer-plus'
+          hoverClass='composer-plus-hover'
+          aria-label='上传图片'
+          onClick={chooseImage}
+        >
+          <TdIcon name='add' className='composer-plus-icon' />
+        </View>}
+        {imageOnlyReady && <View
+          className='composer-image-send'
+          hoverClass='composer-plus-hover'
+          onClick={() => send()}
+        >发送图片</View>}
       </View>
 
       <SideDrawer open={historyOpen} title='对话历史' onClose={() => setHistoryOpen(false)}>
@@ -311,13 +409,6 @@ export default function ChatPage() {
       </SideDrawer>
       <t-toast id='t-toast' theme='info' />
       <t-dialog id='t-dialog' title='' />
-      <t-image-viewer
-        visible={!!viewer}
-        images={viewer?.urls || []}
-        current={viewer?.current || 0}
-        closeBtn
-        onClose={() => setViewer(null)}
-      />
     </>}
   </View>;
 }

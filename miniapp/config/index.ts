@@ -22,11 +22,11 @@ export default defineConfig(async (merge, { command, mode }) => {
   const TDESIGN_DST = 'dist/miniprogram_npm/tdesign-miniprogram/';
   const TDESIGN_COMPONENTS = [
     // 直接使用（app.config.ts usingComponents）
-    'chat-message', 'toast', 'dialog', 'skeleton', 'popup',
+    'chat-message', 'chat-sender', 'chat-actionbar', 'toast', 'dialog', 'skeleton', 'popup',
     'switch', 'slider', 'date-time-picker', 'picker', 'picker-item', 'notice-bar',
     'image-viewer', 'empty',
     // 传递依赖（各组件 index.json 内 usingComponents 递归引用）
-    'chat-content', 'chat-thinking', 'chat-loading', 'chat-markdown', 'attachments',
+    'chat-content', 'chat-thinking', 'chat-loading', 'chat-markdown', 'attachments', 'popover',
     'icon', 'loading', 'overlay', 'button', 'badge', 'image',
   ];
   const TDESIGN_SHARED = ['common', 'mixins', 'config-provider'];

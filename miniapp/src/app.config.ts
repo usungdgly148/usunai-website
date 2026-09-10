@@ -21,6 +21,8 @@ export default {
   ],
   usingComponents: {
     't-chat-message': 'tdesign-miniprogram/chat-message/chat-message',
+    't-chat-sender': 'tdesign-miniprogram/chat-sender/chat-sender',
+    't-chat-actionbar': 'tdesign-miniprogram/chat-actionbar/chat-actionbar',
     't-toast': 'tdesign-miniprogram/toast/toast',
     't-dialog': 'tdesign-miniprogram/dialog/dialog',
     't-skeleton': 'tdesign-miniprogram/skeleton/skeleton',
