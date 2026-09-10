@@ -17,6 +17,15 @@ const GLYPHS: Record<string, string> = {
   time: '\uE834',
   /** 「加入资产库」：t-chat-actionbar 的 iconMap 不含自定义动作，图标由本组件自绘 */
   'bookmark-add': '\uE0CD',
+  /** 工作流页头「去历史记录」（对应网页版 SubHeader 的 MessageSquare） */
+  chat: '\uE1B6',
+  /** 工作流页头「回配置参数」（对应网页版 SubHeader 的 SlidersHorizontal） */
+  'control-platform': '\uE26D',
+  /** 历史记录卡片：运行完成 / 复制结果 / 图片计数 / 视频计数 */
+  'check-circle': '\uE1B8',
+  copy: '\uE273',
+  image: '\uE498',
+  video: '\uE8EF',
 };
 
 export function TdIcon({ name, className = '' }: { name: keyof typeof GLYPHS | string; className?: string }) {

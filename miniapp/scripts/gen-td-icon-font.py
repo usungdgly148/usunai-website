@@ -119,7 +119,9 @@ def main():
               'copy', 'replay', 'refresh', 'thumb-up', 'thumb-down', 'multiply',
               'bookmark-add', 'check', 'delete',
               'close-circle-filled', 'ellipsis', 'chevron-down', 'time',
-              'info-circle', 'play', 'play-circle', 'pause-circle']:
+              'info-circle', 'play', 'play-circle', 'pause-circle',
+              # td-icon.tsx 自绘图标（脚本扫不到，须显式登记）
+              'chat', 'control-platform', 'check-circle', 'copy', 'image', 'video']:
         if n in icon_map:
             names.add(n)
 

@@ -15,8 +15,29 @@ import { useThemePage } from '../../hooks/use-theme-page';
 
 type ChatMessage = { id: string; role: 'user' | 'assistant'; text: string; reasoning?: string; images?: string[]; createdAt?: string };
 type HistoryRecord = Record<string, unknown> & { id?: string; title?: string; createdAt?: string; agentId?: string; messages?: Array<Record<string, unknown>> };
-/** t-chat-sender / attachments 的文件结构 */
-type AttachmentFile = { url?: string; name?: string; size?: number; fileType?: string };
+/** t-chat-sender / attachments 的文件结构（原样透传给官方组件，附带 uid 便于回删时定位） */
+type AttachmentFile = { uid?: string; url?: string; name?: string; size?: number; fileType?: string };
+
+/**
+ * 待发送的图片草稿。
+ * 官方 t-attachments 的加载态是「status 驱动」的：status 为 pending / fail / error 时
+ * 不渲染 <image>，改为渲染 <t-loading theme="circular">。所以这里必须先把草稿以 pending
+ * 入列，上传成功再切 success，失败切 error，否则用户看不到任何上传进度反馈。
+ */
+type UploadDraft = {
+  /** 稳定标识：用于回删 / 预览定位（官方 remove 事件带 index，但重新渲染后 index 会漂） */
+  uid: string;
+  /** 展示地址：pending 阶段是本地临时路径（立刻可显示，无需等网络），成功后仍保留本地路径避免闪白 */
+  url: string;
+  /** 上传成功后拿到的远端地址（提交给对话接口用） */
+  remote?: string;
+  name: string;
+  size: number;
+  fileType: string;
+  status: 'pending' | 'success' | 'error';
+  progress?: number;
+  errorMessage?: string;
+};
 
 const ASSET_TYPE_NAMES: Record<string, string> = { copy: '文案', image: '图片', video: '视频', audio: '音频', article: '文章' };
 const sessionKey = (agentId?: string) => `usunai_miniapp_chat_session_${agentId || 'unknown'}`;
@@ -69,7 +90,8 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [input, setInput] = useState('');
-  const [images, setImages] = useState<string[]>([]);
+  /** 待发送图片草稿（含上传状态，驱动官方 t-attachments 的加载态） */
+  const [drafts, setDrafts] = useState<UploadDraft[]>([]);
   const [uploading, setUploading] = useState(false);
   /** 输入框聚焦（编辑态）：蓝色描边 + 淡光晕的视觉反馈 */
   const [focused, setFocused] = useState(false);
@@ -130,38 +152,79 @@ export default function ChatPage() {
     setKeyboardHeight(resizedByKeyboard ? 0 : height);
   }), []);
 
-  /** 加号上传：官方内置弹层只能单张取图，这里自建「拍摄 / 从相册选择」并支持一次多选 */
+  /**
+   * 加号上传：官方内置弹层只能单张取图，这里自建「拍摄 / 从相册选择」并支持一次多选。
+   * 加载态：每张图先以 pending 草稿入列（官方 attachments 渲染转圈），逐张上传完成后切 success，
+   * 失败切 error + errorMessage，用户能逐张看到进度/失败原因并单独删除重试。
+   */
   const chooseImage = async () => {
     if (!agent || !agent.supportsImages || uploading) return;
-    const remaining = MAX_IMAGES - images.length;
+    const remaining = MAX_IMAGES - drafts.length;
     if (remaining <= 0) { toast(`最多上传 ${MAX_IMAGES} 张图片`, 'warning'); return; }
     let sourceType: Array<'album' | 'camera'> = ['album', 'camera'];
     try {
       const sheet = await Taro.showActionSheet({ itemList: ['拍摄', '从相册选择'] });
       sourceType = sheet.tapIndex === 0 ? ['camera'] : ['album'];
     } catch { return; }
-    setUploading(true);
+    let tempFiles: Array<{ tempFilePath: string; size?: number }> = [];
     try {
       const selected = await Taro.chooseMedia({ count: remaining, mediaType: ['image'], sourceType });
-      const next: string[] = [];
-      for (const file of selected.tempFiles) {
-        const type = 'image/jpeg';
-        const dataUrl = await fileToDataUrl(file.tempFilePath, type);
-        const uploaded = await uploadRuntimeFile({ targetType: 'agent', targetId: agent.id, dataUrl, fileName: `image_${Date.now()}.jpg`, fileType: type });
-        if (uploaded.dataUrl) next.push(toMiniappUrl(uploaded.dataUrl));
-      }
-      if (next.length) setImages((current) => [...current, ...next].slice(0, MAX_IMAGES));
+      tempFiles = selected.tempFiles as unknown as Array<{ tempFilePath: string; size?: number }>;
     } catch (reason) {
       const errMsg = String((reason as { errMsg?: string } | undefined)?.errMsg || '');
-      if (!/cancel/i.test(errMsg)) toast(reason instanceof Error ? reason.message : '图片上传失败', 'error');
+      if (!/cancel/i.test(errMsg)) toast('选择图片失败', 'error');
+      return;
+    }
+    const stamp = Date.now();
+    const queued: UploadDraft[] = tempFiles.map((file, index) => ({
+      uid: runtimeId('upload'),
+      url: file.tempFilePath,
+      name: `image_${stamp}_${index}.jpg`,
+      size: Number(file.size) || 0,
+      fileType: 'image',
+      status: 'pending',
+      progress: 0,
+    }));
+    setDrafts((current) => [...current, ...queued].slice(0, MAX_IMAGES));
+    setUploading(true);
+    let failures = 0;
+    try {
+      for (const draft of queued) {
+        try {
+          const dataUrl = await fileToDataUrl(draft.url, 'image/jpeg');
+          setDrafts((current) => current.map((item) => (item.uid === draft.uid ? { ...item, progress: 50 } : item)));
+          const uploaded = await uploadRuntimeFile({
+            targetType: 'agent',
+            targetId: agent.id,
+            dataUrl,
+            fileName: draft.name,
+            fileType: 'image/jpeg',
+          });
+          const remote = uploaded.dataUrl ? toMiniappUrl(uploaded.dataUrl) : '';
+          if (!remote) throw new Error('上传失败，请重试');
+          setDrafts((current) => current.map((item) => (item.uid === draft.uid
+            ? { ...item, status: 'success', progress: 100, remote }
+            : item)));
+        } catch (reason) {
+          failures += 1;
+          const message = reason instanceof Error ? reason.message : '图片上传失败';
+          setDrafts((current) => current.map((item) => (item.uid === draft.uid
+            ? { ...item, status: 'error', errorMessage: message }
+            : item)));
+        }
+      }
+      // 图片失败态在官方 attachments 里只显示转圈（不展示 errorMessage），补一次聚合提示
+      if (failures) toast(`${failures} 张图片上传失败，请删除后重试`, 'error');
     } finally { setUploading(false); }
   };
 
-  /** 官方 t-attachments 的删除：只回传被删项，按 url 过滤 */
+  /** 官方 t-attachments 的删除：只回传被删项，优先按 uid 定位，退回按 url 匹配 */
   const removeImage = (event: { detail?: { file?: AttachmentFile } }) => {
-    const url = String(event?.detail?.file?.url || '');
-    if (!url) return;
-    setImages((current) => current.filter((item) => item !== url));
+    const file = event?.detail?.file;
+    if (!file) return;
+    const uid = String(file.uid || '');
+    const url = String(file.url || '');
+    setDrafts((current) => current.filter((item) => (uid ? item.uid !== uid : item.url !== url)));
   };
 
   const runTurn = async (userMessage: ChatMessage, baseMessages: ChatMessage[]) => {
@@ -169,7 +232,7 @@ export default function ChatPage() {
     const snapshot = [...baseMessages, userMessage];
     const assistantId = runtimeId('msg');
     setMessages([...snapshot, { id: assistantId, role: 'assistant', text: '', createdAt: new Date().toISOString() }]);
-    setInput(''); setImages([]); setSending(true); setError('');
+    setInput(''); setDrafts([]); setSending(true); setError('');
     let answer = ''; let reasoning = '';
     try {
       await streamAgentChat(agent.id, {
@@ -208,8 +271,14 @@ export default function ChatPage() {
 
   const send = (override?: string) => {
     const text = String(override ?? input).trim();
-    if (!agent || sending || (!text && images.length === 0)) return;
-    void runTurn({ id: runtimeId('msg'), role: 'user', text, images: [...images], createdAt: new Date().toISOString() }, messages);
+    if (!agent || sending) return;
+    if (uploading) { toast('图片上传中，请稍候…', 'warning'); return; }
+    const readyImages = drafts.filter((item) => item.status === 'success' && item.remote).map((item) => item.remote as string);
+    if (!text && !readyImages.length) {
+      if (drafts.some((item) => item.status === 'error')) toast('有图片上传失败，请删除后重试', 'warning');
+      return;
+    }
+    void runTurn({ id: runtimeId('msg'), role: 'user', text, images: readyImages, createdAt: new Date().toISOString() }, messages);
   };
 
   const regenerate = (assistantId: string) => {
@@ -241,7 +310,7 @@ export default function ChatPage() {
       content: '当前对话已自动保存到历史记录，确定开始新对话吗？',
       confirmText: '开始新对话',
     }))) return;
-    setMessages([]); setInput(''); setImages([]); setError('');
+    setMessages([]); setInput(''); setDrafts([]); setError('');
     setSessionId(runtimeId('miniapp_chat'));
     setHistoryOpen(false);
   };
@@ -310,18 +379,36 @@ export default function ChatPage() {
   };
 
   const suggestions = useMemo(() => (agent?.suggestedQuestions || []).filter((item) => typeof item === 'string' && item.trim()).slice(0, 6), [agent]);
-  /** 官方 t-attachments 的预览数据：发送前已上传的图片缩略图 + 可删除 */
+  /**
+   * 官方 t-attachments 的预览数据：发送前已上传的图片缩略图 + 可删除。
+   * status 必须是 'pending' | 'success' | 'error' 之一——组件按它决定渲染转圈还是缩略图。
+   */
   const attachmentsProps = useMemo(
-    () => ({ items: images.map((url) => ({ url, name: 'image.jpg', size: 0, fileType: 'image' })), removable: true, imageViewer: true }),
-    [images],
+    () => ({
+      items: drafts.map((draft) => ({
+        uid: draft.uid,
+        url: draft.url,
+        name: draft.name,
+        size: draft.size,
+        fileType: draft.fileType,
+        status: draft.status,
+        progress: draft.progress,
+        errorMessage: draft.errorMessage,
+      })),
+      removable: true,
+      imageViewer: true,
+    }),
+    [drafts],
   );
   /**
    * 智能体头像：有真头像用图片，没有（线上 32 个智能体里 18 个 avatar 为空）则退化成图标字形色块。
    * 注意 agent.icon 是 lucide 图标名而不是图片地址，不能直接丢给 <Image>。
    */
   const agentAvatar = useMemo(() => resolveEntityAvatar(agent, 'agent'), [agent]);
-  /** 官方发送按钮在「有图无字」时是 disabled，这里补一个兜底入口 */
-  const imageOnlyReady = images.length > 0 && !input.trim() && !sending;
+  /** 官方发送按钮在「有图无字」时是 disabled，这里补一个兜底入口（上传中不出现，避免和加载态打架） */
+  const imageOnlyReady = drafts.some((item) => item.status === 'success' && item.remote) && !input.trim() && !sending && !uploading;
+  /** 有草稿正在上传：加号置忙，避免重复触发系统选择器 */
+  const uploadingAny = uploading || drafts.some((item) => item.status === 'pending');
   /** 键盘弹起时页面收窄到键盘上方（内联样式里的 px 会被微信按逻辑像素处理，不需转 rpx） */
   const pageHeightStyle = keyboardHeight ? `height:calc(100vh - ${keyboardHeight}px);min-height:0` : '';
   const rootStyle = [pageStyle, pageHeightStyle].filter(Boolean).join(';');
@@ -381,7 +468,10 @@ export default function ChatPage() {
                   datetime={formatStamp(message.createdAt)}
                 />
                 {/* 官方 chat-actionbar（复制/重新生成/点赞/点踩）+ 自绘「加入资产库」
-                    注：Taro 编译期不会给内部组件生成 slot 属性，官方 prefix 插槽用不了，故并排拼条 */}
+                    注：Taro 出于性能考虑不会给 View 生成 slot 属性（其源码注释原文是
+                    「不给 View 直接加 slot 属性的原因是性能损耗」），所以官方 chat-sender
+                    的 input-prefix / footer-prefix、chat-actionbar 的 prefix 插槽都注不进去，
+                    需要额外元素时一律并排拼条 / 绝对定位自绘。 */}
                 {showActions && <View className='msg-toolbar'>
                   <View className='msg-asset' hoverClass='msg-action-hover' aria-label='加入资产库' onClick={() => addAsset(message)}>
                     <TdIcon name='bookmark-add' className='msg-asset-icon' />
@@ -417,7 +507,7 @@ export default function ChatPage() {
           onFileDelete={removeImage}
         />
         {agent.supportsImages && <View
-          className='composer-plus'
+          className={`composer-plus${uploadingAny ? ' composer-plus-busy' : ''}`}
           hoverClass='composer-plus-hover'
           aria-label='上传图片'
           onClick={chooseImage}

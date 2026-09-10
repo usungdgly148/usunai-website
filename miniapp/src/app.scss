@@ -189,7 +189,6 @@ button::after { border: 0; }
 .user-bubble { background: var(--mini-primary); color: #fff; }
 .reasoning-text { display: block; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid rgba(120, 140, 170, .2); color: var(--mini-subtle); font-size: 23px; }
 .image-grid, .media-grid { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
-.upload-thumb { width: 120px; height: 120px; border-radius: 14px; }
 .runtime-error { display: block; margin: 12px 0; padding: 16px; border-radius: 12px; background: var(--mini-danger-soft); color: var(--mini-danger); font-size: 24px; }
 .runtime-field { margin-bottom: 20px; }
 .runtime-textarea { width: 100%; min-height: 180px; padding: 18px 22px; border: 1px solid var(--mini-line-strong); border-radius: 16px; background: var(--mini-surface); }
@@ -600,6 +599,8 @@ button::after { border: 0; }
 .composer-plus { position: absolute; left: 24rpx; bottom: 22rpx; z-index: 3; display: flex; width: 64rpx; height: 64rpx; align-items: center; justify-content: center; border-radius: 999rpx; background: var(--mini-soft); color: var(--mini-text-2); }
 .composer-plus-icon { font-size: 40rpx; line-height: 1; }
 .composer-plus-hover { opacity: .6; }
+/* 有图片正在上传：加号置忙（视觉降噪 + 阻断重复点击），加载态本身由官方 attachments 的 t-loading 呈现 */
+.composer-plus-busy { opacity: .45; }
 /* 官方发送按钮在「有图无字」时是 disabled，用同位置的兜底按钮盖住 */
 .composer-image-send { position: absolute; right: 24rpx; bottom: 22rpx; z-index: 4; height: 64rpx; padding: 0 26rpx; border-radius: 999rpx; background: var(--mini-primary); color: #fff; font-size: 26rpx; line-height: 64rpx; }
 /* 消息体的昵称 / 时间：用站点文字色阶，避免官方 placeholder 灰偏浅 */
@@ -615,15 +616,10 @@ button::after { border: 0; }
 .field-hint { display: block; margin-top: 8px; color: var(--mini-subtle-2); font-size: 21px; }
 .switch-row { display: flex; align-items: center; justify-content: space-between; min-height: 82px; padding: 0 22px; border: 1px solid var(--mini-line-strong); border-radius: 16px; background: var(--mini-surface); color: var(--mini-text-2); font-size: 26px; }
 .slider-value { margin-top: 6px; color: var(--mini-text-2); font-size: 22px; text-align: right; }
-.file-preview-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
-.file-preview-item { position: relative; }
-.file-preview-remove { position: absolute; top: -10px; right: -10px; display: flex; width: 40px; height: 40px; align-items: center; justify-content: center; border-radius: 50%; background: rgba(15, 35, 65, .72); color: #fff; font-size: 24px; line-height: 1; }
+/* 官方 t-attachments 承载附件字段：缩略图/文件条 + 上传转圈（status 驱动）。
+   组件自带 .t-attachments__files 的 margin-left/right 与 12rpx 上边距，这里只补与下方按钮的间距 */
+.workflow-attachments { margin-bottom: 12px; }
 .file-count-note { display: block; margin-top: 10px; color: var(--mini-subtle); font-size: 21px; }
-.input-echo { margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--mini-line-faint); }
-.input-echo-row { margin-bottom: 6px; color: var(--mini-text-2); font-size: 23px; word-break: break-all; }
-.input-echo-label { color: var(--mini-subtle-2); }
-.result-toolbar { display: flex; gap: 28px; margin-top: 16px; }
-.result-toolbar-action { color: var(--mini-primary); font-size: 23px; }
 .media-section-title { display: block; margin: 16px 0 10px; color: var(--mini-subtle); font-size: 22px; font-weight: 600; }
 .doc-row { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; padding: 16px 18px; border: 1px solid var(--mini-line); border-radius: 14px; background: var(--mini-surface); }
 .doc-badge { flex-shrink: 0; display: flex; width: 84px; height: 56px; align-items: center; justify-content: center; border-radius: 10px; background: var(--mini-danger-soft); color: var(--mini-danger); font-size: 20px; font-weight: 700; }
@@ -677,6 +673,44 @@ button::after { border: 0; }
 .info-tutorial-title { display: block; padding: 16px 0; color: var(--mini-text-2); font-size: 25px; font-weight: 600; text-align: center; }
 .config-card-head { display: flex; align-items: center; justify-content: space-between; }
 .reset-link { flex-shrink: 0; color: var(--mini-subtle); font-size: 24px; }
+
+/* ===== 工作流历史记录视图（对齐网页版手机端 RunItem 卡片） =====
+   结构：时间行 → 右侧用户输入气泡 → 左侧工作流卡片（名称 + 运行完成 + 媒体统计 + 结果 + 操作行）。
+   列表接口不返回 result，故详情按 id 懒加载，未加载时显示「点击查看运行结果」入口。 */
+.run-item { margin-bottom: 40px; }
+.run-meta { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.run-meta-time { color: var(--mini-subtle-2); font-size: 22px; }
+.run-ask { display: flex; margin-bottom: 20px; flex-direction: row-reverse; align-items: flex-start; gap: 16px; }
+.run-bubble { max-width: 82%; padding: 18px 22px; border-radius: 22px; background: linear-gradient(160deg, #2563eb, #1d4ed8); box-shadow: 0 6px 18px rgba(29, 78, 216, .18); }
+.run-bubble-row { margin-bottom: 6px; }
+.run-bubble-row:last-child { margin-bottom: 0; }
+.run-bubble-label { color: rgba(255, 255, 255, .72); font-size: 22px; }
+.run-bubble-value { color: #fff; font-size: 25px; line-height: 1.5; word-break: break-all; }
+.run-user-avatar { flex-shrink: 0; display: flex; width: 64px; height: 64px; align-items: center; justify-content: center; border-radius: 50%; background: var(--mini-soft); }
+.run-user-avatar-char { color: var(--mini-text-2); font-size: 24px; font-weight: 600; }
+.run-answer { display: flex; align-items: flex-start; gap: 16px; }
+.run-answer-avatar { flex-shrink: 0; display: flex; width: 64px; height: 64px; align-items: center; justify-content: center; overflow: hidden; border-radius: 18px; }
+.run-answer-avatar-img { display: block; width: 100%; height: 100%; }
+.run-answer-card { flex: 1; min-width: 0; padding: 22px 24px; border: 1px solid var(--mini-line-faint); border-radius: 22px; background: var(--mini-surface); box-shadow: 0 6px 20px rgba(17, 42, 88, .06); }
+.run-answer-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.run-answer-name { flex: 1; min-width: 0; overflow: hidden; color: var(--mini-text-2); font-size: 26px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.run-answer-status { flex-shrink: 0; color: var(--mini-success); font-size: 22px; }
+.run-answer-status-running { color: var(--mini-primary); }
+.run-answer-status-icon { margin-right: 6px; font-size: 22px; }
+.run-placeholder { margin-top: 16px; padding: 20px 0; border: 1px dashed var(--mini-line-strong); border-radius: 14px; text-align: center; }
+.run-placeholder-text { color: var(--mini-subtle-2); font-size: 23px; }
+.run-running-hint { display: block; margin-top: 14px; color: var(--mini-subtle-2); font-size: 23px; }
+.run-media-stat { display: flex; align-items: center; gap: 20px; margin-top: 12px; }
+.run-media-stat-item { color: var(--mini-subtle); font-size: 21px; }
+.run-media-icon { margin-right: 6px; font-size: 21px; }
+.run-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 28px; margin-top: 18px; }
+.run-toolbar-action { color: var(--mini-subtle); font-size: 23px; }
+.run-toolbar-icon { margin-right: 6px; font-size: 23px; }
+/* 空态：对齐网页版 EmptyState（图标块 + 标题 + 说明） */
+.run-empty { display: flex; padding: 120px 40px; flex-direction: column; align-items: center; text-align: center; }
+.run-empty-icon { display: flex; width: 128px; height: 128px; margin-bottom: 26px; align-items: center; justify-content: center; border: 1px solid var(--mini-line-faint); border-radius: 32px; background: var(--mini-surface); color: var(--mini-subtle-2); font-size: 56px; box-shadow: 0 6px 20px rgba(17, 42, 88, .06); }
+.run-empty-title { color: var(--mini-text-2); font-size: 30px; font-weight: 600; }
+.run-empty-desc { margin-top: 12px; color: var(--mini-subtle-2); font-size: 24px; line-height: 1.6; }
 
 /* TDesign 图标字体辅助类：配合 components/td-icon.tsx 输出 PUA 字形 */
 .td-icon { display: inline-block; font-family: 'td-icons'; font-style: normal; font-weight: 400; line-height: 1; vertical-align: -2px; }

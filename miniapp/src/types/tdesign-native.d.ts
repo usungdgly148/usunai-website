@@ -4,6 +4,7 @@ declare namespace JSX {
     't-chat-message': any;
     't-chat-sender': any;
     't-chat-actionbar': any;
+    't-attachments': any;
     't-toast': any;
     't-dialog': any;
     't-skeleton': any;

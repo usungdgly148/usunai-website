@@ -23,6 +23,8 @@ export default {
     't-chat-message': 'tdesign-miniprogram/chat-message/chat-message',
     't-chat-sender': 'tdesign-miniprogram/chat-sender/chat-sender',
     't-chat-actionbar': 'tdesign-miniprogram/chat-actionbar/chat-actionbar',
+    // 工作流附件字段：用官方 attachments 直接拿到「status 驱动的加载态」（pending → t-loading）
+    't-attachments': 'tdesign-miniprogram/attachments/attachments',
     't-toast': 'tdesign-miniprogram/toast/toast',
     't-dialog': 'tdesign-miniprogram/dialog/dialog',
     't-skeleton': 'tdesign-miniprogram/skeleton/skeleton',
