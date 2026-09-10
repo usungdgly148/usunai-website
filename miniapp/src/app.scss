@@ -102,11 +102,23 @@ button::after { border: 0; }
 .runtime-page { display: flex; min-height: 100vh; padding: 24px; flex-direction: column; background: var(--mini-page); }
 .runtime-header { flex-shrink: 0; padding: 8px 4px 18px; }
 .chat-scroll, .workflow-scroll { flex: 1; min-height: 0; }
-.chat-row { display: block; margin: 14px 0; }
+/* 消息行：左「自绘智能体头像」+ 右「官方 t-chat-message」 */
+.chat-row { display: flex; align-items: flex-start; margin: 14px 0; }
+.chat-row-body { flex: 1; min-width: 0; }
 /* 官方 t-chat-message 自带 margin-bottom:32rpx，这里收掉，间距交给 .chat-row 统一控制 */
 .chat-row .t-chat-message { margin-bottom: 0; }
-/* 消息操作区 = 自绘「加入资产库」+ 官方 t-chat-actionbar 拼成一条（缩进对齐气泡：头像 64rpx + 间距 24rpx） */
-.msg-toolbar { display: flex; align-items: stretch; margin-top: 6px; padding-left: 88rpx; }
+/* Taro 编译期不生成 slot 属性 → 官方 avatar 插槽用不了；官方 avatar 又只接受图片地址、
+   缺头像的智能体会渲染成空白，故智能体侧头像改由页面自绘。
+   padding-top 用与官方 `__avatar` 同一条公式，保证与用户侧官方头像同一基线 */
+.message-avatar { flex-shrink: 0; margin-right: 24rpx; padding-top: calc(44rpx + var(--td-spacer, 16rpx)); }
+.message-avatar-img { width: 64rpx; height: 64rpx; border-radius: 50%; }
+.message-avatar-fallback { display: flex; align-items: center; justify-content: center; }
+.message-avatar-glyph { color: #fff; font-size: 30rpx; line-height: 1; }
+/* 只收掉智能体侧的官方头像位（用户侧官方头像正常，保留） */
+.chat-row-assistant .t-chat-message__avatar { display: none; }
+/* 消息操作区 = 自绘「加入资产库」+ 官方 t-chat-actionbar 拼成一条。
+   头像已由 .chat-row 的 .message-avatar 占位（64rpx + 24rpx），所以这里对齐气泡左边缘即可 */
+.msg-toolbar { display: flex; align-items: stretch; margin-top: 6px; }
 .msg-toolbar .t-chat-actionbar__inner { border-left: 0; border-radius: 0 12rpx 12rpx 0; }
 .msg-asset { display: flex; align-items: center; justify-content: center; padding: 0 24rpx; border: 2rpx solid var(--mini-line-strong); border-right: 0; border-radius: 12rpx 0 0 12rpx; background: var(--mini-soft); color: var(--mini-text-2); }
 .msg-asset-icon { font-size: 40rpx; line-height: 1; }
@@ -536,6 +548,13 @@ button::after { border: 0; }
 
 /* 智能体内页补充：建议问题、消息操作条、思考过程折叠、新对话 */
 .header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+/* 页头左侧：实体头像 + 名称（对话页 / 工作流页共用；缺头像时用图标字形色块兜底） */
+.header-main { display: flex; flex: 1; min-width: 0; align-items: center; gap: 16rpx; }
+.header-titles { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+.header-avatar { flex-shrink: 0; width: 80rpx; height: 80rpx; overflow: hidden; border-radius: 24rpx; box-shadow: 0 4rpx 14rpx rgba(17, 42, 88, .10); }
+.header-avatar-img { display: block; width: 100%; height: 100%; }
+.header-avatar-fallback { display: flex; align-items: center; justify-content: center; border-radius: 24rpx; }
+.header-avatar-glyph { color: #fff; font-size: 38rpx; font-weight: 700; line-height: 1; }
 .header-new-chat { flex-shrink: 0; margin-top: 8px; padding: 8px 20px; border: 1px solid var(--mini-line-strong); border-radius: 14px; background: var(--mini-surface); color: var(--mini-text-2); font-size: 22px; }
 .suggestion-row { display: flex; flex-wrap: wrap; gap: 12px; margin: 18px 0 4px; }
 .suggestion-caption { width: 100%; color: var(--mini-subtle-2); font-size: 21px; }
@@ -586,6 +605,11 @@ button::after { border: 0; }
 /* 消息体的昵称 / 时间：用站点文字色阶，避免官方 placeholder 灰偏浅 */
 .chat-page .t-chat-message__name { color: var(--mini-text-2); font-weight: 600; }
 .chat-page .t-chat-message__time { color: var(--mini-subtle-2); font-size: 24rpx; }
+/* 输入框下方免责提示：跟着输入框一起被键盘顶起，不能被盖住 */
+.composer-disclaimer { display: block; flex-shrink: 0; margin-top: 12rpx; color: var(--mini-subtle-2); font-size: 22rpx; line-height: 1.5; text-align: center; }
+/* 键盘弹起：页面高度已由内联样式收窄到键盘上方（`.runtime-page` 的 min-height:100vh 会压过
+   height，故内联里一并 min-height:0），底部安全区留白改回常规值，否则提示行会悬在键盘上方一大截 */
+.chat-page.chat-page-kb { min-height: 0; padding-bottom: 10px; }
 
 /* 工作流内页补充：提示、开关/滑块/日期、文件预览、输入回显、音频、文档 */
 .field-hint { display: block; margin-top: 8px; color: var(--mini-subtle-2); font-size: 21px; }

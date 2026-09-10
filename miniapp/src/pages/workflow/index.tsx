@@ -7,6 +7,7 @@ import { TdIcon } from '../../components/td-icon';
 import { fetchAllRecords, getHistoryDetail, getPublicContent, getRuntimeTask, saveRuntimeAsset, saveRuntimeHistory, submitWorkflowTask, uploadRuntimeFile } from '../../services/api';
 import { fileToDataUrl, runtimeId } from '../../services/runtime';
 import { hideFeedbackToast, loadingToast, toast } from '../../utils/feedback';
+import { resolveEntityAvatar } from '../../utils/entity-visual';
 import type { ContentItem, FormField, FormFieldOption, RuntimeTask } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
 
@@ -532,13 +533,22 @@ function WorkflowPage() {
   };
 
   const { pageStyle } = useThemePage();
+  /** 工作流头像：有真头像用图片，没有则退化成图标字形色块（与智能体页头一致） */
+  const workflowAvatar = resolveEntityAvatar(workflow, 'workflow');
   return <View className='runtime-page' style={pageStyle}>
     <PageState loading={loading} error={error && !workflow ? error : ''} empty={!loading && !error && !workflow} />
     {workflow && <>
       <View className='runtime-header header-row'>
-        <View>
-          <Text className='card-title'>{workflow.name}</Text>
-          <Text className='muted'>配置参数 · 一键运行</Text>
+        <View className='header-main'>
+          <View className='header-avatar'>{workflowAvatar.url
+            ? <Image className='header-avatar-img' src={workflowAvatar.url} mode='aspectFill' lazyLoad webp />
+            : <View className='header-avatar-img header-avatar-fallback' style={{ background: workflowAvatar.background }}>
+              <Text className='header-avatar-glyph'>{workflowAvatar.glyph}</Text>
+            </View>}</View>
+          <View className='header-titles'>
+            <Text className='card-title'>{workflow.name}</Text>
+            <Text className='muted'>配置参数 · 一键运行</Text>
+          </View>
         </View>
         <View className='header-actions'>
           <Text className='header-icon-btn' onClick={openHistory}><TdIcon name='time' /></Text>

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Taro, { useRouter } from '@tarojs/taro';
-import { Button, ScrollView, Text, View } from '@tarojs/components';
+import { Button, Image, ScrollView, Text, View } from '@tarojs/components';
 import { PageState } from '../../components/page-state';
 import { MarkdownContent } from '../../components/markdown-content';
 import { EntityInfoCard, SideDrawer, timeAgo } from '../../components/inner-ui';
@@ -8,6 +8,8 @@ import { TdIcon } from '../../components/td-icon';
 import { fetchAllRecords, getHistoryDetail, getMe, getPublicContent, saveRuntimeAsset, saveRuntimeHistory, streamAgentChat, uploadRuntimeFile } from '../../services/api';
 import { collectMediaUrls, fileToDataUrl, runtimeId } from '../../services/runtime';
 import { confirmDialog, hideFeedbackToast, loadingToast, toast } from '../../utils/feedback';
+import { resolveEntityAvatar, toAvatarUrl, toMiniappUrl } from '../../utils/entity-visual';
+import { subscribeKeyboardHeight, readWindowHeight } from '../../utils/keyboard';
 import type { ContentItem } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
 
@@ -18,7 +20,6 @@ type AttachmentFile = { url?: string; name?: string; size?: number; fileType?: s
 
 const ASSET_TYPE_NAMES: Record<string, string> = { copy: '文案', image: '图片', video: '视频', audio: '音频', article: '文章' };
 const sessionKey = (agentId?: string) => `usunai_miniapp_chat_session_${agentId || 'unknown'}`;
-const WEB_ORIGIN = 'https://www.usunai.top';
 const MAX_IMAGES = 4;
 /**
  * 官方 t-chat-sender 的预设区：只保留官方发送按钮（右下角）。
@@ -28,15 +29,8 @@ const MAX_IMAGES = 4;
 const SENDER_PRESETS = [{ name: 'send', type: 'icon' }];
 /** textareaProps.autosize 的数字会被组件内 wxs 追加 rpx */
 const SENDER_TEXTAREA_PROPS = { autosize: { minHeight: 44, maxHeight: 264 } };
-/** 官方 chat-actionbar 的动作项；iconMap 只认这 6 个，自定义动作走 prefix 插槽自绘 */
+/** 官方 chat-actionbar 的动作项；iconMap 只认这 6 个固定动作，自定义动作（加入资产库）只能自绘并排拼条 */
 const MESSAGE_ACTIONS = ['copy', 'replay', 'good', 'bad'];
-
-/** 相对路径（/api/blob/serve/...）补全为小程序可加载的绝对地址 */
-function toAssetUrl(value?: string) {
-  if (!value) return '';
-  if (/^(https?:)?\/\//i.test(value) || value.startsWith('data:')) return value;
-  return `${WEB_ORIGIN}${value.startsWith('/') ? value : `/${value}`}`;
-}
 
 /** 消息时间戳：当天只显示 HH:mm，跨天补上 MM-DD */
 function formatStamp(iso?: string) {
@@ -79,6 +73,10 @@ export default function ChatPage() {
   const [uploading, setUploading] = useState(false);
   /** 输入框聚焦（编辑态）：蓝色描边 + 淡光晕的视觉反馈 */
   const [focused, setFocused] = useState(false);
+  /** 软键盘高度（px）：键盘弹起时页面整体收窄，避免底部按钮/提示被遮挡 */
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  /** 键盘弹起前的窗口高度基准：识别 Android「键盘压缩 webview」的情形，避免重复让位 */
+  const baseWindowHeight = useRef(0);
   /** 用户头像/昵称（聊天气泡的 role=user 侧） */
   const [userName, setUserName] = useState('我');
   const [userAvatar, setUserAvatar] = useState('');
@@ -109,9 +107,28 @@ export default function ChatPage() {
   useEffect(() => {
     getMe().then((profile) => {
       if (profile.name) setUserName(profile.name);
-      setUserAvatar(toAssetUrl(profile.avatar));
+      setUserAvatar(toAvatarUrl(profile.avatar));
     }).catch(() => {});
   }, []);
+
+  /**
+   * 键盘遮挡：页面是 height:100vh + overflow:hidden 的 flex 布局，软键盘弹起时不会自动让位，
+   * 底部的加号、发送按钮和提示行会被键盘盖住。这里监听键盘高度，把页面高度收窄到键盘上方。
+   * 注意 `.runtime-page` 带 min-height:100vh，min-height 会压过 height，所以内联里必须一并归零。
+   */
+  useEffect(() => subscribeKeyboardHeight((result) => {
+    const height = Math.max(0, Number(result?.height) || 0);
+    const windowHeight = readWindowHeight();
+    if (height <= 0) {
+      if (windowHeight > 0) baseWindowHeight.current = windowHeight;
+      setKeyboardHeight(0);
+      return;
+    }
+    if (!baseWindowHeight.current && windowHeight > 0) baseWindowHeight.current = windowHeight;
+    // Android 部分版本是「键盘把 webview 压缩」而不是浮层覆盖 → 100vh 已不含键盘，再减就重复让位
+    const resizedByKeyboard = baseWindowHeight.current > 0 && windowHeight > 0 && baseWindowHeight.current - windowHeight > 60;
+    setKeyboardHeight(resizedByKeyboard ? 0 : height);
+  }), []);
 
   /** 加号上传：官方内置弹层只能单张取图，这里自建「拍摄 / 从相册选择」并支持一次多选 */
   const chooseImage = async () => {
@@ -131,7 +148,7 @@ export default function ChatPage() {
         const type = 'image/jpeg';
         const dataUrl = await fileToDataUrl(file.tempFilePath, type);
         const uploaded = await uploadRuntimeFile({ targetType: 'agent', targetId: agent.id, dataUrl, fileName: `image_${Date.now()}.jpg`, fileType: type });
-        if (uploaded.dataUrl) next.push(uploaded.dataUrl);
+        if (uploaded.dataUrl) next.push(toMiniappUrl(uploaded.dataUrl));
       }
       if (next.length) setImages((current) => [...current, ...next].slice(0, MAX_IMAGES));
     } catch (reason) {
@@ -298,17 +315,34 @@ export default function ChatPage() {
     () => ({ items: images.map((url) => ({ url, name: 'image.jpg', size: 0, fileType: 'image' })), removable: true, imageViewer: true }),
     [images],
   );
-  const agentAvatar = toAssetUrl(agent?.avatar || agent?.icon);
+  /**
+   * 智能体头像：有真头像用图片，没有（线上 32 个智能体里 18 个 avatar 为空）则退化成图标字形色块。
+   * 注意 agent.icon 是 lucide 图标名而不是图片地址，不能直接丢给 <Image>。
+   */
+  const agentAvatar = useMemo(() => resolveEntityAvatar(agent, 'agent'), [agent]);
   /** 官方发送按钮在「有图无字」时是 disabled，这里补一个兜底入口 */
   const imageOnlyReady = images.length > 0 && !input.trim() && !sending;
+  /** 键盘弹起时页面收窄到键盘上方（内联样式里的 px 会被微信按逻辑像素处理，不需转 rpx） */
+  const pageHeightStyle = keyboardHeight ? `height:calc(100vh - ${keyboardHeight}px);min-height:0` : '';
+  const rootStyle = [pageStyle, pageHeightStyle].filter(Boolean).join(';');
 
-  return <View className='runtime-page chat-page' style={pageStyle}>
+  /** 头像元素：图片优先，缺头像时用「图标字形 + 渐变底色块」兜底 */
+  const renderAvatar = (size: 'header' | 'message') => (agentAvatar.url
+    ? <Image className={`${size}-avatar-img`} src={agentAvatar.url} mode='aspectFill' lazyLoad webp />
+    : <View className={`${size}-avatar-img ${size}-avatar-fallback`} style={{ background: agentAvatar.background }}>
+      <Text className={`${size}-avatar-glyph`}>{agentAvatar.glyph}</Text>
+    </View>);
+
+  return <View className={`runtime-page chat-page${keyboardHeight ? ' chat-page-kb' : ''}`} style={rootStyle}>
     <PageState loading={loading} error={error && !agent ? error : ''} empty={!loading && !error && !agent} />
     {agent && <>
       <View className='runtime-header header-row'>
-        <View>
-          <Text className='card-title'>{agent.name}</Text>
-          <Text className='muted'>AI 智能体 · 实时对话</Text>
+        <View className='header-main'>
+          <View className='header-avatar'>{renderAvatar('header')}</View>
+          <View className='header-titles'>
+            <Text className='card-title'>{agent.name}</Text>
+            <Text className='muted'>AI 智能体 · 实时对话</Text>
+          </View>
         </View>
         <View className='header-actions'>
           <Text className='header-icon-btn' onClick={openHistory}><TdIcon name='time' /></Text>
@@ -330,32 +364,37 @@ export default function ChatPage() {
           const streaming = sending && message.role === 'assistant' && isLast;
           const showActions = message.role === 'assistant' && !!message.text && !streaming;
           return (
-            <View id={`message-${message.id}`} key={message.id} className='chat-row'>
-              {/* 官方消息体：头像 + 昵称 + 时间 + 内容（user/assistant 双角色） */}
-              <t-chat-message
-                content={toTDesignContent(message, streaming)}
-                role={message.role}
-                placement={message.role === 'user' ? 'right' : 'left'}
-                variant='base'
-                status={message.role === 'assistant' ? (streaming ? 'streaming' : 'complete') : undefined}
-                avatar={message.role === 'user' ? userAvatar : agentAvatar}
-                name={message.role === 'user' ? (userName || '我') : agent.name}
-                datetime={formatStamp(message.createdAt)}
-              />
-              {/* 官方 chat-actionbar（复制/重新生成/点赞/点踩）+ 自绘「加入资产库」
-                  注：Taro 的具名插槽只对第三方组件生效，View 拿不到 slot 属性，故这里用并排拼条而不是 prefix 插槽 */}
-              {showActions && <View className='msg-toolbar'>
-                <View className='msg-asset' hoverClass='msg-action-hover' aria-label='加入资产库' onClick={() => addAsset(message)}>
-                  <TdIcon name='bookmark-add' className='msg-asset-icon' />
-                </View>
-                <t-chat-actionbar
-                  actionBar={MESSAGE_ACTIONS}
-                  content={message.text}
-                  chatId={message.id}
-                  placement='start'
-                  onActions={(event: { detail?: { name?: string } }) => handleMessageAction(event, message)}
+            <View id={`message-${message.id}`} key={message.id} className={`chat-row chat-row-${message.role}`}>
+              {/* 智能体头像自绘：官方 chat-message 的 avatar 只接受图片地址，缺头像的智能体没有兜底，
+                  这里在气泡左侧自己画一个（用户侧仍用官方头像，两边保持同一基线） */}
+              {message.role === 'assistant' && <View className='message-avatar'>{renderAvatar('message')}</View>}
+              <View className='chat-row-body'>
+                {/* 官方消息体：头像 + 昵称 + 时间 + 内容（user/assistant 双角色） */}
+                <t-chat-message
+                  content={toTDesignContent(message, streaming)}
+                  role={message.role}
+                  placement={message.role === 'user' ? 'right' : 'left'}
+                  variant='base'
+                  status={message.role === 'assistant' ? (streaming ? 'streaming' : 'complete') : undefined}
+                  avatar={message.role === 'user' ? userAvatar : undefined}
+                  name={message.role === 'user' ? (userName || '我') : agent.name}
+                  datetime={formatStamp(message.createdAt)}
                 />
-              </View>}
+                {/* 官方 chat-actionbar（复制/重新生成/点赞/点踩）+ 自绘「加入资产库」
+                    注：Taro 编译期不会给内部组件生成 slot 属性，官方 prefix 插槽用不了，故并排拼条 */}
+                {showActions && <View className='msg-toolbar'>
+                  <View className='msg-asset' hoverClass='msg-action-hover' aria-label='加入资产库' onClick={() => addAsset(message)}>
+                    <TdIcon name='bookmark-add' className='msg-asset-icon' />
+                  </View>
+                  <t-chat-actionbar
+                    actionBar={MESSAGE_ACTIONS}
+                    content={message.text}
+                    chatId={message.id}
+                    placement='start'
+                    onActions={(event: { detail?: { name?: string } }) => handleMessageAction(event, message)}
+                  />
+                </View>}
+              </View>
             </View>
           );
         })}
@@ -391,6 +430,7 @@ export default function ChatPage() {
           onClick={() => send()}
         >发送图片</View>}
       </View>
+      <Text className='composer-disclaimer'>内容由AI生成，仅供参考</Text>
 
       <SideDrawer open={historyOpen} title='对话历史' onClose={() => setHistoryOpen(false)}>
         <Button className='history-new-btn' onClick={startNewChat}>＋ 新对话</Button>
