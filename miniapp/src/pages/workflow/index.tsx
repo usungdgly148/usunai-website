@@ -702,20 +702,23 @@ function WorkflowPage() {
       : <Text className='header-avatar-glyph'>{workflowAvatar.glyph}</Text>}
   </View>;
 
-  /** 运行中/排队中的进行态卡片（历史列表顶部，任务落库前先占位） */
-  const renderLiveCard = () => {
-    if (!task || (task.status !== 'queued' && task.status !== 'running')) return null;
+  /** 进行中/失败的当前任务卡片（历史列表顶部，任务落库前先占位；失败态历史里没有记录，必须在这里呈现） */
+  const renderActiveCard = () => {
+    if (!task || (task.status !== 'queued' && task.status !== 'running' && task.status !== 'failed')) return null;
+    const failed = task.status === 'failed';
     return <View className='run-item'>
-      {renderRunMeta(new Date().toISOString())}
+      {renderRunMeta(task.completedAt || task.createdAt || new Date().toISOString())}
       {renderRunInputs(lastSnapshotRef.current || undefined)}
       <View className='run-answer'>
         {renderRunAvatar()}
         <View className='run-answer-card'>
           <View className='run-answer-head'>
             <Text className='run-answer-name'>{workflow?.name || '工作流'}</Text>
-            <Text className='run-answer-status run-answer-status-running'>{task.status === 'queued' ? '排队中' : '运行中…'}</Text>
+            <Text className={`run-answer-status${failed ? ' run-answer-status-failed' : ' run-answer-status-running'}`}>
+              {failed ? '运行失败' : task.status === 'queued' ? '排队中' : '运行中…'}
+            </Text>
           </View>
-          <Text className='run-running-hint'>AI 正在生成，请稍候…</Text>
+          <Text className='run-running-hint'>{failed ? (task.error || '本次运行失败，请调整参数后重试') : 'AI 正在生成，请稍候…'}</Text>
         </View>
       </View>
     </View>;
@@ -839,9 +842,10 @@ function WorkflowPage() {
             <Text className='run-empty-desc'>填写参数并点击「开始运行」，结果会在这里显示</Text>
           </View>
             : <>
-              {renderLiveCard()}
+              {renderActiveCard()}
               {historyList.map(renderRunCard)}
             </>}
+        {!!error && <Text className='runtime-error'>{error}</Text>}
       </ScrollView>}
       {configView && <Button className='primary-button runtime-submit' loading={task?.status === 'queued' || task?.status === 'running'} disabled={task?.status === 'queued' || task?.status === 'running'} onClick={submit}>开始运行</Button>}
 

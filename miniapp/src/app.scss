@@ -696,6 +696,7 @@ button::after { border: 0; }
 .run-answer-name { flex: 1; min-width: 0; overflow: hidden; color: var(--mini-text-2); font-size: 26px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .run-answer-status { flex-shrink: 0; color: var(--mini-success); font-size: 22px; }
 .run-answer-status-running { color: var(--mini-primary); }
+.run-answer-status-failed { color: var(--mini-danger); }
 .run-answer-status-icon { margin-right: 6px; font-size: 22px; }
 .run-placeholder { margin-top: 16px; padding: 20px 0; border: 1px dashed var(--mini-line-strong); border-radius: 14px; text-align: center; }
 .run-placeholder-text { color: var(--mini-subtle-2); font-size: 23px; }
