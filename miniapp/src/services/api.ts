@@ -13,6 +13,25 @@ const CONTENT_CACHE_KEY = 'usunai_miniapp_content_v2';
 const CONTENT_TTL = 5 * 60 * 1000;
 const LAYOUT_TTL = 60 * 1000;
 let loginPromise: Promise<string> | null = null;
+/**
+ * 服务端表明「当前登录态不完整、必须重新登录换取新凭证」的错误码。
+ * 这类错误只刷新 token 解决不了，必须重新走 wx.login 让服务端刷新 session_key。
+ * SESSION_KEY_MISSING：虚拟支付用户态签名需要登录时写入身份记录的 session_key，
+ * P51 之前登录的用户身份记录里没有该字段，需重新登录补齐（否则充值下单永远 403）。
+ */
+const SESSION_REFRESH_CODES = new Set([
+  'SESSION_KEY_MISSING',
+  'OPENID_MISSING',
+  'MINIAPP_SESSION_REQUIRED',
+  'USER_AUTH_REQUIRED',
+]);
+
+/** 判断该错误是否可通过「静默重新登录 + 重试一次」恢复 */
+function needsSessionRefresh(error: unknown): error is ApiError {
+  if (!(error instanceof ApiError)) return false;
+  if (error.statusCode === 401) return true;
+  return error.statusCode === 403 && SESSION_REFRESH_CODES.has(String(error.code || ''));
+}
 
 export class ApiError extends Error {
   constructor(public code: string, message: string, public statusCode = 0) {
@@ -117,13 +136,22 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   try {
     return await rawRequest<T>(path, options);
   } catch (error) {
-    if (options.auth !== false && error instanceof ApiError && error.statusCode === 401 && !isLoggedOut()) {
-      Taro.removeStorageSync(TOKEN_KEY);
-      await ensureMiniappSession(true);
+    // 401 或「登录态不完整」类 403：丢弃本地 token，静默重新登录（换取新 session_key）后重试一次。
+    if (options.auth !== false && needsSessionRefresh(error) && !isLoggedOut()) {
+      await refreshMiniappSession();
       return rawRequest<T>(path, options);
     }
     throw error;
   }
+}
+
+/**
+ * 强制静默刷新登录态：丢弃本地 token，重新 wx.login 换取服务端新会话。
+ * 会顺带刷新身份记录里的 session_key（虚拟支付用户态签名的密钥，微信每次登录都会换新的）。
+ */
+export async function refreshMiniappSession(): Promise<string> {
+  Taro.removeStorageSync(TOKEN_KEY);
+  return ensureMiniappSession(true);
 }
 
 /** 退出登录：服务端吊销当前会话 + 清理本地登录态（此后需「微信一键登录」重新进入） */

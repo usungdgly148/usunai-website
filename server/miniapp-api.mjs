@@ -521,13 +521,15 @@ async function createRechargeOrder(req, res, requestId, session, deps) {
   const identity = await KV.kvGet(session.identityKey);
   const openid = identity && identity.openid ? String(identity.openid) : '';
   if (!openid) {
-    sendJson(res, 403, errorEnvelope('OPENID_MISSING', '缺少微信身份信息，请重新登录后重试', requestId), requestId);
+    // 用 401 而非 403：客户端只对 401 做「静默重新登录 + 重试一次」，403 会被当成硬失败直接弹提示。
+    sendJson(res, 401, errorEnvelope('OPENID_MISSING', '登录状态不完整，请重新登录后再试', requestId), requestId);
     return;
   }
   // 用户态签名需要当前有效的 session_key（登录时写入身份记录，重新登录会刷新）。
   const sessionKey = identity && identity.sessionKey ? String(identity.sessionKey) : '';
   if (!sessionKey) {
-    sendJson(res, 403, errorEnvelope('SESSION_KEY_MISSING', '登录状态已过期，请重新进入小程序后再试', requestId), requestId);
+    // 同上：必须回 401，客户端才会自动重登换新的 session_key（老客户端也认 401）。
+    sendJson(res, 401, errorEnvelope('SESSION_KEY_MISSING', '登录状态已过期，请重新登录后再试', requestId), requestId);
     return;
   }
   // outTradeNo：8-32 位，仅数字 / 大小写字母 / _-|*@，不能以下划线开头，每单唯一。

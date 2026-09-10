@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { PageState } from '../../components/page-state';
 import { useLoad } from '../../hooks/use-load';
 import { useThemePage } from '../../hooks/use-theme-page';
-import { createRechargeOrder, getPublicContent, getRechargeStatus } from '../../services/api';
+import { createRechargeOrder, getPublicContent, getRechargeStatus, refreshMiniappSession } from '../../services/api';
 import type { ComputePackage, VirtualPaymentParams } from '../../types';
 
 interface RechargeData {
@@ -49,6 +49,23 @@ interface VirtualPayOptions {
 }
 
 type VirtualPayBridge = (options: VirtualPayOptions) => void;
+
+/** 虚拟支付失败错误：保留 errCode 便于区分「签名失效」「道具未发布」等场景 */
+class VirtualPayError extends Error {
+  constructor(message: string, public errCode = 0) {
+    super(message);
+  }
+}
+
+/**
+ * 是否为「用户态签名校验失败」——即服务端持有的 session_key 已失效。
+ * 微信每次登录都会刷新 session_key，旧密钥会让 signature/paySig 对不上；
+ * 这类错误可以靠「重新登录换新密钥 + 重试一次」恢复，不需要用户手动干预。
+ */
+function isVirtualPaySignatureError(error: unknown) {
+  if (!(error instanceof VirtualPayError)) return false;
+  return /sign|签名/i.test(`${error.message} ${error.errCode}`);
+}
 
 /** 虚拟支付要求基础库 ≥ 2.19.2；iOS 端还需微信客户端 ≥ 8.0.68。不满足时给出明确引导。 */
 function ensureVirtualPaySupported() {
@@ -96,7 +113,7 @@ function requestVirtualPayment(params: VirtualPaymentParams): Promise<void> {
           reject(new Error('cancel'));
           return;
         }
-        reject(new Error(message || '支付失败，请稍后重试'));
+        reject(new VirtualPayError(message || '支付失败，请稍后重试', Number(err && err.errCode) || 0));
       },
     });
   });
@@ -147,11 +164,25 @@ export default function RechargePage() {
     }
     if (!ensureVirtualPaySupported()) return;
     setPayingId(pkg.id);
-    try {
+    /** 下单 → 拉起支付 → 轮询到账；签名失效重试时整体重跑（需重新下单拿新的签名串）。 */
+    const runPayFlow = async () => {
       const order = await createRechargeOrder(pkg.id);
       // success 回调只代表「支付操作完成」，不能作为发货依据；到账以服务端订单状态为准。
       await requestVirtualPayment(order.virtualPay);
       await waitPaid(order.orderId);
+    };
+    try {
+      try {
+        await runPayFlow();
+      } catch (error) {
+        // session_key 失效导致的签名校验失败：静默重新登录换新密钥后重试一次。
+        if (isVirtualPaySignatureError(error)) {
+          await refreshMiniappSession();
+          await runPayFlow();
+        } else {
+          throw error;
+        }
+      }
       Taro.showToast({ title: '充值成功', icon: 'success' });
       setTimeout(() => Taro.navigateBack(), 1200);
     } catch (error) {
