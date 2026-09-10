@@ -445,6 +445,45 @@ async function reconcileVirtualOrder({ KV, sanitizeId, order }) {
   }
 }
 
+// 定时对账：扫描「pending 且为虚拟支付」的近期订单，主动查单补发货。
+// 使命：让到账彻底不依赖微信「发货推送」——推送在微信后台可能配不上（报「系统繁忙」），
+// 且用户付完款立刻退出小程序时前端也不再轮询，这类漏单全部由服务端定时兜底。
+// key 形如 order_p<13位毫秒时间戳><随机hex>，先按时间戳排除老单，避免全量读 KV。
+const RECONCILE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+export async function reconcilePendingVirtualOrders(KV, sanitizeId, {
+  maxAgeMs = RECONCILE_MAX_AGE_MS,
+  scanLimit = 3000,
+  batch = 10,
+} = {}) {
+  const stats = { candidates: 0, pending: 0, delivered: 0 };
+  try {
+    await loadVirtualPayConfig(KV);
+    if (!virtualPayConfigured()) return stats;
+    const now = Date.now();
+    const keys = (await KV.kvList('order_', scanLimit)).filter((key) => {
+      const ts = Number(String(key).slice(7, 20));
+      return Number.isFinite(ts) && ts > 0 && now - ts <= maxAgeMs;
+    });
+    stats.candidates = keys.length;
+    for (let i = 0; i < keys.length; i += batch) {
+      const orders = await Promise.all(keys.slice(i, i + batch).map((key) => KV.kvGet(key)));
+      for (const order of orders) {
+        if (!order || String(order.status) !== 'pending') continue;
+        if (!order.meta || order.meta.payment !== 'wechat_virtual') continue;
+        // 缺 openid 无法调 query_order，跳过（正常下单都会落库 openid）。
+        if (!order.meta.openid) continue;
+        stats.pending += 1;
+        const after = await reconcileVirtualOrder({ KV, sanitizeId, order });
+        if (String(after && after.status) === 'paid') stats.delivered += 1;
+      }
+    }
+    if (stats.delivered > 0) console.log('[recharge] 定时对账补发货:', JSON.stringify(stats));
+  } catch (error) {
+    console.error('[recharge] 定时对账异常:', error?.code, error?.message || error);
+  }
+  return stats;
+}
+
 // 创建充值订单并返回 wx.requestVirtualPayment 所需参数（signData / paySig / signature）。
 async function createRechargeOrder(req, res, requestId, session, deps) {
   const { KV, sanitizeId } = deps;

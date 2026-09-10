@@ -24,7 +24,7 @@ import {
   loadVirtualPayConfig,
   virtualPayConfigured,
 } from './wechat-virtual-pay.mjs';
-import { handleMiniappApi } from './miniapp-api.mjs';
+import { handleMiniappApi, reconcilePendingVirtualOrders } from './miniapp-api.mjs';
 import { handleMiniappAuth } from './miniapp-auth.mjs';
 import { handleMiniappRuntime } from './miniapp-runtime.mjs';
 import { handleMiniappLayout } from './miniapp-layout.mjs';
@@ -4676,8 +4676,22 @@ try {
   console.error('[security] admin password hash migration failed:', e.message || e);
 }
 
+// 虚拟支付订单对账间隔（供 listen 回调里的定时器使用）。
+const RECHARGE_RECONCILE_INTERVAL_MS = 3 * 60 * 1000;
+// 与请求处理内的 sanitizeId 规则保持一致（KV key 只保留 [A-Za-z0-9_]）。
+const sanitizeIdForKV = (s) => String(s == null ? '' : s).replace(/[^a-zA-Z0-9_]/g, '_');
+
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[phase2-backend] listening on http://localhost:${PORT}`);
   console.log(`[phase2-backend] agents configured: ${Object.keys(agents).length}`);
   resumeKnowledgeIngestion().catch((error) => console.error('[rag] resume ingestion failed:', error?.message || error));
+
+  // 虚拟支付订单定时对账（每 3 分钟）：主动 query_order 查单补发货。
+  // 使到账不依赖微信「发货推送」——推送在微信后台可能配不上，且用户付款后立刻退出小程序
+  // 会导致前端停止轮询，这类漏单由服务端定时兜底（失败不阻断，下一轮重试）。
+  const rechargeReconcileTimer = setInterval(() => {
+    reconcilePendingVirtualOrders(KV, sanitizeIdForKV).catch(() => {});
+  }, RECHARGE_RECONCILE_INTERVAL_MS);
+  if (typeof rechargeReconcileTimer.unref === 'function') rechargeReconcileTimer.unref();
+  console.log(`[recharge] 虚拟支付订单对账已启动，间隔 ${RECHARGE_RECONCILE_INTERVAL_MS / 1000}s`);
 });
