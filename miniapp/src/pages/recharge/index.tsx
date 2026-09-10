@@ -67,6 +67,32 @@ function isVirtualPaySignatureError(error: unknown) {
   return /sign|签名/i.test(`${error.message} ${error.errCode}`);
 }
 
+/**
+ * 微信虚拟支付原始报错（形如 `requestVirtualPayment:fail SOME_UPPER_CODE`）→ 人话。
+ * 运营/测试期最容易撞上的几个码先覆盖，未命中则原样透出，方便继续排查。
+ */
+const VIRTUAL_PAY_HINTS: Array<[RegExp, string]> = [
+  [/COIN_OR_PRODUCT_ID_CREATED_IN_RECENTLY/, '道具刚在微信后台创建，约 10 分钟后才生效，请稍后再试'],
+  [/COIN_OR_PRODUCT_ID_NOT_EXIST|PRODUCT_ID_NOT_EXIST|COIN_ID_NOT_EXIST|NOT_EXIST/, '微信后台还没有这个道具，请先在「虚拟支付 → 道具管理」创建并发布'],
+  [/NOT_PUBLISHED|NOT_ONLINE|NOT_EFFECTIVE/, '道具尚未发布生效，请在微信后台提交发布并等待通过'],
+  [/GOODS_PRICE|PRICE_NOT_MATCH|INVALID_PRICE|PRICE_ERROR/, '道具价格与套餐价格不一致，请核对微信后台的道具价格'],
+  [/INVALID_BUY_QUANTITY/, '购买数量无效，请稍后重试'],
+  [/SESSION_?KEY/, '登录态已失效，请重新进入小程序后再试'],
+  [/INSUFFICIENT|BALANCE_NOT_ENOUGH/, '账户余额不足'],
+  [/FREQUENCY|TOO_MANY_REQUEST/, '操作过于频繁，请稍后再试'],
+  [/SIGNATURE_INVALID|SIGN_ERROR/, '支付签名校验失败，请重新进入小程序后再试'],
+];
+
+/** 把虚拟支付报错转成可读文案；命中映射时 `hint=true`（表示这是我们给出的处置建议，而非原始码） */
+function describeVirtualPayError(error: unknown): { text: string; hint: boolean } {
+  const raw = error instanceof Error ? error.message : '';
+  if (!raw) return { text: '支付失败，请稍后重试', hint: false };
+  for (const [pattern, tip] of VIRTUAL_PAY_HINTS) {
+    if (pattern.test(raw)) return { text: tip, hint: true };
+  }
+  return { text: raw, hint: false };
+}
+
 /** 虚拟支付要求基础库 ≥ 2.19.2；iOS 端还需微信客户端 ≥ 8.0.68。不满足时给出明确引导。 */
 function ensureVirtualPaySupported() {
   const info = Taro.getSystemInfoSync();
@@ -190,8 +216,13 @@ export default function RechargePage() {
         Taro.showToast({ title: '已取消支付', icon: 'none' });
         return;
       }
-      const msg = error instanceof Error ? error.message : '';
-      Taro.showToast({ title: msg || '支付失败，请稍后重试', icon: 'none', duration: 2500 });
+      const { text, hint } = describeVirtualPayError(error);
+      // 命中的是我们给出的处置建议（偏长且需要看清）→ 用弹窗；未识别的原始报错 → 用短 toast。
+      if (hint) {
+        Taro.showModal({ title: '暂时无法支付', content: text, showCancel: false, confirmText: '知道了' });
+      } else {
+        Taro.showToast({ title: text || '支付失败，请稍后重试', icon: 'none', duration: 3000 });
+      }
     } finally {
       setPayingId(null);
     }
