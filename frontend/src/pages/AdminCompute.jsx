@@ -13,7 +13,7 @@ export default function AdminCompute() {
   const [filterType, setFilterType] = useState('all');
   const [pkgOpen, setPkgOpen] = useState(false);
   const [editingPkg, setEditingPkg] = useState(null);
-  const [pkgForm, setPkgForm] = useState({ name: '', points: '', price: '', validDays: '', validFrom: '' });
+  const [pkgForm, setPkgForm] = useState({ name: '', points: '', price: '', validDays: '', validFrom: '', virtualProductId: '' });
   const [rechargeOpen, setRechargeOpen] = useState(false);
   const [rechargeUserId, setRechargeUserId] = useState('');
   const [rechargeAmount, setRechargeAmount] = useState('');
@@ -55,15 +55,15 @@ export default function AdminCompute() {
   useEffect(() => { setPage(1); }, [search, filterType]);
   useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
 
-  const openPkgAdd = () => { setEditingPkg(null); setPkgForm({ name: '', points: '', price: '', validDays: '', validFrom: '' }); setPkgOpen(true); };
-  const openPkgEdit = (pkg) => { setEditingPkg(pkg); setPkgForm({ name: pkg.name, points: pkg.points, price: pkg.price, validDays: pkg.validDays ?? '', validFrom: pkg.validFrom || '' }); setPkgOpen(true); };
+  const openPkgAdd = () => { setEditingPkg(null); setPkgForm({ name: '', points: '', price: '', validDays: '', validFrom: '', virtualProductId: '' }); setPkgOpen(true); };
+  const openPkgEdit = (pkg) => { setEditingPkg(pkg); setPkgForm({ name: pkg.name, points: pkg.points, price: pkg.price, validDays: pkg.validDays ?? '', validFrom: pkg.validFrom || '', virtualProductId: pkg.virtualProductId || '' }); setPkgOpen(true); };
   const submitPkg = () => {
     const points = Number(pkgForm.points);
     const price = Number(pkgForm.price);
     if (!pkgForm.name || !points || !price) return;
     const validDays = pkgForm.validDays ? Number(pkgForm.validDays) : 0; // 0 = 永久有效
     const validFrom = pkgForm.validFrom ? pkgForm.validFrom : null;       // 留空 = 购买当天起算
-    const payload = { name: pkgForm.name, points, price, validDays, validFrom };
+    const payload = { name: pkgForm.name, points, price, validDays, validFrom, virtualProductId: String(pkgForm.virtualProductId || '').trim() };
     if (editingPkg) updateComputePackage(editingPkg.id, payload);
     else addComputePackage(payload);
     setPkgOpen(false);
@@ -285,6 +285,11 @@ export default function AdminCompute() {
               ? `结束日期：${pkgForm.validFrom || '购买当天'} 起 ${pkgForm.validDays} 天${pkgForm.validFrom ? `（至 ${pkgEndDate(pkgForm.validFrom, Number(pkgForm.validDays))}）` : ''}`
               : '留空或填 0 表示长期有效（不限定到期日）'}
           </p>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">虚拟支付道具 ID（可选）</label>
+            <input type="text" value={pkgForm.virtualProductId} onChange={e => setPkgForm({ ...pkgForm, virtualProductId: e.target.value })} placeholder="微信后台「虚拟支付 → 道具管理」创建并发布后的道具 ID" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
+            <p className="mt-1 text-xs text-slate-400">填写后该套餐可在小程序用虚拟支付购买；道具价格必须与上方「价格（元）」一致（微信侧单位为分）。留空则小程序内提示「暂未开放在线支付」。</p>
+          </div>
         </div>
       </Modal>
 

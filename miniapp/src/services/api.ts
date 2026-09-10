@@ -194,7 +194,7 @@ export async function changePassword(payload: { oldPassword?: string; newPasswor
   return (await apiRequest<{ ok: boolean }>('/api/miniapp/v1/password', { method: 'POST', data: payload })).data;
 }
 
-/** 创建充值订单并返回微信支付调起参数。 */
+/** 创建充值订单并返回虚拟支付调起参数（signData/paySig/signature 由服务端签名）。 */
 export async function createRechargeOrder(packageId: string) {
   return (await apiRequest<RechargeOrderResult>('/api/miniapp/v1/recharge/order', {
     method: 'POST', data: { packageId },

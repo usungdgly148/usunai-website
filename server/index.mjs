@@ -18,6 +18,12 @@ import nodemailer from 'nodemailer';
 import sharp from 'sharp';
 import { resolveMaxPlanValidity } from './plan-validity.mjs';
 import { PAY_CONFIG_KV_KEY } from './wechat-pay.mjs';
+import {
+  VIRTUAL_PAY,
+  VIRTUAL_PAY_CONFIG_KV_KEY,
+  loadVirtualPayConfig,
+  virtualPayConfigured,
+} from './wechat-virtual-pay.mjs';
 import { handleMiniappApi } from './miniapp-api.mjs';
 import { handleMiniappAuth } from './miniapp-auth.mjs';
 import { handleMiniappRuntime } from './miniapp-runtime.mjs';
@@ -3949,6 +3955,70 @@ const server = http.createServer(async (req, res) => {
       };
       await KV.kvPut(PAY_CONFIG_KV_KEY, next);
       res.end(JSON.stringify({ ok: true, data: { configured: !!(next.serialNo && next.apiV3Key && next.privateKey) } }));
+      return;
+    }
+
+    // 小程序设置：虚拟支付配置（offerId / AppKey / env）。小程序「算力充值」走道具直购。
+    // AppKey 是支付签名密钥，只在服务端持有：读回只返回 offerId/env 明文 + AppKey「是否已设置」。
+    if (p === '/api/admin/miniapp-virtual-pay-settings' && (req.method === 'GET' || req.method === 'POST')) {
+      res.setHeader('Content-Type', 'application/json');
+      if (!requireAdmin(req, res)) return;
+      const existing = (await KV.kvGet(VIRTUAL_PAY_CONFIG_KV_KEY)) || {};
+      if (req.method === 'GET') {
+        const offerId = typeof existing.offerId === 'string' ? existing.offerId : '';
+        const appKeySet = !!(existing.appKey && String(existing.appKey).trim())
+          || !!(process.env.WECHAT_VIRTUAL_PAY_APP_KEY || '').trim();
+        res.end(JSON.stringify({
+          ok: true,
+          data: {
+            offerId,
+            env: Number(existing.env) === 1 ? 1 : 0,
+            appId: VIRTUAL_PAY.appId,
+            appKeySet,
+            // Token / EncodingAESKey 回明文：管理员需要把它们复制到 MP 后台「发货推送配置」。
+            // 即使泄露也只能伪造推送报文，发货前仍有 query_order 查单二次确认兜底。
+            pushToken: typeof existing.pushToken === 'string' ? existing.pushToken : '',
+            encodingAesKey: typeof existing.encodingAesKey === 'string' ? existing.encodingAesKey : '',
+            configured: virtualPayConfigured(),
+          },
+        }));
+        return;
+      }
+      const body = await readBody(req);
+      const offerId = String((body && body.offerId) || '').trim();
+      const appKey = String((body && body.appKey) || '').trim();
+      const pushToken = String((body && body.pushToken) || '').trim();
+      const encodingAesKey = String((body && body.encodingAesKey) || '').trim();
+      // EncodingAESKey 必须是 43 位（微信规定），且 base64 解码后恰好 32 字节，
+      // 否则安全模式解密必然失败（少一位 → 31 字节 → Invalid key length）。
+      if (encodingAesKey) {
+        if (encodingAesKey.length !== 43) {
+          res.end(JSON.stringify({ ok: false, msg: 'EncodingAESKey 必须是 43 位（可点「随机生成」）' }));
+          return;
+        }
+        let keyBytes = 0;
+        try { keyBytes = Buffer.from(`${encodingAesKey}=`, 'base64').length; } catch { keyBytes = 0; }
+        if (keyBytes !== 32) {
+          res.end(JSON.stringify({ ok: false, msg: 'EncodingAESKey 解码后不是 32 字节，请点「随机生成」重取' }));
+          return;
+        }
+      }
+      // Token 微信要求 3-32 位任意字符（不是微信下发，由开发者自己定）。
+      if (pushToken && (pushToken.length < 3 || pushToken.length > 32)) {
+        res.end(JSON.stringify({ ok: false, msg: 'Token 需 3-32 位' }));
+        return;
+      }
+      // 空值保留原值（前端回显后保存，不应清空已配置的 AppKey / Token / AESKey）
+      const next = {
+        offerId: offerId || (typeof existing.offerId === 'string' ? existing.offerId : ''),
+        appKey: appKey || (typeof existing.appKey === 'string' ? existing.appKey : ''),
+        pushToken: pushToken || (typeof existing.pushToken === 'string' ? existing.pushToken : ''),
+        encodingAesKey: encodingAesKey || (typeof existing.encodingAesKey === 'string' ? existing.encodingAesKey : ''),
+        env: Number(body && body.env) === 1 ? 1 : 0,
+      };
+      await KV.kvPut(VIRTUAL_PAY_CONFIG_KV_KEY, next);
+      await loadVirtualPayConfig(KV);
+      res.end(JSON.stringify({ ok: true, data: { configured: virtualPayConfigured() } }));
       return;
     }
 

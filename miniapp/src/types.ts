@@ -92,6 +92,8 @@ export interface ComputePackage {
   validFrom: string | null;
   sortOrder: number;
   published?: boolean;
+  /** 微信虚拟支付道具 ID（后台「算力管理」填写；缺失表示该套餐未开放在线支付）。 */
+  virtualProductId?: string;
 }
 export interface CustomerService {
   enabled: boolean;
@@ -159,6 +161,7 @@ export interface ApiEnvelope<T> {
 }
 
 /** 微信支付 JSAPI 调起参数（传给 Taro.requestPayment）。 */
+/** 【JSAPI 版停用】Taro.requestPayment 调起参数，保留以备回退（当前走虚拟支付）。 */
 export interface RechargePayParams {
   timeStamp: string;
   nonceStr: string;
@@ -167,10 +170,20 @@ export interface RechargePayParams {
   paySign: string;
 }
 
-/** 充值下单结果：订单号 + 支付参数。 */
+/** 虚拟支付调起参数（wx.requestVirtualPayment）。signData 为字符串，前端必须原样透传。 */
+export interface VirtualPaymentParams {
+  signData: string;
+  paySig: string;
+  signature: string;
+  mode: 'short_series_goods' | 'short_series_coin';
+  env: number;
+}
+
+/** 充值下单结果：订单号 + 虚拟支付参数。 */
 export interface RechargeOrderResult {
   orderId: string;
-  payParams: RechargePayParams;
+  productId: string;
+  virtualPay: VirtualPaymentParams;
 }
 
 /** 充值订单状态（支付后查询）。 */

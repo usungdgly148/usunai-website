@@ -5,7 +5,7 @@ import { PageState } from '../../components/page-state';
 import { useLoad } from '../../hooks/use-load';
 import { useThemePage } from '../../hooks/use-theme-page';
 import { createRechargeOrder, getPublicContent, getRechargeStatus } from '../../services/api';
-import type { ComputePackage } from '../../types';
+import type { ComputePackage, VirtualPaymentParams } from '../../types';
 
 interface RechargeData {
   computePackages: ComputePackage[];
@@ -25,10 +25,87 @@ function validityText(pkg: ComputePackage) {
   return '长期有效';
 }
 
+/** 版本号比较：v1 > v2 返回 1，相等返回 0，小于返回 -1。 */
+function compareVersion(v1: string, v2: string) {
+  const a = String(v1 || '').split('.').map((n) => parseInt(n, 10) || 0);
+  const b = String(v2 || '').split('.').map((n) => parseInt(n, 10) || 0);
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    const left = a[i] || 0;
+    const right = b[i] || 0;
+    if (left > right) return 1;
+    if (left < right) return -1;
+  }
+  return 0;
+}
+
+interface VirtualPayOptions {
+  signData: string;
+  paySig: string;
+  signature: string;
+  mode: string;
+  success?: (res: unknown) => void;
+  fail?: (err: { errMsg?: string; errCode?: number }) => void;
+}
+
+type VirtualPayBridge = (options: VirtualPayOptions) => void;
+
+/** 虚拟支付要求基础库 ≥ 2.19.2；iOS 端还需微信客户端 ≥ 8.0.68。不满足时给出明确引导。 */
+function ensureVirtualPaySupported() {
+  const info = Taro.getSystemInfoSync();
+  const sdkVersion = String(info.SDKVersion || '');
+  if (compareVersion(sdkVersion, '2.19.2') < 0 && !Taro.canIUse('requestVirtualPayment')) {
+    Taro.showModal({ title: '提示', content: '当前微信版本过低，请升级微信后再进行支付', showCancel: false });
+    return false;
+  }
+  if (String(info.platform) === 'ios' && compareVersion(String(info.version || ''), '8.0.68') < 0) {
+    Taro.showModal({ title: '提示', content: 'iOS 端请将微信更新至 8.0.68 及以上版本后再支付', showCancel: false });
+    return false;
+  }
+  return true;
+}
+
+/** Taro 未封装 requestVirtualPayment：优先取 Taro 上的实现，否则回落到小程序全局 wx。 */
+function resolveVirtualPayBridge(): VirtualPayBridge | null {
+  const taroScope = Taro as unknown as { requestVirtualPayment?: VirtualPayBridge };
+  if (typeof taroScope.requestVirtualPayment === 'function') return taroScope.requestVirtualPayment.bind(Taro);
+  const globalScope = (typeof globalThis === 'undefined' ? undefined : globalThis) as unknown as {
+    wx?: { requestVirtualPayment?: VirtualPayBridge };
+  };
+  const api = globalScope && globalScope.wx ? globalScope.wx.requestVirtualPayment : undefined;
+  return typeof api === 'function' ? api : null;
+}
+
+/** 拉起虚拟支付。signData 必须原样透传服务端签名串，不能重新序列化。 */
+function requestVirtualPayment(params: VirtualPaymentParams): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const bridge = resolveVirtualPayBridge();
+    if (!bridge) {
+      reject(new Error('当前微信版本不支持虚拟支付，请升级微信后再试'));
+      return;
+    }
+    bridge({
+      signData: params.signData,
+      paySig: params.paySig,
+      signature: params.signature,
+      mode: params.mode,
+      success: () => resolve(),
+      fail: (err) => {
+        const message = String((err && err.errMsg) || '');
+        if (message.includes('cancel') || Number(err && err.errCode) === -2) {
+          reject(new Error('cancel'));
+          return;
+        }
+        reject(new Error(message || '支付失败，请稍后重试'));
+      },
+    });
+  });
+}
+
 /**
- * 算力充值二级页：套餐列表 + 微信在线支付。
- * 套餐与网页端「算力充值」弹窗同源（getPublicContent → computePackages），
- * 选套餐后走微信 JSAPI 支付，不再需要联系客服人工办理。
+ * 算力充值二级页：套餐列表 + 微信虚拟支付（道具直购）。
+ * 套餐与网页端「算力充值」弹窗同源（getPublicContent → computePackages）。
+ * 支付成功后由微信发货推送 + 服务端查单兜底完成加算力，前端轮询订单状态确认到账。
  */
 export default function RechargePage() {
   const { pageStyle } = useThemePage();
@@ -52,7 +129,7 @@ export default function RechargePage() {
   const data = state.data;
   const packages = data?.computePackages || [];
 
-  /** 支付成功后轮询订单状态，确认已到账（微信回调异步，最多轮询 ~10s）。 */
+  /** 支付后轮询订单状态确认到账（发货推送异步，服务端每次轮询都会查单兜底，最多 ~10s）。 */
   const waitPaid = async (orderId: string) => {
     for (let i = 0; i < 10; i++) {
       const status = await getRechargeStatus(orderId);
@@ -68,30 +145,20 @@ export default function RechargePage() {
       Taro.showToast({ title: '请先选择套餐', icon: 'none' });
       return;
     }
+    if (!ensureVirtualPaySupported()) return;
     setPayingId(pkg.id);
     try {
       const order = await createRechargeOrder(pkg.id);
-      try {
-        await Taro.requestPayment({
-          timeStamp: order.payParams.timeStamp,
-          nonceStr: order.payParams.nonceStr,
-          package: order.payParams.package,
-          signType: order.payParams.signType,
-          paySign: order.payParams.paySign,
-        });
-      } catch (payError) {
-        const errMsg = String((payError as { errMsg?: unknown })?.errMsg || (payError as Error)?.message || '');
-        if (errMsg.includes('cancel')) {
-          Taro.showToast({ title: '已取消支付', icon: 'none' });
-          return;
-        }
-        throw payError;
-      }
-      // 用户已确认支付，等待回调落库确认到账。
+      // success 回调只代表「支付操作完成」，不能作为发货依据；到账以服务端订单状态为准。
+      await requestVirtualPayment(order.virtualPay);
       await waitPaid(order.orderId);
       Taro.showToast({ title: '充值成功', icon: 'success' });
       setTimeout(() => Taro.navigateBack(), 1200);
     } catch (error) {
+      if (error instanceof Error && error.message === 'cancel') {
+        Taro.showToast({ title: '已取消支付', icon: 'none' });
+        return;
+      }
       const msg = error instanceof Error ? error.message : '';
       Taro.showToast({ title: msg || '支付失败，请稍后重试', icon: 'none', duration: 2500 });
     } finally {
@@ -102,7 +169,7 @@ export default function RechargePage() {
   return <View className='page mini-recharge-page' style={pageStyle}>
     <View className='mini-page-topbar'>
       <Text className='mini-page-heading'>算力充值</Text>
-      <Text className='mini-page-caption'>选择算力套餐，微信在线支付，即时到账</Text>
+      <Text className='mini-page-caption'>选择算力套餐，微信支付，即时到账</Text>
     </View>
 
     <PageState loading={state.loading} error={state.error} onRetry={state.reload} />

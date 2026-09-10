@@ -53,7 +53,12 @@ export async function exchangeWechatCode(code, config, fetchImpl = fetch) {
     error.code = 'WECHAT_CODE_INVALID';
     throw error;
   }
-  return { openid: String(data.openid), unionid: String(data.unionid || '') };
+  return {
+    openid: String(data.openid),
+    unionid: String(data.unionid || ''),
+    // session_key 仅用于服务端签名（虚拟支付用户态 signature），绝不回传前端。
+    sessionKey: String(data.session_key || ''),
+  };
 }
 
 function requireMiniappUser(req, res, requestId, deps) {
@@ -119,6 +124,15 @@ async function login(req, res, requestId, deps) {
     user: { ...reg },
   });
   const activeIdentity = resolved.identity;
+  // session_key 每次登录都会刷新，且是虚拟支付用户态签名的密钥，必须写回身份记录。
+  // kvResolveWechatIdentity 只保证「身份存在」，不保证字段更新，故这里显式覆盖。
+  if (wechatIdentity.sessionKey) {
+    await deps.KV.kvPut(activeIdentity.id, {
+      ...activeIdentity,
+      sessionKey: wechatIdentity.sessionKey,
+      sessionKeyUpdatedAt: now,
+    });
+  }
   const safeId = deps.sanitizeId(activeIdentity.userId);
   const [storedReg, storedUser] = await Promise.all([
     deps.KV.kvGet('reg_' + safeId),

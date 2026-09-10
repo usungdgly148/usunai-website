@@ -1,5 +1,18 @@
 import crypto from 'node:crypto';
 import {
+  VIRTUAL_PAY,
+  buildVirtualPaymentParams,
+  decryptPushMessage,
+  extractEncrypt,
+  isOrderPaidStatus,
+  loadVirtualPayConfig,
+  notifyProvideGoods,
+  queryVirtualOrder,
+  verifyMsgSignature,
+  verifyPushSignature,
+  virtualPayConfigured,
+} from './wechat-virtual-pay.mjs';
+import {
   buildPayParams,
   createJsapiOrder,
   decryptNotifyResource,
@@ -319,16 +332,123 @@ async function changePassword(req, res, requestId, session, deps) {
   sendJson(res, 200, successEnvelope({ ok: true }, requestId), requestId);
 }
 
-// ============ 算力充值：微信在线支付 ============
+// ============ 算力充值：微信虚拟支付（道具直购） ============
+//
+// 链路：/recharge/order 下单（服务端出 signData / paySig / signature）
+//   → 小程序 wx.requestVirtualPayment 拉起支付（Android/鸿蒙/Windows 走微信支付，iOS 走 Apple 支付）
+//   → 微信推送 xpay_goods_deliver_notify 到 /recharge/virtual-notify（主发货链路）
+//   → 小程序轮询 /recharge/status 时服务端 query_order 兜底自发货（推送丢失也能到账）
+// 发货 = 加算力（KV.kvAdminAdjustPoints，requestId = outTradeNo 天然幂等）。
 
-// 创建充值订单并调起微信支付（JSAPI 下单）。
+// 发货（幂等）：给订单用户加算力并标记订单已支付。推送 / 轮询兜底两处共用。
+async function deliverRechargeOrder({ KV, sanitizeId, order, payment, transactionId = '', wxOrderId = '' }) {
+  const outTradeNo = String(order.id || '');
+  if (String(order.status) === 'paid') return { ok: true, reason: 'already_paid' };
+  const userId = String(order.userId || '');
+  const points = Number(order.meta && order.meta.points);
+  if (!userId || !Number.isFinite(points) || points <= 0) return { ok: false, reason: 'invalid_order' };
+  const now = new Date().toISOString();
+  const packageName = order.meta && order.meta.packageName ? String(order.meta.packageName) : '';
+  const validDays = order.meta && Object.prototype.hasOwnProperty.call(order.meta, 'validDays') ? Number(order.meta.validDays) : 0;
+  const validFrom = order.meta && order.meta.validFrom ? String(order.meta.validFrom) : '';
+  // 有效期处理：与后台手动充值同规则（不叠加时长，永久优先）。
+  const userPatch = {};
+  const existingUser = await KV.kvGet('user_' + sanitizeId(userId));
+  if (Number.isFinite(validDays) && validDays > 0) {
+    const resolved = resolveMaxPlanValidity(existingUser, {
+      validFrom,
+      validDays,
+      fallbackStart: now.slice(0, 10),
+    });
+    userPatch.planValidFrom = resolved.planValidFrom;
+    userPatch.planValidDays = resolved.planValidDays;
+    if (resolved.winner === 'incoming' && resolved.planValidFrom) {
+      const days = Number(resolved.planValidDays);
+      const startMs = new Date(resolved.planValidFrom).getTime();
+      const expireAt = days === 0
+        ? '长期有效'
+        : Number.isFinite(startMs) && days > 0
+          ? new Date(startMs + days * 86400000).toISOString().slice(0, 10)
+          : '';
+      if (expireAt) userPatch.membership = { plan: packageName, expireAt };
+    }
+  }
+  const computeRecord = {
+    id: outTradeNo,
+    userId: sanitizeId(userId),
+    type: 'recharge',
+    amount: points,
+    reason: packageName ? `微信支付购买「${packageName}」` : '微信支付充值',
+    title: packageName || '微信支付充值',
+    createdAt: now,
+    meta: {
+      payment,
+      packageId: order.meta && order.meta.packageId,
+      packageName,
+      outTradeNo,
+      transactionId,
+      wxOrderId,
+      validDays,
+      validFrom,
+    },
+  };
+  const paidOrder = {
+    ...order,
+    status: 'paid',
+    action: packageName ? `在线充值（${packageName}）` : '在线充值',
+    meta: { ...(order.meta || {}), transactionId, wxOrderId, paidAt: now },
+  };
+  const result = await KV.kvAdminAdjustPoints({
+    userId,
+    amount: points,
+    userPatch,
+    computeRecord,
+    orderRecord: paidOrder,
+    requestId: outTradeNo,
+  });
+  if (!result.ok && result.reason !== 'duplicate') return { ok: false, reason: result.reason || 'adjust_failed' };
+  return { ok: true };
+}
+
+// 兜底发货：前端轮询订单状态时，若订单仍是 pending 且为虚拟支付单，主动查单确认后自发货。
+// 覆盖两种异常：① 发货推送未配置/丢失；② 推送到达但当时查单失败被微信重试前的空窗。
+async function reconcileVirtualOrder({ KV, sanitizeId, order }) {
+  const outTradeNo = String(order.id || '');
+  try {
+    await loadVirtualPayConfig(KV);
+    if (!virtualPayConfigured()) return order;
+    const remoteOrder = await queryVirtualOrder({
+      openid: String((order.meta && order.meta.openid) || ''),
+      orderId: outTradeNo,
+    });
+    if (!remoteOrder || !isOrderPaidStatus(remoteOrder.status)) return order;
+    const delivered = await deliverRechargeOrder({
+      KV,
+      sanitizeId,
+      order,
+      payment: 'wechat_virtual',
+      transactionId: String(remoteOrder.wxpay_order_id || ''),
+      wxOrderId: String(remoteOrder.wx_order_id || ''),
+    });
+    if (!delivered.ok && delivered.reason !== 'already_paid') {
+      console.error('[recharge] 兜底发货失败:', outTradeNo, delivered.reason);
+      return order;
+    }
+    // 顺手通知微信「已发货完成」，避免平台侧订单长期停留在待发货状态。
+    notifyProvideGoods({ orderId: outTradeNo }).catch((error) => {
+      console.error('[recharge] notify_provide_goods 失败:', error?.code, error?.message || error);
+    });
+    return (await KV.kvGet('order_' + sanitizeId(outTradeNo))) || order;
+  } catch (error) {
+    console.error('[recharge] 兜底查单失败:', outTradeNo, error?.code, error?.message || error);
+    return order;
+  }
+}
+
+// 创建充值订单并返回 wx.requestVirtualPayment 所需参数（signData / paySig / signature）。
 async function createRechargeOrder(req, res, requestId, session, deps) {
   const { KV, sanitizeId } = deps;
-  await loadPayConfig(KV);
-  if (!wechatPayConfigured()) {
-    sendJson(res, 503, errorEnvelope('WECHAT_PAY_NOT_CONFIGURED', '微信支付尚未配置，请稍后再试', requestId), requestId);
-    return;
-  }
+  await loadVirtualPayConfig(KV);
   const body = await deps.readBody(req);
   const packageId = sanitizeId(String(body && body.packageId));
   if (!packageId) {
@@ -349,12 +469,29 @@ async function createRechargeOrder(req, res, requestId, session, deps) {
     sendJson(res, 400, errorEnvelope('INVALID_PACKAGE', '套餐配置无效，请稍后再试', requestId), requestId);
     return;
   }
+  // 虚拟支付道具 ID：在微信后台「虚拟支付 → 道具管理」创建并发布道具后，填到套餐配置里。
+  const productId = String(pkg.virtualProductId || '').trim();
+  if (!productId) {
+    sendJson(res, 400, errorEnvelope('PACKAGE_NOT_PAYABLE', '该套餐暂未开放在线支付，请联系客服', requestId), requestId);
+    return;
+  }
+  if (!virtualPayConfigured()) {
+    sendJson(res, 503, errorEnvelope('VIRTUAL_PAY_NOT_CONFIGURED', '虚拟支付尚未配置，请稍后再试', requestId), requestId);
+    return;
+  }
   const identity = await KV.kvGet(session.identityKey);
   const openid = identity && identity.openid ? String(identity.openid) : '';
   if (!openid) {
     sendJson(res, 403, errorEnvelope('OPENID_MISSING', '缺少微信身份信息，请重新登录后重试', requestId), requestId);
     return;
   }
+  // 用户态签名需要当前有效的 session_key（登录时写入身份记录，重新登录会刷新）。
+  const sessionKey = identity && identity.sessionKey ? String(identity.sessionKey) : '';
+  if (!sessionKey) {
+    sendJson(res, 403, errorEnvelope('SESSION_KEY_MISSING', '登录状态已过期，请重新进入小程序后再试', requestId), requestId);
+    return;
+  }
+  // outTradeNo：8-32 位，仅数字 / 大小写字母 / _-|*@，不能以下划线开头，每单唯一。
   const outTradeNo = 'p' + Date.now() + crypto.randomBytes(6).toString('hex');
   const now = new Date().toISOString();
   const userId = String(session.userId || '');
@@ -368,8 +505,12 @@ async function createRechargeOrder(req, res, requestId, session, deps) {
     status: 'pending',
     createdAt: now,
     meta: {
+      payment: 'wechat_virtual',
       packageId: pkg.id,
       packageName: pkg.name,
+      productId,
+      // openid 落库：发货推送缺失时，轮询兜底要用它调 query_order 查单。
+      openid,
       points,
       price,
       validDays: Object.prototype.hasOwnProperty.call(pkg, 'validDays') ? Number(pkg.validDays) : undefined,
@@ -377,28 +518,205 @@ async function createRechargeOrder(req, res, requestId, session, deps) {
     },
   };
   await KV.kvPut('order_' + sanitizeId(outTradeNo), orderRecord);
-  let prepayId;
-  try {
-    prepayId = await createJsapiOrder({
-      openid,
-      outTradeNo,
-      description: pkg.name ? `友尚AI算力充值-${pkg.name}` : '友尚AI算力充值',
-      amountCents: Math.round(price * 100),
-    });
-  } catch (error) {
-    console.error('[recharge] createJsapiOrder 失败:', {
-      code: error?.code,
-      message: error?.message,
-      status: error?.status,
-      detail: error?.detail,
-    });
-    sendJson(res, 502, errorEnvelope(error.code || 'WECHAT_PAY_ORDER_FAILED', error.message || '微信支付下单失败', requestId), requestId);
-    return;
-  }
-  sendJson(res, 200, successEnvelope({ orderId: outTradeNo, payParams: buildPayParams(prepayId) }, requestId), requestId);
+  // attach 会随发货推送原样回传，便于对账。
+  const virtualPay = buildVirtualPaymentParams({
+    sessionKey,
+    outTradeNo,
+    productId,
+    goodsPrice: Math.round(price * 100),
+    attach: JSON.stringify({ userId: sanitizeId(userId), packageId: pkg.id }),
+  });
+  sendJson(res, 200, successEnvelope({ orderId: outTradeNo, productId, virtualPay }, requestId), requestId);
 }
 
-// 微信支付结果通知回调（无登录态，由微信服务器直连）。
+// 读取原始请求体：发货推送可能是 XML 也可能是 JSON，不能用 JSON 解析器直接读。
+function readRawBody(req, limit = 200_000) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.setEncoding('utf8');
+    req.on('data', (chunk) => {
+      data += chunk;
+      if (data.length > limit) {
+        reject(new Error('body too large'));
+        req.destroy();
+      }
+    });
+    req.on('end', () => resolve(data));
+    req.on('error', reject);
+  });
+}
+
+// 取 XML 标签文本（微信消息推送默认 XML，字段为 PascalCase）。
+function pickXml(xml, tag) {
+  const match = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(String(xml));
+  return match ? match[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim() : '';
+}
+
+// 虚拟支付发货推送（xpay_goods_deliver_notify）。无登录态，由微信服务器直连。
+// 两种请求：
+//   GET  —— 在 MP 后台保存「发货推送配置」时的 URL 握手校验：signature 校验通过则原样返回 echostr。
+//   POST —— 发货推送报文。明文模式直接解析；安全模式报文为 AES 加密（先验 msg_signature 再解密），
+//           应答按微信要求回明文，格式跟随数据格式（XML / JSON）。
+// 非 0 或无应答微信会重试（最多 15 次），故发货必须幂等。
+// 安全模型：推送报文之外，发货前再用 query_order 主动查单（AppKey 签名）二次确认订单状态。
+async function handleVirtualPayNotify(req, res, requestId, deps) {
+  const { KV, sanitizeId } = deps;
+  const pushUrl = new URL(String(req.url || ''), 'http://localhost');
+  await loadVirtualPayConfig(KV);
+
+  // ① URL 握手校验（微信保存推送配置时触发）
+  if (req.method === 'GET') {
+    const signature = String(pushUrl.searchParams.get('signature') || '');
+    const timestamp = String(pushUrl.searchParams.get('timestamp') || '');
+    const nonce = String(pushUrl.searchParams.get('nonce') || '');
+    const echostr = String(pushUrl.searchParams.get('echostr') || '');
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    if (!VIRTUAL_PAY.pushToken) {
+      res.end('push token not configured');
+      return;
+    }
+    if (!verifyPushSignature({ signature, timestamp, nonce })) {
+      console.error('[recharge] 虚拟支付推送握手签名校验失败');
+      res.end('invalid signature');
+      return;
+    }
+    res.end(echostr);
+    return;
+  }
+
+  let raw = '';
+  try {
+    raw = await readRawBody(req);
+  } catch {
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({ ErrCode: -1, ErrMsg: 'invalid body' }));
+    return;
+  }
+  let isXml = String(raw).trim().startsWith('<');
+  const respond = (ok, message) => {
+    const text = message || (ok ? 'success' : 'failed');
+    res.statusCode = 200;
+    if (isXml) {
+      res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+      res.end(`<xml><ErrCode>${ok ? 0 : -1}</ErrCode><ErrMsg>${text}</ErrMsg></xml>`);
+      return;
+    }
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({ ErrCode: ok ? 0 : -1, ErrMsg: text }));
+  };
+
+  // ② 安全模式：报文被 AES 加密（XML 外层 <Encrypt> 或 JSON 的 Encrypt 字段）
+  const encrypted = extractEncrypt(raw);
+  if (encrypted) {
+    if (!verifyMsgSignature({
+      msgSignature: String(pushUrl.searchParams.get('msg_signature') || ''),
+      timestamp: String(pushUrl.searchParams.get('timestamp') || ''),
+      nonce: String(pushUrl.searchParams.get('nonce') || ''),
+      encrypt: encrypted,
+    })) {
+      console.error('[recharge] 虚拟支付推送 msg_signature 校验失败');
+      respond(false, 'invalid msg_signature');
+      return;
+    }
+    try {
+      raw = decryptPushMessage(encrypted);
+      isXml = String(raw).trim().startsWith('<');
+    } catch (error) {
+      console.error('[recharge] 虚拟支付推送解密失败:', error?.code, error?.message || error);
+      respond(false, 'decrypt failed');
+      return;
+    }
+  }
+
+  let payload = null;
+  if (!isXml) {
+    try { payload = raw ? JSON.parse(raw) : null; } catch { payload = null; }
+  }
+  // 兼容 XML（PascalCase）与 JSON（PascalCase / snake_case）两种字段命名。
+  const pick = (jsonKeys, xmlTag) => {
+    if (isXml) return pickXml(raw, xmlTag);
+    for (const key of jsonKeys) {
+      const value = payload && payload[key];
+      if (value !== undefined && value !== null && value !== '') return String(value);
+    }
+    return '';
+  };
+  const nest = (jsonPath, xmlTag) => {
+    if (isXml) return pickXml(raw, xmlTag);
+    let current = payload;
+    for (const key of jsonPath) {
+      if (!current || typeof current !== 'object') return '';
+      current = current[key];
+    }
+    return current === undefined || current === null ? '' : String(current);
+  };
+
+  const event = pick(['Event', 'event'], 'Event');
+  // 只处理虚拟支付发货/代币事件；通用「消息推送」页可能一并推来其他事件（客服消息、mock 测试等），
+  // 一律回成功（ErrCode=0），否则微信会按失败重试 15 次形成噪音。
+  if (event !== 'xpay_goods_deliver_notify' && event !== 'xpay_coin_pay_notify') {
+    respond(true, 'ignored');
+    return;
+  }
+  const outTradeNo = pick(['OutTradeNo', 'out_trade_no'], 'OutTradeNo');
+  if (!outTradeNo) {
+    respond(false, 'missing out_trade_no');
+    return;
+  }
+  const order = await KV.kvGet('order_' + sanitizeId(outTradeNo));
+  if (!order) {
+    console.warn('[recharge] 虚拟支付推送未找到订单:', outTradeNo);
+    respond(true, 'order not found');
+    return;
+  }
+  if (String(order.status) === 'paid') {
+    respond(true, 'already delivered');
+    return;
+  }
+  const productId = nest(['GoodsInfo', 'ProductId'], 'ProductId') || pick(['product_id'], 'ProductId');
+  const expectedProductId = String((order.meta && order.meta.productId) || '');
+  if (productId && expectedProductId && productId !== expectedProductId) {
+    console.error('[recharge] 虚拟支付推送道具不匹配:', { outTradeNo, productId, expectedProductId });
+    respond(false, 'product mismatch');
+    return;
+  }
+  // 主动查单二次确认（以微信权威订单状态为准）。
+  let remoteOrder = null;
+  try {
+    remoteOrder = await queryVirtualOrder({
+      openid: String((order.meta && order.meta.openid) || ''),
+      orderId: outTradeNo,
+    });
+  } catch (error) {
+    console.error('[recharge] 虚拟支付查单失败:', error?.code, error?.message || error);
+    respond(false, 'query failed');
+    return;
+  }
+  if (!remoteOrder || !isOrderPaidStatus(remoteOrder.status)) {
+    respond(false, `status=${remoteOrder ? remoteOrder.status : 'unknown'}`);
+    return;
+  }
+  const delivered = await deliverRechargeOrder({
+    KV,
+    sanitizeId,
+    order,
+    payment: 'wechat_virtual',
+    transactionId: nest(['WeChatPayInfo', 'TransactionId'], 'TransactionId') || pick(['transaction_id'], 'TransactionId'),
+    wxOrderId: nest(['WeChatPayInfo', 'MchOrderNo'], 'MchOrderNo') || String(remoteOrder.wx_order_id || ''),
+  });
+  if (!delivered.ok) {
+    console.error('[recharge] 虚拟支付发货失败:', delivered.reason);
+    respond(false, delivered.reason || 'deliver failed');
+    return;
+  }
+  console.log('[recharge] 虚拟支付发货成功:', outTradeNo);
+  respond(true, 'success');
+}
+
+// 【已停用】微信支付（JSAPI）结果通知回调：小程序端已切换为虚拟支付，此路径不再被调用，
+// 保留实现以便回退（恢复时把 createRechargeOrder 改回 JSAPI 下单 + 前端用 Taro.requestPayment）。
 async function handleRechargeNotify(req, res, requestId, deps) {
   const { KV, sanitizeId } = deps;
   const reply = (status, code, message) => {
@@ -550,6 +868,14 @@ export async function handleMiniappApi(req, res, url, deps) {
     return true;
   }
 
+  // 虚拟支付发货推送（微信服务器直连，无登录态）。
+  // GET = 配置推送时的 URL 握手校验（校验 signature 后返回 echostr）；POST = 发货推送报文。
+  // 需在 MP 后台「虚拟支付 → 基本配置 → 发货推送配置」填入此地址 + Token + EncodingAESKey。
+  if ((req.method === 'GET' || req.method === 'POST') && path === '/api/miniapp/v1/recharge/virtual-notify') {
+    await handleVirtualPayNotify(req, res, requestId, deps);
+    return true;
+  }
+
   if (req.method !== 'GET') {
     sendJson(res, 405, errorEnvelope('METHOD_NOT_ALLOWED', '该接口不支持当前请求方法', requestId), requestId);
     return true;
@@ -579,10 +905,14 @@ export async function handleMiniappApi(req, res, url, deps) {
       sendJson(res, 400, errorEnvelope('INVALID_ORDER', '缺少订单号', requestId), requestId);
       return true;
     }
-    const order = await KV.kvGet('order_' + orderId);
+    let order = await KV.kvGet('order_' + orderId);
     if (!order || String(order.userId || '') !== safeId) {
       sendJson(res, 404, errorEnvelope('NOT_FOUND', '订单不存在', requestId), requestId);
       return true;
+    }
+    // 兜底发货：发货推送丢失或未配置时，前端轮询到这里由服务端主动查单确认后自发货。
+    if (String(order.status) !== 'paid' && String((order.meta && order.meta.payment) || '') === 'wechat_virtual') {
+      order = await reconcileVirtualOrder({ KV, sanitizeId, order });
     }
     sendJson(res, 200, successEnvelope({
       orderId: order.id,
