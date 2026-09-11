@@ -632,14 +632,17 @@ function WorkflowPage() {
     const options = (advanced?.options || field.options || []).map(normalizeOption);
     const hintText = String(advanced?.hint || field.hint || '');
     const value = values[key];
-    /** 编辑态（输入框聚焦、或已展开日期/下拉弹层）：驱动聚焦态样式，同时作为键盘避让的滚动目标 */
+    /**
+     * 编辑态（输入框聚焦、或已展开日期/下拉弹层）：驱动聚焦态样式，同时作为键盘避让的滚动目标。
+     * ⚠️ 描边只能挂在外层「外壳」View 上（见下 `.runtime-input-shell`），**绝不能改原生输入框自身的
+     * className / style** —— 聚焦瞬间用 setData 改原生 textarea 的 class 会让它重新渲染并收起键盘
+     * （表现为「键盘闪一下就没了」）。对话页的聚焦描边挂在父级 `.composer-shell` 上，同理。
+     */
     const editing = editingKey === key;
     const startEdit = () => setEditingKey(key);
     const endEdit = () => setEditingKey((current) => (current === key ? '' : current));
-    /** 编辑态视觉反馈（蓝色描边 + 很淡光晕）；picker-value 展开弹层时同样高亮 */
-    const boxClass = (base: string) => `${base}${editing ? ' runtime-control-focus' : ''}`;
 
-    return <View className='runtime-field' key={key} id={fieldAnchorId(index)}>
+    return <View className={`runtime-field${editing ? ' runtime-field-editing' : ''}`} key={key} id={fieldAnchorId(index)}>
       <Text className='form-label'>{fieldLabel(field, index)}{field.required ? ' *' : ''}</Text>
       {isFileField(field) ? <>
         {/* 官方 attachments：pending/error 时自带 t-loading 与失败文案，逐张可见上传状态 */}
@@ -687,15 +690,21 @@ function WorkflowPage() {
               }}
             />
           </View>
-            : (advComponent === 'date' || style === 'date') ? <View className={boxClass('form-input picker-value')} onClick={() => { startEdit(); setFieldPicker({ kind: 'date', key }); }}>
+            : (advComponent === 'date' || style === 'date') ? <View className='runtime-input-shell picker-value' onClick={() => { startEdit(); setFieldPicker({ kind: 'date', key }); }}>
               {String(value || '请选择日期')}
             </View>
-              : options.length ? <View className={boxClass('form-input picker-value')} onClick={() => { startEdit(); setFieldPicker({ kind: 'select', key }); }}>
+              : options.length ? <View className='runtime-input-shell picker-value' onClick={() => { startEdit(); setFieldPicker({ kind: 'select', key }); }}>
                 {String(value ?? field.placeholder ?? '请选择')}
               </View>
-                : (style === 'number' || /number|integer/.test(rawType)) ? <Input className={boxClass('form-input')} type='number' value={String(value ?? '')} placeholder={field.placeholder || '请输入数字'} cursorSpacing={24} onFocus={startEdit} onBlur={endEdit} onInput={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />
-                  : /textarea|multiline/.test(`${style} ${rawType}`) ? <Textarea className={boxClass('runtime-textarea')} value={String(value || '')} placeholder={field.placeholder || '请输入'} cursorSpacing={24} onFocus={startEdit} onBlur={endEdit} onInput={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />
-                    : <Input className={boxClass('form-input')} value={String(value ?? '')} placeholder={field.placeholder || '请输入'} cursorSpacing={24} onFocus={startEdit} onBlur={endEdit} onInput={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />}
+                : (style === 'number' || /number|integer/.test(rawType)) ? <View className='runtime-input-shell'>
+                  <Input className='form-input' type='number' value={String(value ?? '')} placeholder={field.placeholder || '请输入数字'} cursorSpacing={24} onFocus={startEdit} onBlur={endEdit} onInput={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />
+                </View>
+                  : /textarea|multiline/.test(`${style} ${rawType}`) ? <View className='runtime-input-shell'>
+                    <Textarea className='runtime-textarea' value={String(value || '')} placeholder={field.placeholder || '请输入'} cursorSpacing={24} onFocus={startEdit} onBlur={endEdit} onInput={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />
+                  </View>
+                    : <View className='runtime-input-shell'>
+                      <Input className='form-input' value={String(value ?? '')} placeholder={field.placeholder || '请输入'} cursorSpacing={24} onFocus={startEdit} onBlur={endEdit} onInput={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />
+                    </View>}
       {!!hintText && <Text className='field-hint'>{hintText}</Text>}
     </View>;
   };
@@ -868,7 +877,8 @@ function WorkflowPage() {
         </View>
       </View>
 
-      {configView ? <ScrollView className='workflow-scroll' scrollY scrollWithAnimation scrollIntoView={scrollTarget}>
+      {/* 不加 scrollWithAnimation：聚焦瞬间的动画滚动会和键盘弹起动画抢布局（原生输入框需要重新同步位置），改瞬时定位更稳 */}
+      {configView ? <ScrollView className='workflow-scroll' scrollY scrollIntoView={scrollTarget}>
         <View className='card'>
           <View className='config-card-head'>
             <Text className='card-title'>配置参数</Text>

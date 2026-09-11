@@ -48,8 +48,13 @@ const MAX_IMAGES = 4;
  * 这里自绘一个加号浮在卡片左下角，走系统 action-sheet + chooseMedia（一次最多 4 张）。
  */
 const SENDER_PRESETS = [{ name: 'send', type: 'icon' }];
-/** textareaProps.autosize 的数字会被组件内 wxs 追加 rpx */
-const SENDER_TEXTAREA_PROPS = { autosize: { minHeight: 44, maxHeight: 264 } };
+/**
+ * textareaProps.autosize 的数字会被组件内 wxs 追加 rpx（写成 400 就是 400rpx）。
+ * 官方默认 maxHeight 264rpx，配合 48rpx 行高 + 16rpx 内边距 ≈ 只能显示 5 行；
+ * 这里放到 400rpx = 8 行（8 × 48 + 16），让长文字自适应到 8 行再内部滚动。
+ * 外层 `.t-chat-sender__textarea` 自带的 max-height: 280rpx 也要一起放宽（见 app.scss）。
+ */
+const SENDER_TEXTAREA_PROPS = { autosize: { minHeight: 44, maxHeight: 400 } };
 /** 官方 chat-actionbar 的动作项；iconMap 只认这 6 个固定动作，自定义动作（加入资产库）只能自绘并排拼条 */
 const MESSAGE_ACTIONS = ['copy', 'replay', 'good', 'bad'];
 

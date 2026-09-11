@@ -192,10 +192,17 @@ button::after { border: 0; }
 .runtime-error { display: block; margin: 12px 0; padding: 16px; border-radius: 12px; background: var(--mini-danger-soft); color: var(--mini-danger); font-size: 24px; }
 .runtime-field { margin-bottom: 20px; }
 .runtime-textarea { width: 100%; min-height: 180px; padding: 18px 22px; border: 1px solid var(--mini-line-strong); border-radius: 16px; background: var(--mini-surface); }
-/* 编辑态视觉反馈：蓝色描边 + 很淡的外发光（与对话页输入框同一套语言）。
-   覆盖多行文本框、单行输入框，以及展开了日期/下拉弹层的 picker-value。 */
-.form-input, .runtime-textarea { transition: border-color .2s ease, box-shadow .2s ease; }
-.form-input.runtime-control-focus, .runtime-textarea.runtime-control-focus {
+/* 输入类控件的「外壳」：边框 / 圆角 / 底色 / 聚焦描边全部挂在这一层**普通 view** 上。
+   聚焦描边绝不能挂在原生 input / textarea 自身——聚焦瞬间改它的 class 或样式，会让原生组件
+   重新渲染并收起软键盘（表现为「键盘闪一下就没了，根本没法打字」）。对话页把描边挂在父级
+   `.composer-shell` 上也是同一个道理。
+   内层尺寸各减 2px，让外壳连边框正好等于原来的 82 / 180px，视觉尺寸不变。 */
+.runtime-input-shell { display: flex; width: 100%; min-height: 82px; align-items: center; padding: 0 22px; border: 1px solid var(--mini-line-strong); border-radius: 16px; background: var(--mini-surface); transition: border-color .2s ease, box-shadow .2s ease; }
+/* 外壳里的原生输入框：只负责排版，边框 / 底色 / 描边一律交给外壳 */
+.runtime-input-shell .form-input { width: 100%; height: 80px; padding: 0; border: 0; background: transparent; transition: none; }
+.runtime-input-shell .runtime-textarea { width: 100%; min-height: 178px; padding: 18px 0; border: 0; background: transparent; transition: none; }
+/* 编辑态视觉反馈：蓝色描边 + 很淡的外发光（与对话页输入框同一套语言） */
+.runtime-field-editing .runtime-input-shell {
   border-color: var(--mini-primary);
   box-shadow: 0 0 0 6rpx rgba(40, 100, 234, .10), 0 8rpx 26rpx rgba(40, 100, 234, .16);
 }
@@ -595,11 +602,14 @@ button::after { border: 0; }
 .composer-shell { position: relative; flex-shrink: 0; margin-top: 14px; }
 /* 官方卡片自带 margin:24rpx 24rpx 80rpx，这里归零由 .composer-shell / 页面留白接管 */
 .composer-shell .t-chat-sender { margin: 0; transition: border-color .2s ease, box-shadow .2s ease; }
-/* 编辑态视觉反馈：蓝色描边 + 很淡的外发光 */
+/* 编辑态视觉反馈：蓝色描边 + 很淡的外发光（挂在外层 .composer-shell，输入框自身属性全程不变） */
 .composer-shell-focus .t-chat-sender {
   border-color: var(--mini-primary);
   box-shadow: 0 0 0 6rpx rgba(40, 100, 234, .10), 0 8rpx 26rpx rgba(40, 100, 234, .16);
 }
+/* 输入框最多 8 行：组件自带的 .t-chat-sender__textarea{max-height:280rpx} 只够 5 行，
+   必须跟着 textareaProps.autosize.maxHeight(400rpx) 一起放宽（+16rpx 是它自己的 padding-bottom） */
+.composer-shell .t-chat-sender__textarea { max-height: 416rpx; }
 /* 左下角只保留「用加号上传图片」（不放官方的深度思考 / 联网）。
    绝对定位贴在卡片内边距上：官方 __actions 左右内边距 24rpx、根 padding-bottom 22rpx，
    与右下角 64rpx 高的发送按钮同一水平线。 */
@@ -608,8 +618,7 @@ button::after { border: 0; }
 .composer-plus-hover { opacity: .6; }
 /* 有图片正在上传：加号置忙（视觉降噪 + 阻断重复点击），加载态本身由官方 attachments 的 t-loading 呈现 */
 .composer-plus-busy { opacity: .45; }
-/* 官方发送按钮在「有图无字」时是 disabled，用同位置的兜底按钮盖住 */
-.composer-image-send { position: absolute; right: 24rpx; bottom: 22rpx; z-index: 4; height: 64rpx; padding: 0 26rpx; border-radius: 999rpx; background: var(--mini-primary); color: #fff; font-size: 26rpx; line-height: 64rpx; }
+/* 官方发送按钮在「有图无字」时是 disabled，用同位置的兜底按钮盖住 */.composer-image-send { position: absolute; right: 24rpx; bottom: 22rpx; z-index: 4; height: 64rpx; padding: 0 26rpx; border-radius: 999rpx; background: var(--mini-primary); color: #fff; font-size: 26rpx; line-height: 64rpx; }
 /* 消息体的昵称 / 时间：用站点文字色阶，避免官方 placeholder 灰偏浅 */
 .chat-page .t-chat-message__name { color: var(--mini-text-2); font-weight: 600; }
 .chat-page .t-chat-message__time { color: var(--mini-subtle-2); font-size: 24rpx; }
@@ -651,7 +660,9 @@ button::after { border: 0; }
 .chat-page { height: 100vh; overflow: hidden; padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
 .header-actions { display: flex; flex-shrink: 0; gap: 12px; margin-top: 8px; }
 .header-icon-btn { padding: 6px 16px; border: 1px solid var(--mini-line-strong); border-radius: 14px; background: var(--mini-surface); color: var(--mini-text-2); font-size: 32px; line-height: 1.2; }
-.chat-opening-scroll { max-height: 700px; }
+/* 开场白最高可视高度 = 17 行：`.mini-markdown` 行高 27px × 1.72 ≈ 46.4px，
+   气泡上下内边距共 40px → (840 - 40) / 46.4 ≈ 17.2 行（原 700px 约 14 行，本次 +3 行） */
+.chat-opening-scroll { max-height: 840px; }
 .drawer-panel { display: flex; width: 85vw; max-width: 640px; height: 100%; flex-direction: column; background: var(--mini-surface); box-shadow: -8px 0 30px rgba(17, 42, 88, .15); }
 .drawer-header { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; height: 96px; padding: 0 28px; border-bottom: 1px solid var(--mini-line-faint); }
 .drawer-title { font-size: 28px; font-weight: 650; color: var(--mini-text-2); }
