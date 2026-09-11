@@ -204,19 +204,31 @@ function WorkflowPage() {
   useEffect(() => () => { audioRef.current?.destroy(); }, []);
 
   /**
-   * 键盘避让：配置页是 `height:100vh` 的 flex 布局（表单在 ScrollView 里），软键盘弹起时
-   * 既不会让位、ScrollView 也不会自动把编辑中的字段滚进可视区 → 底部字段会被键盘盖住。
-   * 这里订阅键盘让位高度把页面收窄到键盘上沿，再由下面的 `scrollTarget` 把编辑中的字段滚到顶部。
+   * 键盘避让（第一步）：把页面收窄到键盘上沿。配置页是 `min-height:100vh` 的 flex 布局，
+   * 软键盘弹起时页面既不滚动也不让位，底部字段会被键盘盖住；收窄后整块表单区落在键盘之上。
+   * 同一套判定对话页也在用（那边已稳定），改这里时两边一起看。
    */
   useEffect(() => subscribeKeyboardOffset(setKeyboardHeight), []);
 
-  /**
-   * 编辑中的字段要滚进可视区（对齐需求「编辑/选择组件必须落在键盘上方」）。
-   * 用 `scroll-into-view` 而不是 `scroll-top`：后者要先量元素位置、还要自己维护当前偏移。
-   * 锚点带下标，所以 `editingKey` 为空时给空串，同一个字段二次聚焦也能重新触发滚动。
-   */
+  /** 正在编辑的字段下标（-1 = 没在编辑）；字段锚点见上面的 `fieldAnchorId` */
   const editingIndex = editingKey ? fields.findIndex((field, index) => fieldKey(field, index) === editingKey) : -1;
-  const scrollTarget = editingIndex >= 0 ? fieldAnchorId(editingIndex) : '';
+  /**
+   * 键盘避让（第二步）：把编辑中的字段滚到表单区顶部（对齐需求「编辑/选择组件必须落在键盘上方」）。
+   *
+   * ⚠️ 绝对不能聚焦瞬间就滚（P56/P57 踩过的坑）：聚焦那一帧原生输入框刚拿到焦点、键盘刚开始
+   * 上推动画，此时 `scroll-into-view` 若同时变化，ScrollView 会立刻滚动去抢布局，微信会把刚弹起
+   * 的键盘直接收掉 —— 现象就是「键盘闪一下就没了，根本打不了字」。
+   * 所以这里用固定延时把滚动推迟到键盘动画完全停稳之后（300ms 动画 + 余量）。
+   *
+   * 只依赖 `editingIndex`、不依赖键盘回调：键盘一直开着直接切到另一个字段时
+   * `onKeyboardHeightChange` 不会再触发，靠键盘事件驱动会漏掉这种情况。
+   */
+  const [scrollTarget, setScrollTarget] = useState('');
+  useEffect(() => {
+    if (editingIndex < 0) { setScrollTarget(''); return; }
+    const timer = setTimeout(() => setScrollTarget(fieldAnchorId(editingIndex)), 400);
+    return () => clearTimeout(timer);
+  }, [editingIndex]);
 
   const refreshTask = async (taskId: string, workflowId: string) => {
     try {
@@ -877,7 +889,8 @@ function WorkflowPage() {
         </View>
       </View>
 
-      {/* 不加 scrollWithAnimation：聚焦瞬间的动画滚动会和键盘弹起动画抢布局（原生输入框需要重新同步位置），改瞬时定位更稳 */}
+      {/* scrollIntoView 由上面的延时 effect 驱动（键盘停稳后才滚），不加 scrollWithAnimation：
+          聚焦瞬间的动画滚动会和键盘弹起动画抢布局，微信会直接收掉键盘 */}
       {configView ? <ScrollView className='workflow-scroll' scrollY scrollIntoView={scrollTarget}>
         <View className='card'>
           <View className='config-card-head'>
