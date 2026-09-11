@@ -31,6 +31,7 @@
     "build:miniapp:production": "node scripts/build-miniapp-release.mjs production",
     "candidate:build": "node scripts/build-candidate.mjs",
     "candidate:verify": "node scripts/verify-candidate.mjs",
+    "deploy:web": "node scripts/deploy-web.mjs",
     "verify": "npm run check:secrets && npm run check:baseline && npm run check:stage-a && npm run check:stage-b && npm run check:stage-c && npm run check:stage-d && npm run check:stage-e && npm run check:stage-g && npm run check:session-isolation && npm run check:billing-settlement && npm run check:plan-validity && npm run check:coze-workflow-files && npm run check:asset-category-routing && npm run check:miniapp-stage1 && npm run check:miniapp-stage2 && npm run check:miniapp-stage3 && npm run check:miniapp-stage4 && npm run check:miniapp-stage5 && npm run check:miniapp-stage7"
   }
 }
