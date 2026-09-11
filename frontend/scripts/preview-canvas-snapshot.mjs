@@ -89,8 +89,11 @@ if (process.argv.includes('--demo-tools')) {
     { title: '爆款拆解', subtitle: '对标视频转干货' },
     { title: '数据看板', subtitle: '算力与用量' },
   ].map((card, index) => ({ id: `demo-tool-${index + 1}`, image: pool[index % Math.max(pool.length, 1)] || '', ...card }));
-  layout.blocks = [...layout.blocks, { id: 'tool-cards-demo', type: 'tool-cards', visible: true, title: '', spacing: 16, toolCards: demo }];
-  console.log(`[snapshot] 已追加演示用的「实用AI工具」区块（${demo.length} 张，借用了 ${pool.length} 张线上真实底图）`);
+  // 线上已经有这个区块（只是还没配卡）→ 就地填空，别再加一块出来
+  const existing = layout.blocks.find((block) => block.type === 'tool-cards');
+  if (existing) existing.toolCards = demo;
+  else layout.blocks = [...layout.blocks, { id: 'tool-cards-demo', type: 'tool-cards', visible: true, title: '', spacing: 16, toolCards: demo }];
+  console.log(`[snapshot] 已写入演示用的「实用AI工具」卡片（${demo.length} 张，借用了 ${pool.length} 张线上真实底图）`);
 }
 
 /* --------------------------------------------------------------- 2. 渲染 */
