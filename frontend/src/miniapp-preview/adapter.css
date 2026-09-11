@@ -1,0 +1,117 @@
+/* ============================================================================
+ * 画布适配层：小程序组件 → 浏览器 DOM 的差异补齐。**手写**，不参与生成。
+ *   - 组件本体与样式来自真机（见 miniapp-preview/index.jsx 与 miniappPreview.css）
+ *   - 这里只补「浏览器里没有对应物」的那几件事，以及编辑器自己的框选外挂
+ * ========================================================================== */
+
+/* 手机屏：固定 375px 宽 —— miniappPreview.css 的长度是按 750rpx→375px 折算的，
+   宽度一变整套尺寸就全错了，所以这里写死，不做响应式。 */
+.miniapp-stage {
+  position: relative;
+  width: 375px;
+  overflow: hidden;
+  background: var(--mini-page);
+}
+
+.miniapp-stage-scroll {
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* 真机 `.page { min-height: 100vh }` 在画布里没有意义（会按后台窗口高撑开） */
+.miniapp-stage .page { min-height: 0; }
+
+/* 小程序元素 → 浏览器 DOM：补齐盒模型与 display。
+   样式里大量用元素选择器（`view, text, ...`）命中，这里必须跟元素名对齐。 */
+.miniapp-stage view,
+.miniapp-stage text,
+.miniapp-stage image,
+.miniapp-stage swiper,
+.miniapp-stage swiper-item,
+.miniapp-stage scroll-view { box-sizing: border-box; }
+
+.miniapp-stage image,
+.miniapp-stage swiper,
+.miniapp-stage swiper-item,
+.miniapp-stage scroll-view { display: block; }
+
+.miniapp-stage swiper { position: relative; overflow: hidden; }
+.miniapp-stage image > img { display: block; width: 100%; height: 100%; }
+
+/* 真机 <input> 没有浏览器默认边框；placeholder 颜色走的是 placeholderClass 那条 token */
+.miniapp-stage input,
+.miniapp-stage textarea {
+  margin: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+}
+.miniapp-stage input::placeholder,
+.miniapp-stage textarea::placeholder { color: var(--mini-subtle); }
+
+/* 底部导航在真机是 fixed 到视口；画布里要 fixed 到「手机屏」内部。
+   .miniapp-stage 是最近的定位祖先，left/right/bottom 三个值原样沿用即可。 */
+.miniapp-stage .mini-tab-bar { position: absolute; }
+
+/* 轮播指示点：真机由 swiper 的 indicatorDots 自己画，浏览器里由替身补 */
+.miniapp-preview-dots {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 12px;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+.miniapp-preview-dots i { width: 6px; height: 6px; border-radius: 50%; }
+
+/* ===== 编辑器外挂：只服务「点区块 → 选中」，不参与真机还原 ===== */
+.miniapp-stage-shell { width: 100%; }
+
+.miniapp-stage-block {
+  position: relative;
+  /* 兜底最小高度：像「轮播没配图」「推荐区取不到内容」这种区块真机里高度为 0，
+     这里给一条可点的细缝，否则选不中它（区块列表里也能选，但画布上点不到很反直觉） */
+  min-height: 22px;
+  cursor: pointer;
+  outline: 1px dashed transparent;
+  outline-offset: 2px;
+}
+.miniapp-stage-block:hover { outline-color: rgba(39, 104, 231, .35); }
+.miniapp-stage-block.is-selected { outline: 2px solid #2768e7; }
+
+.miniapp-stage-badge {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  left: 0;
+  padding: 1px 6px;
+  border-radius: 0 0 6px 0;
+  background: #2768e7;
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .15s ease;
+}
+.miniapp-stage-block:hover .miniapp-stage-badge,
+.miniapp-stage-block.is-selected .miniapp-stage-badge { opacity: 1; }
+
+/* 点击读出行：告诉后台「刚才点的那一下，小程序里会跳到哪儿」 */
+.miniapp-stage-readout {
+  margin-top: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.55;
+  word-break: break-all;
+}
+.miniapp-stage-readout.is-hit { background: #eff6ff; color: #1d4ed8; }

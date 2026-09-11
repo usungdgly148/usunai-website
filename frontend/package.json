@@ -4,7 +4,10 @@
   "version": "0.2.0",
   "type": "module",
   "scripts": {
+    "gen:miniapp-preview": "node scripts/gen-miniapp-preview-style.mjs",
+    "predev": "npm run gen:miniapp-preview",
     "dev": "vite",
+    "prebuild": "npm run gen:miniapp-preview",
     "build": "vite build",
     "preview": "vite preview --host",
     "server": "node server/index.mjs"

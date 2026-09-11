@@ -53,7 +53,7 @@ export function ResilientImage({
 }
 
 /** 区块默认标题。⚠️ 后台属性面板会把它当占位提示显示，改这里要同步 AdminMiniappDesign.jsx 的 DEFAULT_TITLES。 */
-const titles: Record<MiniappLayoutBlock['type'], string> = {
+export const titles: Record<MiniappLayoutBlock['type'], string> = {
   carousel: '精选推荐',
   announcements: '公告通知',
   search: '搜索工具',
@@ -115,8 +115,11 @@ export function recommendedEntries(content: PublicContent): Array<{ item: Conten
  *   - 「数据源」这条分支压根没读过，不管选什么都不影响。
  * 现在两者都真的生效：`all` = 全部已上架（按 sortOrder），其余 = 推荐位（网页版同源，按 recommended
  * 数组顺序；智能体块保持「智能体工作流混排」的原有口径）。推荐位为空时回落全部，避免整块消失。
+ *
+ * ⚠️ 后台「小程序设计」的「每张卡片的跳转」面板直接 import 这个函数来列出会显示的卡片，
+ *    所以它的口径就是唯一事实来源 —— 不要在前端另写一份。
  */
-function featuredEntries(content: PublicContent, block: MiniappLayoutBlock, kind: 'agent' | 'workflow', category?: string) {
+export function featuredEntries(content: PublicContent, block: MiniappLayoutBlock, kind: 'agent' | 'workflow', category?: string) {
   const limit = Math.max(1, Math.min(24, Number(block.limit) || 6));
   const recommended = recommendedEntries(content);
   let items = block.dataSource === 'all' || !recommended.length
@@ -219,7 +222,10 @@ export function LayoutBlocks({ layout, content, category = '', type = '' }: { la
       />
       <View className='mini-category-nav'>{content.categories.filter((item) => !isAllCategory(item)).slice(0, block.limit || 12).map((item) => {
         const title = item.label || item.name || '分类';
-        const destination = String(item.miniappLink || `/pages/category/index?category=${encodeURIComponent(item.key || item.id)}&title=${encodeURIComponent(title)}`);
+        // 优先级：后台给这张卡单独配的跳转 → 分类自带的 miniappLink → 默认进该分类列表页
+        const destination = block.categoryLinks?.[categoryRef(item)]
+          || item.miniappLink
+          || `/pages/category/index?category=${encodeURIComponent(item.key || item.id)}&title=${encodeURIComponent(title)}`;
         const image = block.categoryImages?.[categoryRef(item)] || item.miniappImage || '';
         return <View className='mini-category-item' key={item.id} onClick={() => navigateLink(destination)}>
           {image
@@ -235,7 +241,7 @@ export function LayoutBlocks({ layout, content, category = '', type = '' }: { la
       if (!items.length) return null;
       return <View key={block.id} className={`section ${className}`} style={style}>
         <SectionTitle title={heading} more={moreLabel(block)} onMore={() => navigateLink(block.link || '/pages/hot/index?type=agent')} />
-        <View className='mini-content-list'>{items.map(entry => <ContentCard item={entry.item} type={entry.kind} variant='compact' key={entry.item.id} />)}</View>
+        <View className='mini-content-list'>{items.map(entry => <ContentCard item={entry.item} type={entry.kind} variant='compact' key={entry.item.id} link={block.cardLinks?.[entry.item.id]} />)}</View>
       </View>;
     }
     if (block.type === 'featured-workflows') {
@@ -244,7 +250,7 @@ export function LayoutBlocks({ layout, content, category = '', type = '' }: { la
       if (!items.length) return null;
       return <View key={block.id} className={`section ${className}`} style={style}>
         <SectionTitle title={heading} more={moreLabel(block)} onMore={() => navigateLink(block.link || '/pages/hot/index?type=workflow')} />
-        <View className='mini-content-list'>{items.map(entry => <ContentCard item={entry.item} type={entry.kind} variant='compact' key={entry.item.id} />)}</View>
+        <View className='mini-content-list'>{items.map(entry => <ContentCard item={entry.item} type={entry.kind} variant='compact' key={entry.item.id} link={block.cardLinks?.[entry.item.id]} />)}</View>
       </View>;
     }
     return null;

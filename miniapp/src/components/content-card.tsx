@@ -1,7 +1,7 @@
-import Taro from '@tarojs/taro';
 import { Image, Text, View } from '@tarojs/components';
-import type { ContentItem } from '../types';
+import type { ContentItem, MiniLinkValue } from '../types';
 import { resolveEntityAvatar } from '../utils/entity-visual';
+import { navigateLink, resolveLink } from '../utils/link';
 
 const GRADIENT_PRESETS: Record<string, { from: string; to: string }> = {
   'bg-blue-600': { from: '#DBEAFE', to: '#FFFFFF' },
@@ -36,10 +36,15 @@ function getCoverBackground(item: ContentItem) {
   return `linear-gradient(${angle}deg, ${from}, ${to})`;
 }
 
-export function ContentCard({ item, type, variant = 'cover' }: {
+export function ContentCard({ item, type, variant = 'cover', link }: {
   item: ContentItem;
   type: 'agent' | 'workflow';
   variant?: 'cover' | 'compact';
+  /**
+   * 后台在「小程序设计」里给这张卡单独配的跳转（首页推荐区用）。
+   * 不传 / 配了但解析不出目标 → 保持原行为：打开这个智能体 / 工作流自身。
+   */
+  link?: MiniLinkValue;
 }) {
   const tags = (item.tags || []).filter(Boolean).slice(0, 2);
   const description = item.description || item.desc || (type === 'agent'
@@ -50,7 +55,11 @@ export function ContentCard({ item, type, variant = 'cover' }: {
   const { url: avatarUrl, glyph: fallback, background: fallbackBackground } = resolveEntityAvatar(item, type);
   const fallbackStyle = { background: fallbackBackground };
 
-  const handleOpen = () => Taro.navigateTo({ url: `${operationPath}?id=${encodeURIComponent(item.id)}` });
+  const handleOpen = () => {
+    // 拼成默认地址后统一交给 navigateLink —— 一条路径，不会出现「配了链接却不走 reLaunch 判定」的分叉
+    const fallbackTarget = `${operationPath}?id=${encodeURIComponent(item.id)}`;
+    navigateLink(resolveLink(link) || fallbackTarget);
+  };
 
   // 紧凑样式：左圆形头像 + 右名称/简介。用于首页「热门智能体/工作流」section。
   // 背景统一为毛玻璃大圆角（由 .mini-content-card--compact 的 CSS 变量控制，浅/深色自适应），

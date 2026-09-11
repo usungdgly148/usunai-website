@@ -152,6 +152,16 @@ export interface MiniappLayoutBlock {
   link?: MiniLinkValue;
   slides?: MiniappCarouselSlide[];
   categoryImages?: Record<string, string>;
+  /**
+   * 分类导航：**每张分类卡**单独配的跳转，键是分类标识（key || id）。
+   * 缺省时回落到 `item.miniappLink`，再回落到「进该分类的列表页」。
+   */
+  categoryLinks?: Record<string, MiniLinkValue>;
+  /**
+   * 推荐区（热门智能体 / 热门工作流）：**每张卡片**单独配的跳转，键是内容 id。
+   * 缺省时回落到「打开这个智能体 / 工作流自身」。
+   */
+  cardLinks?: Record<string, MiniLinkValue>;
   dataSource?: 'recommended' | 'all' | 'current-category' | '';
   limit?: number;
   /** 搜索块：搜索框里的提示语，空则用渲染器默认文案 */

@@ -4,3 +4,6 @@ dist/
 .env
 .env.*
 !.env.example
+# 本地临时脚本产物（scripts/ 下的自测脚本会在崩溃时留下中间文件）
+tmp/
+.selftest-miniapp-preview.*

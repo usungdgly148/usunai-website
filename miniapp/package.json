@@ -6,8 +6,8 @@
     "dev:weapp": "taro build --type weapp --watch",
     "build:weapp": "taro build --type weapp",
     "build:weapp:prod": "taro build --type weapp --mode production",
-    "postbuild:weapp": "node scripts/postbuild-clean-nested.js && node scripts/postbuild-esm-to-cjs.js && node scripts/postbuild-transpile-deps.js && node scripts/postbuild-chat-selectable.js",
-    "postbuild:weapp:prod": "node scripts/postbuild-clean-nested.js && node scripts/postbuild-esm-to-cjs.js && node scripts/postbuild-transpile-deps.js && node scripts/postbuild-chat-selectable.js",
+    "postbuild:weapp": "node scripts/postbuild-clean-nested.js && node scripts/postbuild-esm-to-cjs.js && node scripts/postbuild-transpile-deps.js && node scripts/postbuild-td-events.js && node scripts/postbuild-chat-selectable.js",
+    "postbuild:weapp:prod": "node scripts/postbuild-clean-nested.js && node scripts/postbuild-esm-to-cjs.js && node scripts/postbuild-transpile-deps.js && node scripts/postbuild-td-events.js && node scripts/postbuild-chat-selectable.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

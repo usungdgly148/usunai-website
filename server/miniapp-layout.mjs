@@ -165,6 +165,29 @@ function safeCategoryImages(value) {
   }).filter(([, image]) => image));
 }
 
+/**
+ * 「按项配的跳转」校验：{ 分类标识 / 内容 id → 链接 }。
+ *
+ * 用于分类导航的每张分类卡、推荐区的每张卡片（后端 AdminMiniappDesign 的逐项链接选择器）。
+ * 与 categoryImages 同一套路：key 只保留有链接的项，空值＝沿用页面默认跳转，**不落库**——
+ * 这样「没配过的项」在数据里就是不存在，渲染器的回落逻辑天然生效。
+ * 值非法照旧明确报错（不静默吞掉，否则就是又一种「配了没反应」）。
+ */
+function safeLinkMap(value, label, max = 60) {
+  if (value == null || value === '') return {};
+  if (typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label}格式无效`);
+  const entries = Object.entries(value);
+  if (entries.length > max) throw new Error(`${label}最多支持 ${max} 项`);
+  const result = {};
+  for (const [rawKey, rawLink] of entries) {
+    const ref = text(rawKey, 100);
+    if (!ref) continue;
+    const link = safeLink(rawLink, `${label}「${ref}」`);
+    if (link) result[ref] = link;
+  }
+  return result;
+}
+
 export function defaultMiniappLayout(page) {
   const pageKey = MINIAPP_LAYOUT_PAGES.has(page) ? page : 'home';
   return {
@@ -181,6 +204,8 @@ export function defaultMiniappLayout(page) {
       link: '',
       slides: [],
       categoryImages: {},
+      categoryLinks: {},
+      cardLinks: {},
       dataSource: type.startsWith('featured-') ? 'recommended' : '',
       limit: defaultLimitFor(type),
       searchPlaceholder: '',
@@ -223,6 +248,9 @@ export function validateMiniappLayout(input, expectedPage = '') {
       link: safeLink(block.link),
       slides: safeCarouselSlides(block.slides),
       categoryImages: safeCategoryImages(block.categoryImages),
+      // 逐项跳转：分类导航每张分类卡 / 推荐区每张卡片（键＝分类标识 / 内容 id）
+      categoryLinks: safeLinkMap(block.categoryLinks, '分类卡跳转', 30),
+      cardLinks: safeLinkMap(block.cardLinks, '卡片跳转', 60),
       // 可配文案（B）：搜索框提示语 / 「更多」的文字 / 是否显示「更多」
       searchPlaceholder: text(block.searchPlaceholder, 40),
       moreText: text(block.moreText, 12),
