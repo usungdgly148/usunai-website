@@ -1,6 +1,11 @@
 import crypto from 'node:crypto';
 
 export const MINIAPP_LAYOUT_PAGES = new Set(['home', 'category']);
+/**
+ * 区块白名单。
+ * ⚠️ 这里每多一个类型，小程序渲染器就要多一个分支 —— 加之前先确认它真能被渲染出来。
+ * 已移除 `quick-links`：渲染器里是 `return null` 的死块，后台摆着只会让人以为配上就有用。
+ */
 export const MINIAPP_LAYOUT_TYPES = new Set([
   'carousel',
   'announcements',
@@ -8,12 +13,54 @@ export const MINIAPP_LAYOUT_TYPES = new Set([
   'categories',
   'featured-agents',
   'featured-workflows',
-  'quick-links',
   'spacer',
 ]);
 
+/**
+ * 小程序内页白名单 —— 「点击链接」选「小程序页面」时只能从这里挑。
+ *
+ * ⚠️ 必须与 `miniapp/src/app.config.ts` 的 pages 数组保持一致（验证脚本会逐条比对）。
+ * 故意**排除**两个页面：
+ *   - `pages/detail/index` 需要 id 参数
+ *   - `pages/webview/index` 需要 url 参数
+ * 让运营从下拉里选这两个没有意义，选了也打不开。
+ */
+export const MINIAPP_INTERNAL_PAGES = [
+  { path: '/pages/home/index', label: '首页' },
+  { path: '/pages/announcements/index', label: '公告通知' },
+  { path: '/pages/category/index', label: '分类（全部）' },
+  { path: '/pages/search/index', label: '搜索' },
+  { path: '/pages/chat/index', label: 'AI 智能体对话' },
+  { path: '/pages/workflow/index', label: 'AI 工作流' },
+  { path: '/pages/profile/index', label: '我的' },
+  { path: '/pages/compute/index', label: '算力记录' },
+  { path: '/pages/assets/index', label: '我的资产' },
+  { path: '/pages/orders/index', label: '订单记录' },
+  { path: '/pages/bind/index', label: '绑定账号' },
+  { path: '/pages/account-security/index', label: '账号与安全' },
+  { path: '/pages/legal/index', label: '政策协议' },
+  { path: '/pages/recharge/index', label: '算力充值' },
+  { path: '/pages/service/index', label: '联系客服' },
+  { path: '/pages/hot/index', label: '热门智能体 / 工作流' },
+];
+const INTERNAL_PAGE_PATHS = new Set(MINIAPP_INTERNAL_PAGES.map((item) => item.path));
+
 const MAX_BLOCKS = 40;
 const MAX_VERSIONS = 30;
+
+/**
+ * 各区块「展示数量」的兜底值。featured-* 取 6 —— 与首页现状（网页版同源的 recommended 前 6）一致，
+ * 所以放开 limit 硬上限之后，没被改过的布局看起来不会变。
+ */
+function defaultLimitFor(type) {
+  if (String(type).startsWith('featured-')) return 6;
+  if (type === 'categories') return 12;
+  return 8;
+}
+
+/** 链接对象允许的 kind 白名单 */
+const LINK_KINDS = new Set(['agent', 'workflow', 'page', 'category', 'external', 'none']);
+const TARGET_ID_PATTERN = /^[a-zA-Z0-9_-]{1,100}$/;
 
 const defaults = {
   home: ['carousel', 'announcements', 'search', 'categories', 'featured-agents', 'featured-workflows'],
@@ -31,11 +78,54 @@ function safeColor(value) {
   return color;
 }
 
+/**
+ * 链接校验，两种形态都收：
+ *  - 裸字符串（旧配置，**不迁移**）：只允许 `'/pages/...'` 或 `https://`
+ *  - 对象（新配置）：{ kind: agent | workflow | page | category | external | none, ... }
+ *    返回的对象是**小程序端可直接消费**的最小结构，多余字段一律丢弃（不吃未知输入）。
+ * 返回 '' 表示没有跳转。
+ */
 function safeLink(value, label = '链接') {
-  const link = text(value, 500);
-  if (!link) return '';
-  if (link.startsWith('/pages/') || /^https:\/\//i.test(link)) return link;
-  throw new Error(`${label}只允许 HTTPS 或小程序内部页面路径`);
+  if (value == null || value === '' || typeof value === 'string') {
+    const link = text(value, 500);
+    if (!link) return '';
+    if (link.startsWith('/pages/') || /^https:\/\//i.test(link)) return link;
+    throw new Error(`${label}只允许 HTTPS 或小程序内部页面路径`);
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label}格式无效`);
+
+  const kind = text(value.kind, 20);
+  if (!LINK_KINDS.has(kind)) throw new Error(`${label}的跳转类型不在白名单中`);
+  if (kind === 'none') return '';
+
+  if (kind === 'agent' || kind === 'workflow') {
+    const id = text(value.id, 100);
+    const noun = kind === 'agent' ? '智能体' : '工作流';
+    if (!id) throw new Error(`${label}：请选择具体的${noun}`);
+    if (!TARGET_ID_PATTERN.test(id)) throw new Error(`${label}：${noun} ID 无效`);
+    return { kind, id };
+  }
+
+  if (kind === 'page') {
+    // 白名单比对的是**路径部分**；query 原样保留（历史配置里有 `/pages/hot/index?type=agent` 这类值，
+    // 不保留等于把老配置改坏了）。
+    const raw = text(value.path, 200);
+    const [pathname, ...rest] = raw.split('?');
+    const query = rest.join('?');
+    if (!INTERNAL_PAGE_PATHS.has(pathname)) throw new Error(`${label}：只能选择已注册的小程序页面`);
+    if (query && !/^[a-zA-Z0-9_=&%.\-]+$/.test(query)) throw new Error(`${label}：页面参数包含非法字符`);
+    return { kind, path: query ? `${pathname}?${query}` : pathname };
+  }
+
+  if (kind === 'category') {
+    const key = text(value.key, 100);
+    if (!key) throw new Error(`${label}：请选择具体分类`);
+    return { kind, key };
+  }
+
+  const url = text(value.url, 500);
+  if (!/^https:\/\//i.test(url)) throw new Error(`${label}只允许 HTTPS 外部链接`);
+  return { kind: 'external', url };
 }
 
 function safeImage(value) {
@@ -92,7 +182,10 @@ export function defaultMiniappLayout(page) {
       slides: [],
       categoryImages: {},
       dataSource: type.startsWith('featured-') ? 'recommended' : '',
-      limit: type.startsWith('featured-') ? 8 : 12,
+      limit: defaultLimitFor(type),
+      searchPlaceholder: '',
+      moreText: '',
+      showMore: true,
     })),
   };
 }
@@ -120,8 +213,12 @@ export function validateMiniappLayout(input, expectedPage = '') {
       link: safeLink(block.link),
       slides: safeCarouselSlides(block.slides),
       categoryImages: safeCategoryImages(block.categoryImages),
+      // 可配文案（B）：搜索框提示语 / 「更多」的文字 / 是否显示「更多」
+      searchPlaceholder: text(block.searchPlaceholder, 40),
+      moreText: text(block.moreText, 12),
+      showMore: block.showMore !== false,
       dataSource: ['recommended', 'all', 'current-category', ''].includes(block.dataSource) ? block.dataSource : '',
-      limit: numberInRange(block.limit, 8, 1, 24),
+      limit: numberInRange(block.limit, defaultLimitFor(block.type), 1, 24),
     };
   });
   return { page, blocks };
@@ -174,7 +271,13 @@ export async function getMiniappLayoutAdmin(KV, page) {
   try { draft = validateMiniappLayout(draftValue || defaultMiniappLayout(page), page); }
   catch { draft = defaultMiniappLayout(page); }
   const published = versions.find((item) => item?.id === publishedId) || null;
-  return { draft, published, versions: versions.map(({ layout: _layout, ...item }) => item) };
+  return {
+    draft,
+    published,
+    versions: versions.map(({ layout: _layout, ...item }) => item),
+    // 后台「点击链接」选择器要用：可选的小程序内页（唯一事实来源在服务端）
+    pages: MINIAPP_INTERNAL_PAGES,
+  };
 }
 
 export async function saveMiniappLayoutDraft(KV, page, layout) {

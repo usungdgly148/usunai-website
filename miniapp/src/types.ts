@@ -113,12 +113,32 @@ export interface PublicContent {
   customerService: CustomerService;
 }
 
-export type MiniappLayoutBlockType = 'carousel' | 'announcements' | 'search' | 'categories' | 'featured-agents' | 'featured-workflows' | 'quick-links' | 'spacer';
+export type MiniappLayoutBlockType = 'carousel' | 'announcements' | 'search' | 'categories' | 'featured-agents' | 'featured-workflows' | 'spacer';
+
+/**
+ * 后台可视化设计器里配置的跳转目标。
+ * 结构化的意义：运营在后台直接选「某个智能体」，而不是手写 /pages/chat/index?id=xxx。
+ * 解析统一收口在 utils/link.ts 的 resolveLink / navigateLink，不要在业务里各写一套。
+ */
+export type MiniLink =
+  | { kind: 'agent'; id: string }
+  | { kind: 'workflow'; id: string }
+  | { kind: 'page'; path: string }
+  | { kind: 'category'; key: string }
+  | { kind: 'external'; url: string }
+  | { kind: 'none' };
+
+/**
+ * ⚠️ 兼容层：后台在链接对象化之前把链接存成裸字符串（'/pages/xxx' 或 'https://...'）。
+ * 这些历史配置**不迁移**，解析时继续认；新写入的一律是对象。
+ */
+export type MiniLinkValue = MiniLink | string;
+
 export interface MiniappCarouselSlide {
   image: string;
   title?: string;
   subtitle?: string;
-  link?: string;
+  link?: MiniLinkValue;
 }
 export interface MiniappLayoutBlock {
   id: string;
@@ -129,11 +149,17 @@ export interface MiniappLayoutBlock {
   backgroundColor?: string;
   textColor?: string;
   spacing?: number;
-  link?: string;
+  link?: MiniLinkValue;
   slides?: MiniappCarouselSlide[];
   categoryImages?: Record<string, string>;
   dataSource?: 'recommended' | 'all' | 'current-category' | '';
   limit?: number;
+  /** 搜索块：搜索框里的提示语，空则用渲染器默认文案 */
+  searchPlaceholder?: string;
+  /** 「更多」的文字，空则用默认的「更多>>」 */
+  moreText?: string;
+  /** 是否显示「更多」入口，默认显示 */
+  showMore?: boolean;
 }
 export interface MiniappLayout { page: 'home' | 'category'; blocks: MiniappLayoutBlock[]; }
 

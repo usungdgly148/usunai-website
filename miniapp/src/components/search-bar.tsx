@@ -21,6 +21,8 @@ export interface SearchBarProps {
   onTapIcon?: () => void;
   onClear?: () => void;
   placeholder?: string;
+  /** 区块级样式（首页布局块配的背景色/文字色/下边距要能落到搜索框上） */
+  style?: Record<string, string | undefined>;
   autoFocus?: boolean;
   showClear?: boolean;
   className?: string;
@@ -35,6 +37,7 @@ export function SearchBar({
   onTapIcon,
   onClear,
   placeholder = '输入关键词搜索智能体和工作流',
+  style,
   autoFocus = false,
   showClear = true,
   className,
@@ -46,7 +49,7 @@ export function SearchBar({
     onClear?.();
   };
   return (
-    <View className={`mini-searchbar ${className || ''}`}>
+    <View className={`mini-searchbar ${className || ''}`} style={style}>
       <View
         className='mini-searchbar-icon ui-icon-search'
         hoverClass={onTapIcon ? 'mini-searchbar-icon-hover' : undefined}

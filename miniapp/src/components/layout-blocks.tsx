@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { ContentCard } from './content-card';
 import { SearchBar, gotoGlobalSearch } from './search-bar';
 import { API_BASE } from '../services/api';
+import { navigateLink, resolveLink } from '../utils/link';
 import { ANN_SEEN_EVENT, announcementTime, getAnnouncementSeen, sortAnnouncements, type Announcement } from '../services/announcements';
 import type { ContentItem, MiniappLayout, MiniappLayoutBlock, PublicContent } from '../types';
 
@@ -51,6 +52,7 @@ export function ResilientImage({
   />;
 }
 
+/** 区块默认标题。⚠️ 后台属性面板会把它当占位提示显示，改这里要同步 AdminMiniappDesign.jsx 的 DEFAULT_TITLES。 */
 const titles: Record<MiniappLayoutBlock['type'], string> = {
   carousel: '精选推荐',
   announcements: '公告通知',
@@ -58,9 +60,14 @@ const titles: Record<MiniappLayoutBlock['type'], string> = {
   categories: '快捷分类',
   'featured-agents': '热门智能体',
   'featured-workflows': '热门工作流',
-  'quick-links': '快捷入口',
   spacer: '',
 };
+
+/** 「更多」入口的文案：没配就是「更多>>」，显式关掉就是空串（SectionTitle 见空串就不渲染）。 */
+function moreLabel(block: MiniappLayoutBlock) {
+  if (block.showMore === false) return '';
+  return block.moreText || '更多>>';
+}
 
 function blockStyle(block: MiniappLayoutBlock) {
   return {
@@ -68,16 +75,6 @@ function blockStyle(block: MiniappLayoutBlock) {
     backgroundColor: block.backgroundColor || undefined,
     color: block.textColor || undefined,
   };
-}
-
-function internalNavigate(url: string) {
-  if (!url) return;
-  if (url.startsWith('/pages/')) void Taro.navigateTo({ url });
-  else if (/^https:\/\//i.test(url)) void Taro.navigateTo({ url: `/pages/webview/index?url=${encodeURIComponent(url)}` });
-}
-
-function recommendedIds(content: PublicContent) {
-  return new Set(content.recommended || []);
 }
 
 function categoryRef(item: { id: string; key?: string }) {
@@ -88,17 +85,6 @@ function isAllCategory(item: { id: string; key?: string; name?: string; label?: 
   const key = categoryRef(item).toLowerCase();
   const name = String(item.label || item.name || '').trim();
   return key === 'all' || name === '全部';
-}
-
-function filtered(items: ContentItem[], block: MiniappLayoutBlock, content: PublicContent, category?: string) {
-  let result = items;
-  if (block.dataSource === 'recommended') {
-    const ids = recommendedIds(content);
-    const recommended = result.filter(item => ids.has(item.id));
-    if (recommended.length) result = recommended;
-  }
-  if ((block.dataSource === 'current-category' || category) && category) result = result.filter(item => item.category === category);
-  return result.slice(0, Math.max(1, Math.min(24, Number(block.limit) || 8)));
 }
 
 /**
@@ -121,6 +107,26 @@ export function recommendedEntries(content: PublicContent): Array<{ item: Conten
     .filter((entry): entry is { item: ContentItem; kind: 'agent' | 'workflow' } => !!entry);
 }
 
+/**
+ * 推荐区（热门智能体 / 热门工作流）取数。
+ *
+ * 以前这里有两个「配了没反应」：
+ *   - 「展示数量」被硬编码 `Math.min(6, limit)` 卡在 6，后台改多大都只显示 6 条；
+ *   - 「数据源」这条分支压根没读过，不管选什么都不影响。
+ * 现在两者都真的生效：`all` = 全部已上架（按 sortOrder），其余 = 推荐位（网页版同源，按 recommended
+ * 数组顺序；智能体块保持「智能体工作流混排」的原有口径）。推荐位为空时回落全部，避免整块消失。
+ */
+function featuredEntries(content: PublicContent, block: MiniappLayoutBlock, kind: 'agent' | 'workflow', category?: string) {
+  const limit = Math.max(1, Math.min(24, Number(block.limit) || 6));
+  const recommended = recommendedEntries(content);
+  let items = block.dataSource === 'all' || !recommended.length
+    ? (kind === 'agent' ? content.agents : content.workflows).map(item => ({ item, kind }))
+    : recommended;
+  if (kind === 'workflow') items = items.filter(entry => entry.kind === 'workflow');
+  if (category) items = items.filter(entry => entry.item.category === category);
+  return items.slice(0, limit);
+}
+
 function SectionTitle({ title, more, onMore, headingClass }: { title: string; more?: string; onMore?: () => void; headingClass?: string }) {
   return <View className='section-title mini-section-title'>
     <Text className={headingClass || 'mini-block-heading'}>{title}</Text>
@@ -130,19 +136,25 @@ function SectionTitle({ title, more, onMore, headingClass }: { title: string; mo
 
 function SearchBlock({ block, className, style }: { block: MiniappLayoutBlock; className: string; style: Record<string, string | undefined> }) {
   const [keyword, setKeyword] = useState('');
+  // 搜索块的点击目标可配：配了跳配的，没配就保持原行为（进全局搜索页）
+  const submit = () => {
+    if (resolveLink(block.link)) navigateLink(block.link);
+    else gotoGlobalSearch(keyword);
+  };
   return <SearchBar
     className={`${className} mini-searchbar-block`}
+    style={style}
     value={keyword}
     onInput={setKeyword}
-    onTapIcon={() => gotoGlobalSearch(keyword)}
-    onSubmit={() => gotoGlobalSearch(keyword)}
+    onTapIcon={submit}
+    onSubmit={submit}
     onClear={() => setKeyword('')}
-    placeholder='输入关键词搜索智能体和工作流'
+    placeholder={block.searchPlaceholder || '输入关键词搜索智能体和工作流'}
   />;
 }
 
-/** 首页公告通知栏：左侧固定铃铛（有未读显示红点）+ 右侧跑马灯，点击进公告列表二级页 */
-function AnnouncementBar({ announcements }: { announcements: Announcement[] }) {
+/** 首页公告通知栏：左侧固定铃铛（有未读显示红点）+ 右侧跑马灯，点击默认进公告列表二级页 */
+function AnnouncementBar({ announcements, onTap }: { announcements: Announcement[]; onTap: () => void }) {
   const [seen, setSeen] = useState(() => getAnnouncementSeen());
   // 列表页标记已读后会广播事件，首页监听后刷新红点状态（返回首页时红点消失）
   useEffect(() => {
@@ -156,7 +168,7 @@ function AnnouncementBar({ announcements }: { announcements: Announcement[] }) {
   const hasUnread = !!newest && newest > seen;
   const marqueeText = String(latest.title || latest.content || '');
   return (
-    <View className='mini-announce-bar' onClick={() => Taro.navigateTo({ url: '/pages/announcements/index' })}>
+    <View className='mini-announce-bar' onClick={onTap}>
       <View className='mini-announce-bell'>
         <View className='ui-icon-bell mini-announce-bell-icon' />
         {hasUnread && <View className='mini-announce-dot' />}
@@ -181,12 +193,12 @@ export function LayoutBlocks({ layout, content, category = '', type = '' }: { la
         image: String(banner.image || banner.imageUrl || block.image || ''),
         title: String(banner.title || ''),
         subtitle: String(banner.subtitle || ''),
-        link: String(banner.link || banner.linkUrl || block.link || ''),
+        link: (banner.link || banner.linkUrl || block.link || '') as string,
       })).filter((slide) => slide.image);
       if (!slides.length) return null;
       return <View key={block.id} className={className} style={style}>
         <Swiper className='layout-swiper mini-hero-swiper' autoplay circular indicatorDots indicatorColor='rgba(255,255,255,.45)' indicatorActiveColor='#ffffff'>
-          {slides.slice(0, block.limit || 8).map((slide, index) => <SwiperItem key={`${slide.image}-${index}`} onClick={() => internalNavigate(slide.link || block.link || '')}>
+          {slides.slice(0, block.limit || 8).map((slide, index) => <SwiperItem key={`${slide.image}-${index}`} onClick={() => navigateLink(slide.link || block.link)}>
             <ResilientImage className='layout-banner mini-hero-image' src={slide.image} width={1200} height={675} lazyLoad={index > 0} />
           </SwiperItem>)}
         </Swiper>
@@ -195,21 +207,21 @@ export function LayoutBlocks({ layout, content, category = '', type = '' }: { la
     if (block.type === 'announcements') {
       if (!content.announcements?.length) return null;
       return <View key={block.id} className={`section ${className}`} style={style}>
-        <AnnouncementBar announcements={content.announcements} />
+        <AnnouncementBar announcements={content.announcements} onTap={() => navigateLink(block.link || '/pages/announcements/index')} />
       </View>;
     }
     if (block.type === 'search') return <SearchBlock key={block.id} block={block} className={className} style={style} />;
     if (block.type === 'categories') return <View key={block.id} className={`section ${className}`} style={style}>
       <SectionTitle
         title={heading}
-        more='更多>>'
-        onMore={() => Taro.navigateTo({ url: `/pages/category/index?title=${encodeURIComponent('全部分类')}` })}
+        more={moreLabel(block)}
+        onMore={() => navigateLink(block.link || `/pages/category/index?title=${encodeURIComponent('全部分类')}`)}
       />
       <View className='mini-category-nav'>{content.categories.filter((item) => !isAllCategory(item)).slice(0, block.limit || 12).map((item) => {
         const title = item.label || item.name || '分类';
         const destination = String(item.miniappLink || `/pages/category/index?category=${encodeURIComponent(item.key || item.id)}&title=${encodeURIComponent(title)}`);
         const image = block.categoryImages?.[categoryRef(item)] || item.miniappImage || '';
-        return <View className='mini-category-item' key={item.id} onClick={() => internalNavigate(destination)}>
+        return <View className='mini-category-item' key={item.id} onClick={() => navigateLink(destination)}>
           {image
             ? <ResilientImage className='mini-category-picture' src={image} width={640} height={480} lazyLoad />
             : <View className='mini-category-fallback' style={{ backgroundColor: item.color || undefined }} />}
@@ -219,31 +231,22 @@ export function LayoutBlocks({ layout, content, category = '', type = '' }: { la
     </View>;
     if (block.type === 'featured-agents') {
       if (type === 'workflow') return null;
-      const recommended = recommendedEntries(content);
-      // 热门智能体首页默认展示 recommended 前 6（网页版同源：recommended 数组顺序）
-      const items = recommended.length
-        ? recommended.slice(0, Math.max(1, Math.min(6, Number(block.limit) || 6)))
-        : filtered(content.agents, block, content, category).map(item => ({ item, kind: 'agent' as const }));
+      const items = featuredEntries(content, block, 'agent', category);
       if (!items.length) return null;
       return <View key={block.id} className={`section ${className}`} style={style}>
-        <SectionTitle title={heading} more='更多>>' onMore={() => Taro.navigateTo({ url: '/pages/hot/index?type=agent' })} />
+        <SectionTitle title={heading} more={moreLabel(block)} onMore={() => navigateLink(block.link || '/pages/hot/index?type=agent')} />
         <View className='mini-content-list'>{items.map(entry => <ContentCard item={entry.item} type={entry.kind} variant='compact' key={entry.item.id} />)}</View>
       </View>;
     }
     if (block.type === 'featured-workflows') {
       if (type === 'agent') return null;
-      const recommended = recommendedEntries(content);
-      const items = recommended.length
-        ? recommended.filter(entry => entry.kind === 'workflow').slice(0, Math.max(1, Math.min(6, Number(block.limit) || 6)))
-        : filtered(content.workflows, block, content, category).map(item => ({ item, kind: 'workflow' as const }));
+      const items = featuredEntries(content, block, 'workflow', category);
       if (!items.length) return null;
       return <View key={block.id} className={`section ${className}`} style={style}>
-        <SectionTitle title={heading} more='更多>>' onMore={() => Taro.navigateTo({ url: '/pages/hot/index?type=workflow' })} />
+        <SectionTitle title={heading} more={moreLabel(block)} onMore={() => navigateLink(block.link || '/pages/hot/index?type=workflow')} />
         <View className='mini-content-list'>{items.map(entry => <ContentCard item={entry.item} type={entry.kind} variant='compact' key={entry.item.id} />)}</View>
       </View>;
     }
-    // 底部导航已承担快捷入口职责，首页不重复展示旧的快捷入口区。
-    if (block.type === 'quick-links') return null;
     return null;
   })}</>;
 }

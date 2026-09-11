@@ -1,5 +1,5 @@
 import Taro from '@tarojs/taro';
-import type { ApiEnvelope, MiniappLayout, PublicContent, RechargeOrderResult, RechargeStatus, UserProfile } from '../types';
+import type { ApiEnvelope, MiniappLayout, MiniappLayoutBlockType, PublicContent, RechargeOrderResult, RechargeStatus, UserProfile } from '../types';
 
 export const API_BASE = __MINIAPP_API_BASE__;
 export const MINIAPP_ENVIRONMENT = __MINIAPP_ENV__;
@@ -189,9 +189,19 @@ export async function getPublicContent(force = false): Promise<PublicContent> {
   }
 }
 
+/**
+ * 拉不到布局时的兜底结构（断网/接口异常才用得上）。
+ * ⚠️ 必须与 server/miniapp-layout.mjs 的 defaults + defaultLimitFor 保持一致，
+ * 否则断网时首页区块和线上不一样 —— 这里以前多了一个 quick-links（早已是死块）。
+ */
+const DEFAULT_LIMITS: Record<string, number> = { categories: 12, 'featured-agents': 6, 'featured-workflows': 6 };
+const defaultBlocks = (types: MiniappLayoutBlockType[]) => types.map((type, index) => ({
+  id: `${type}-${index}`, type, visible: true, spacing: 16, limit: DEFAULT_LIMITS[type] || 8,
+}));
+
 const DEFAULT_LAYOUTS: Record<'home' | 'category', MiniappLayout> = {
-  home: { page: 'home', blocks: ['carousel', 'announcements', 'search', 'categories', 'featured-agents', 'featured-workflows', 'quick-links'].map((type, index) => ({ id: `${type}-${index}`, type: type as MiniappLayout['blocks'][number]['type'], visible: true, spacing: 16, limit: 8 })) },
-  category: { page: 'category', blocks: ['search', 'categories', 'featured-agents', 'featured-workflows'].map((type, index) => ({ id: `${type}-${index}`, type: type as MiniappLayout['blocks'][number]['type'], visible: true, spacing: 16, limit: 12 })) },
+  home: { page: 'home', blocks: defaultBlocks(['carousel', 'announcements', 'search', 'categories', 'featured-agents', 'featured-workflows']) },
+  category: { page: 'category', blocks: defaultBlocks(['search', 'categories', 'featured-agents', 'featured-workflows']) },
 };
 
 export async function getMiniappLayout(page: 'home' | 'category', force = false): Promise<MiniappLayout> {
