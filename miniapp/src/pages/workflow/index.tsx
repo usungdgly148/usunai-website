@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
 import Taro, { useRouter } from '@tarojs/taro';
 import { Button, Image, Input, ScrollView, Text, Textarea, Video, View } from '@tarojs/components';
 import { PageState } from '../../components/page-state';
@@ -9,7 +8,6 @@ import { fetchAllRecords, getHistoryDetail, getPublicContent, getRuntimeTask, sa
 import { fileToDataUrl, runtimeId } from '../../services/runtime';
 import { hideFeedbackToast, loadingToast, toast } from '../../utils/feedback';
 import { resolveEntityAvatar } from '../../utils/entity-visual';
-import { subscribeKeyboardOffset } from '../../utils/keyboard';
 import type { ContentItem, FormField, FormFieldOption, RuntimeTask } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
 
@@ -143,27 +141,6 @@ function normalizeOption(option: string | FormFieldOption): FormFieldOption {
   return { label: option.label || option.value || '', value: option.value || option.label || '' };
 }
 
-/* ==================== 临时诊断（P59 定位「键盘闪退」，定位完整体删除）====================
- * 背景：P57（把原生控件 className 静态化）与 P58（把滚动延后 400ms）两轮修复在真机上都没生效，
- * 说明两轮都在猜。这一轮改成「先抓现场」：把 focus / blur / 键盘高度 / 组件挂载卸载全部画到页面上，
- * 真机截图即可判断「到底是谁让它失焦」，不再靠推断。
- * ============================================================================== */
-/** 诊断日志出口（模块级，这样 DiagProbe 的依赖可以保持只有 label） */
-const diagSink: { current: (line: string) => void } = { current: () => {} };
-
-/**
- * 挂载 / 卸载探针：用来证实或证伪「聚焦后 textarea 被销毁重建 → focus 丢失 → 键盘收起」。
- * 若聚焦后日志里出现 `UNMOUNT`/`MOUNT`，就说明节点真被重建了（第一嫌疑成立）。
- */
-function DiagProbe({ label, children }: { label: string; children: ReactNode }) {
-  useEffect(() => {
-    diagSink.current(`MOUNT ${label}`);
-    return () => { diagSink.current(`UNMOUNT ${label}`); };
-  }, [label]);
-  return <>{children}</>;
-}
-/* ================================================================================== */
-
 function WorkflowPage() {
   const { params } = useRouter();
   const [workflow, setWorkflow] = useState<ContentItem>();
@@ -179,9 +156,7 @@ function WorkflowPage() {
   /** false = 历史记录视图，true = 配置参数视图（对齐网页版手机端的单视图切换） */
   const [configView, setConfigView] = useState(true);
   const [infoOpen, setInfoOpen] = useState(false);
-  /** 软键盘需要页面额外让位的高度（px，0 = 不用让位）；Android 已压缩 webview 时为 0 */
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-  /** 正在编辑（输入框聚焦）或已展开选择弹层的字段键：驱动聚焦态样式 + 键盘避让的滚动目标 */
+  /** 正在编辑（输入框聚焦）或已展开选择弹层的字段键：驱动聚焦态描边 + 滚动避让的目标 */
   const [editingKey, setEditingKey] = useState('');
   const [historyList, setHistoryList] = useState<HistoryRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -200,28 +175,6 @@ function WorkflowPage() {
   const fields = useMemo(() => (workflow?.formFields || []).filter((field) => field.enabled !== false), [workflow]);
   /** 工作流头像：有真头像用图片，没有则退化成图标字形色块（与智能体页头一致） */
   const workflowAvatar = resolveEntityAvatar(workflow, 'workflow');
-
-  /* ===== 临时诊断（P59，定位完删除）：日志只存 ref、不 setState，避免诊断本身引起重渲染 ===== */
-  const diagRef = useRef<string[]>([]);
-  const renderRef = useRef(0);
-  const diag = (line: string) => {
-    const now = new Date();
-    const pad = (value: number, size: number) => String(value).padStart(size, '0');
-    const stamp = `${pad(now.getMinutes(), 2)}:${pad(now.getSeconds(), 2)}.${pad(now.getMilliseconds(), 3)}`;
-    diagRef.current.push(`${stamp} ${line}`);
-    if (diagRef.current.length > 8) diagRef.current.shift();
-  };
-  diagSink.current = diag;
-  /**
-   * 【P59 临时诊断】把两个可疑项做成手机上可当场切换的开关。
-   * 真机已经确认：两个都关 = 键盘稳定、能连续打字；两个都开 = 闪退。
-   * 于是只需在真机上一项一项打开，就能定死到底是「改滚动容器高度」还是「让滚动容器滚动」打断的聚焦，
-   * 而不用再猜、也不用一轮只改一个变量地来回烧真机测试。
-   */
-  const [trialNarrow, setTrialNarrow] = useState(false);
-  const [trialScroll, setTrialScroll] = useState(false);
-  const [scrollTarget, setScrollTarget] = useState('');
-  /* ================================================================================== */
 
   const initValues = (item: ContentItem) => {
     const next: Record<string, unknown> = {};
@@ -248,29 +201,29 @@ function WorkflowPage() {
   useEffect(() => () => { audioRef.current?.destroy(); }, []);
 
   /**
-   * 【P59 临时诊断】键盘高度**只记录、不做任何布局**。
+   * 键盘避让：把编辑中的字段滚到表单区顶部（对齐需求「编辑/选择组件必须落在键盘上方」）。
    *
-   * 前两轮的失败教训：P56/P57 改的是「原生控件自身的 class」，P58 改的是「滚动的时机」——
-   * 两次都在同一个聚焦瞬间同时动了好几处布局，谁也说不清是哪一处打断了聚焦。
-   * 这一轮先把页面收窄与自动滚动**全部摘掉**，只留下观测：
-   * 于是这个基线里「聚焦瞬间」除了一个编辑态类名之外，不再有任何布局变更。
-   * 键盘高度照样记录，用来确认键盘确实弹起了、以及弹起后多久又被收掉。
+   * ⚠️ **这里只能滚动，绝对不能顺带改页面 / 滚动容器的高度。**
+   * 2026-09-11 真机 A/B 定论（微信 iOS，同一页面上逐个开关验证）：
+   *   - 打开「页面收窄」`height:calc(100vh - kb);min-height:0`（连带 `flex:1` 的 ScrollView 高度被改小）
+   *     → 键盘立刻被收掉，完全打不了字；
+   *   - 只下发下面这个滚动、一点高度都不改 → 键盘完全稳定，字段照样被滚到键盘上方。
+   *
+   * 原因：本页输入框在 ScrollView **内部**，聚焦期间动这个容器的高度就会打断原生输入框。
+   * 对话页的输入框在 scroll-view 外面，所以那边用「收窄」一直没事——两边不能互相套用。
+   *
+   * 为什么延时：聚焦那一帧键盘刚开始上推动画，此时让滚动容器滚动同样会抢布局，
+   * 所以推迟到动画完全停稳之后（300ms 动画 + 余量）。只依赖 `editingIndex`、不依赖键盘回调——
+   * 键盘一直开着直接切到另一个字段时 `onKeyboardHeightChange` 不会再触发，靠键盘事件驱动会漏掉。
    */
-  useEffect(() => subscribeKeyboardOffset((offset) => { diag(`KB ${offset}`); setKeyboardHeight(offset); }), []);
-
+  const [scrollTarget, setScrollTarget] = useState('');
   /** 正在编辑的字段下标（-1 = 没在编辑）；字段锚点见上面的 `fieldAnchorId` */
   const editingIndex = editingKey ? fields.findIndex((field, index) => fieldKey(field, index) === editingKey) : -1;
-  /**
-   * 【P59 临时诊断】候选①：自动滚动（`scroll-into-view`，400ms 延时版）。
-   * 只有开关打开时才真正下发滚动；关闭时只记一行 `WOULD-SCROLL` 便于对照。
-   */
   useEffect(() => {
     if (editingIndex < 0) { setScrollTarget(''); return; }
-    const target = fieldAnchorId(editingIndex);
-    if (!trialScroll) { setScrollTarget(''); return; }
-    const timer = setTimeout(() => { setScrollTarget(target); diag(`SCROLL ${target}`); }, 400);
+    const timer = setTimeout(() => setScrollTarget(fieldAnchorId(editingIndex)), 400);
     return () => clearTimeout(timer);
-  }, [editingIndex, trialScroll]);
+  }, [editingIndex]);
 
   const refreshTask = async (taskId: string, workflowId: string) => {
     try {
@@ -693,17 +646,10 @@ function WorkflowPage() {
      * （表现为「键盘闪一下就没了」）。对话页的聚焦描边挂在父级 `.composer-shell` 上，同理。
      */
     const editing = editingKey === key;
-    /* 【P59 临时诊断】字段标签 + 三个事件打点 */
-    const fieldTag = `${key}#${index}`;
-    const startEdit = () => { diag(`FOCUS ${fieldTag}`); setEditingKey(key); };
-    const endEdit = () => { diag(`BLUR ${fieldTag}`); setEditingKey((current) => (current === key ? '' : current)); };
-    const changeValue = (next: unknown) => {
-      diag(`INPUT ${fieldTag} len=${String(next ?? '').length}`);
-      setValues((current) => ({ ...current, [key]: next }));
-    };
+    const startEdit = () => setEditingKey(key);
+    const endEdit = () => setEditingKey((current) => (current === key ? '' : current));
 
-    /* 【P59 临时诊断】整个字段包一层挂载探针：聚焦后若出现 UNMOUNT/MOUNT，即证明节点被重建 */
-    return <DiagProbe label={fieldTag} key={key}><View className={`runtime-field${editing ? ' runtime-field-editing' : ''}`} id={fieldAnchorId(index)}>
+    return <View className={`runtime-field${editing ? ' runtime-field-editing' : ''}`} key={key} id={fieldAnchorId(index)}>
       <Text className='form-label'>{fieldLabel(field, index)}{field.required ? ' *' : ''}</Text>
       {isFileField(field) ? <>
         {/* 官方 attachments：pending/error 时自带 t-loading 与失败文案，逐张可见上传状态 */}
@@ -758,16 +704,16 @@ function WorkflowPage() {
                 {String(value ?? field.placeholder ?? '请选择')}
               </View>
                 : (style === 'number' || /number|integer/.test(rawType)) ? <View className='runtime-input-shell'>
-                  <Input className='form-input' type='number' value={String(value ?? '')} placeholder={field.placeholder || '请输入数字'} cursorSpacing={24} onFocus={startEdit} onBlur={endEdit} onInput={(event) => changeValue(event.detail.value)} />
+                  <Input className='form-input' type='number' value={String(value ?? '')} placeholder={field.placeholder || '请输入数字'} cursorSpacing={24} onFocus={startEdit} onBlur={endEdit} onInput={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />
                 </View>
                   : /textarea|multiline/.test(`${style} ${rawType}`) ? <View className='runtime-input-shell'>
-                    <Textarea className='runtime-textarea' value={String(value || '')} placeholder={field.placeholder || '请输入'} cursorSpacing={24} onFocus={startEdit} onBlur={endEdit} onInput={(event) => changeValue(event.detail.value)} />
+                    <Textarea className='runtime-textarea' value={String(value || '')} placeholder={field.placeholder || '请输入'} cursorSpacing={24} onFocus={startEdit} onBlur={endEdit} onInput={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />
                   </View>
                     : <View className='runtime-input-shell'>
-                      <Input className='form-input' value={String(value ?? '')} placeholder={field.placeholder || '请输入'} cursorSpacing={24} onFocus={startEdit} onBlur={endEdit} onInput={(event) => changeValue(event.detail.value)} />
+                      <Input className='form-input' value={String(value ?? '')} placeholder={field.placeholder || '请输入'} cursorSpacing={24} onFocus={startEdit} onBlur={endEdit} onInput={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />
                     </View>}
       {!!hintText && <Text className='field-hint'>{hintText}</Text>}
-    </View></DiagProbe>;
+    </View>;
   };
 
   /** 记录时间行：相对时间（+ 可选消耗点数），对齐网页版 RunItem 的 meta 行 */
@@ -908,21 +854,13 @@ function WorkflowPage() {
 
   const { pageStyle } = useThemePage();
   /**
-   * 【P59 临时诊断】候选②：页面收窄（`height:calc(100vh - kb);min-height:0`）。
-   * 它会让整个 flex 列收缩 → 滚动容器高度被改小 → 而输入框就在滚动容器内部，会跟着被重新布局。
-   * 只有开关打开时才生效。
+   * ⚠️ **不要在这里按键盘高度收窄页面**（`height:calc(100vh - kb);min-height:0`）。
+   * 2026-09-11 真机 A/B 已定论：加它就是「点输入框键盘闪一下就消失」的唯一原因
+   * ——`.runtime-page` 是 flex 列，收窄会让 `flex:1` 的 ScrollView 高度一起被改小，
+   * 而本页输入框就在这个 ScrollView 内部，聚焦期间容器高度一变，原生输入框就被打断。
+   * 具体说明见上面 `scrollTarget` effect（避让只靠滚动，不碰高度）。
    */
-  const keyboardStyle = trialNarrow && keyboardHeight ? `height:calc(100vh - ${keyboardHeight}px);min-height:0` : '';
-  const rootStyle = [pageStyle, keyboardStyle].filter(Boolean).join(';');
-  renderRef.current += 1;
-  return <View className={`runtime-page${keyboardStyle ? ' runtime-page-kb' : ''}`} style={rootStyle}>
-    {/* 【P59 临时诊断】真机截图这块即可看清 focus/blur/键盘/挂载的先后顺序，定位完整体删除 */}
-    <View className='diag-panel'>
-      <Text className='diag-line'>render#{renderRef.current} kb={keyboardHeight} edit={editingKey || '-'} 收窄={trialNarrow ? 'ON' : 'off'} 滚动={trialScroll ? 'ON' : 'off'}</Text>
-      <Text className={`diag-line ${trialNarrow ? 'diag-on' : ''}`} onClick={() => { setTrialNarrow((value) => !value); diag(`SET 收窄=${trialNarrow ? 'off' : 'ON'}`); }}>① 点这里切换【页面收窄】：{trialNarrow ? '开' : '关'}</Text>
-      <Text className={`diag-line ${trialScroll ? 'diag-on' : ''}`} onClick={() => { setTrialScroll((value) => !value); diag(`SET 滚动=${trialScroll ? 'off' : 'ON'}`); }}>② 点这里切换【自动滚动】：{trialScroll ? '开' : '关'}</Text>
-      {diagRef.current.map((line, index) => <Text className='diag-line' key={`diag-${index}`}>{line}</Text>)}
-    </View>
+  return <View className='runtime-page' style={pageStyle}>
     <PageState loading={loading} error={error && !workflow ? error : ''} empty={!loading && !error && !workflow} />
     {workflow && <>
       <View className='runtime-header header-row'>
@@ -946,8 +884,9 @@ function WorkflowPage() {
         </View>
       </View>
 
-      {/* 【P59 临时诊断】由「自动滚动」开关决定是否真正下发 scrollIntoView */}
-      {configView ? <ScrollView className='workflow-scroll' scrollY scrollIntoView={trialScroll ? scrollTarget : ''}>
+      {/* scrollIntoView 由上面的延时 effect 驱动（键盘停稳后才滚）：只滚、不改高度，
+          这是真机验证过的安全避让方式；不加 scrollWithAnimation，聚焦瞬间的动画滚动会抢布局 */}
+      {configView ? <ScrollView className='workflow-scroll' scrollY scrollIntoView={scrollTarget}>
         <View className='card'>
           <View className='config-card-head'>
             <Text className='card-title'>配置参数</Text>

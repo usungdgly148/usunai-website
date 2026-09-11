@@ -100,10 +100,6 @@ button::after { border: 0; }
 .form-label { display: block; margin: 24px 0 10px; font-weight: 600; }
 .form-input { width: 100%; height: 82px; padding: 0 22px; border: 1px solid var(--mini-line-strong); border-radius: 16px; background: var(--mini-surface); }
 .runtime-page { display: flex; min-height: 100vh; padding: 24px; flex-direction: column; background: var(--mini-page); }
-/* 【P59 临时诊断面板】定位完整体删除（连同 pages/workflow 里的 diag 代码） */
-.diag-panel { flex-shrink: 0; margin-bottom: 16px; padding: 14px 18px; border-radius: 14px; background: rgba(0, 0, 0, .88); }
-.diag-line { display: block; color: #7cfc00; font-size: 24px; line-height: 1.4; word-break: break-all; }
-.diag-on { color: #ffd24d; text-decoration: underline; }
 .runtime-header { flex-shrink: 0; padding: 8px 4px 18px; }
 .chat-scroll, .workflow-scroll { flex: 1; min-height: 0; }
 /* 消息行：左「自绘智能体头像」+ 右「官方 t-chat-message」 */
@@ -631,8 +627,12 @@ button::after { border: 0; }
 /* 键盘弹起：页面高度已由内联样式收窄到键盘上方（`.runtime-page` 的 min-height:100vh 会压过
    height，故内联里一并 min-height:0），底部安全区留白改回常规值，否则提示行会悬在键盘上方一大截 */
 .chat-page.chat-page-kb { min-height: 0; padding-bottom: 10px; }
-/* 工作流配置页同一套键盘让位：高度已由内联样式收窄，这里只把底部安全区留白改回常规值 */
-.runtime-page.runtime-page-kb { min-height: 0; padding-bottom: 10px; }
+/* ⚠️ 工作流配置页**禁止**再按键盘高度收窄页面。原 `.runtime-page.runtime-page-kb{min-height:0;padding-bottom:10px}`
+   已随收窄逻辑一起删除。2026-09-11 真机 A/B 定论：`.runtime-page` 是 flex 列，收窄会让 `flex:1` 的
+   ScrollView 高度被改小，而工作流页的输入框就在这个 ScrollView 内部 —— 聚焦期间容器高度一变，
+   微信就把刚弹起的键盘收掉（表现为「点输入框键盘闪一下就消失、完全打不了字」）。
+   本页的键盘避让只靠 ScrollView 的 `scroll-into-view` 滚动实现（见 pages/workflow/index.tsx 的 scrollTarget effect）。
+   注：对话页 `.chat-page-kb` 的收窄**可以保留**——它的输入框在 scroll-view 外面，两者不能互相套用。 */
 
 /* 工作流内页补充：提示、开关/滑块/日期、文件预览、输入回显、音频、文档 */
 .field-hint { display: block; margin-top: 8px; color: var(--mini-subtle-2); font-size: 21px; }
