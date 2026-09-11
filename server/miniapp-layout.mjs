@@ -196,12 +196,22 @@ export function validateMiniappLayout(input, expectedPage = '') {
   if (!MINIAPP_LAYOUT_PAGES.has(page) || (expectedPage && page !== expectedPage)) throw new Error('页面标识无效');
   if (!Array.isArray(input.blocks) || input.blocks.length > MAX_BLOCKS) throw new Error(`区块数量必须在 0-${MAX_BLOCKS} 之间`);
   const ids = new Set();
-  const blocks = input.blocks.map((block, index) => {
-    if (!block || typeof block !== 'object' || !MINIAPP_LAYOUT_TYPES.has(block.type)) throw new Error(`第 ${index + 1} 个区块类型不在白名单中`);
+  const dropped = [];
+  const blocks = input.blocks.flatMap((block, index) => {
+    /*
+     * 未知区块类型 = 历史遗留（例如已下线的 quick-links），**只丢这一块**，保住其余配置的顺序与数值。
+     * ⚠️ 这里绝对不能 throw：线上已发布的布局里就躺着一个 quick-links，
+     *    throw 会让整份配置作废 —— 客户端回落到默认结构（首页顺序突变、多出一个区块），
+     *    后台更危险：draft 校验失败 → 静默换成默认结构 → 主人一按「保存草稿」就把真配置覆盖掉。
+     */
+    if (!block || typeof block !== 'object' || !MINIAPP_LAYOUT_TYPES.has(block.type)) {
+      if (block && typeof block === 'object' && block.type) dropped.push(String(block.type));
+      return [];
+    }
     const id = text(block.id, 80) || `${block.type}-${crypto.randomUUID().slice(0, 8)}`;
     if (!/^[a-zA-Z0-9_-]+$/.test(id) || ids.has(id)) throw new Error(`第 ${index + 1} 个区块 ID 无效或重复`);
     ids.add(id);
-    return {
+    return [{
       id,
       type: block.type,
       visible: block.visible !== false,
@@ -219,8 +229,11 @@ export function validateMiniappLayout(input, expectedPage = '') {
       showMore: block.showMore !== false,
       dataSource: ['recommended', 'all', 'current-category', ''].includes(block.dataSource) ? block.dataSource : '',
       limit: numberInRange(block.limit, defaultLimitFor(block.type), 1, 24),
-    };
+    }];
   });
+  // 整份配置的区块全被丢掉（类型全不认识）才回落到默认结构，避免页面白屏
+  if (!blocks.length && input.blocks.length) return defaultMiniappLayout(page);
+  if (dropped.length) console.warn(`[miniapp-layout] ${page} 丢弃 ${dropped.length} 个未知区块: ${dropped.join(', ')}`);
   return { page, blocks };
 }
 
