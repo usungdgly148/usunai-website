@@ -212,6 +212,15 @@ function WorkflowPage() {
     if (diagRef.current.length > 8) diagRef.current.shift();
   };
   diagSink.current = diag;
+  /**
+   * 【P59 临时诊断】把两个可疑项做成手机上可当场切换的开关。
+   * 真机已经确认：两个都关 = 键盘稳定、能连续打字；两个都开 = 闪退。
+   * 于是只需在真机上一项一项打开，就能定死到底是「改滚动容器高度」还是「让滚动容器滚动」打断的聚焦，
+   * 而不用再猜、也不用一轮只改一个变量地来回烧真机测试。
+   */
+  const [trialNarrow, setTrialNarrow] = useState(false);
+  const [trialScroll, setTrialScroll] = useState(false);
+  const [scrollTarget, setScrollTarget] = useState('');
   /* ================================================================================== */
 
   const initValues = (item: ContentItem) => {
@@ -252,16 +261,16 @@ function WorkflowPage() {
   /** 正在编辑的字段下标（-1 = 没在编辑）；字段锚点见上面的 `fieldAnchorId` */
   const editingIndex = editingKey ? fields.findIndex((field, index) => fieldKey(field, index) === editingKey) : -1;
   /**
-   * 【P59 临时诊断】原本这里会把字段滚到键盘上方（`scroll-into-view` + 400ms 延时），
-   * 现在只记录「本来会滚到哪里」、不真正下发滚动：
-   * 滚动容器一旦在聚焦期间被要求滚动，就会和键盘动画抢布局（P58 的结论），
-   * 而本轮要先取一个「完全不碰滚动容器」的干净基线。
+   * 【P59 临时诊断】候选①：自动滚动（`scroll-into-view`，400ms 延时版）。
+   * 只有开关打开时才真正下发滚动；关闭时只记一行 `WOULD-SCROLL` 便于对照。
    */
   useEffect(() => {
-    if (editingIndex < 0) return;
-    const timer = setTimeout(() => diag(`WOULD-SCROLL wf-field-${editingIndex}`), 400);
+    if (editingIndex < 0) { setScrollTarget(''); return; }
+    const target = fieldAnchorId(editingIndex);
+    if (!trialScroll) { setScrollTarget(''); return; }
+    const timer = setTimeout(() => { setScrollTarget(target); diag(`SCROLL ${target}`); }, 400);
     return () => clearTimeout(timer);
-  }, [editingIndex]);
+  }, [editingIndex, trialScroll]);
 
   const refreshTask = async (taskId: string, workflowId: string) => {
     try {
@@ -899,16 +908,19 @@ function WorkflowPage() {
 
   const { pageStyle } = useThemePage();
   /**
-   * 【P59 临时诊断】页面收窄已摘掉。`height:calc(100vh - kb);min-height:0` 会让整个 flex 列收缩，
-   * 而工作流页的输入框**在 ScrollView 内部** —— 滚动容器高度会在键盘弹起时被改小，
-   * 这正是「聚焦瞬间改布局」的最后一处（对话页没这个问题，因为它的输入框在 scroll-view 外面）。
-   * 本轮先取一个「聚焦期间除类名外零布局变更」的干净基线，验证通过后再重新设计避让方式。
+   * 【P59 临时诊断】候选②：页面收窄（`height:calc(100vh - kb);min-height:0`）。
+   * 它会让整个 flex 列收缩 → 滚动容器高度被改小 → 而输入框就在滚动容器内部，会跟着被重新布局。
+   * 只有开关打开时才生效。
    */
+  const keyboardStyle = trialNarrow && keyboardHeight ? `height:calc(100vh - ${keyboardHeight}px);min-height:0` : '';
+  const rootStyle = [pageStyle, keyboardStyle].filter(Boolean).join(';');
   renderRef.current += 1;
-  return <View className='runtime-page' style={pageStyle}>
+  return <View className={`runtime-page${keyboardStyle ? ' runtime-page-kb' : ''}`} style={rootStyle}>
     {/* 【P59 临时诊断】真机截图这块即可看清 focus/blur/键盘/挂载的先后顺序，定位完整体删除 */}
     <View className='diag-panel'>
-      <Text className='diag-line'>render#{renderRef.current} kb={keyboardHeight} edit={editingKey || '-'}</Text>
+      <Text className='diag-line'>render#{renderRef.current} kb={keyboardHeight} edit={editingKey || '-'} 收窄={trialNarrow ? 'ON' : 'off'} 滚动={trialScroll ? 'ON' : 'off'}</Text>
+      <Text className={`diag-line ${trialNarrow ? 'diag-on' : ''}`} onClick={() => { setTrialNarrow((value) => !value); diag(`SET 收窄=${trialNarrow ? 'off' : 'ON'}`); }}>① 点这里切换【页面收窄】：{trialNarrow ? '开' : '关'}</Text>
+      <Text className={`diag-line ${trialScroll ? 'diag-on' : ''}`} onClick={() => { setTrialScroll((value) => !value); diag(`SET 滚动=${trialScroll ? 'off' : 'ON'}`); }}>② 点这里切换【自动滚动】：{trialScroll ? '开' : '关'}</Text>
       {diagRef.current.map((line, index) => <Text className='diag-line' key={`diag-${index}`}>{line}</Text>)}
     </View>
     <PageState loading={loading} error={error && !workflow ? error : ''} empty={!loading && !error && !workflow} />
@@ -934,8 +946,8 @@ function WorkflowPage() {
         </View>
       </View>
 
-      {/* 【P59 临时诊断】scrollIntoView 已摘掉（连 400ms 延时版也不下发），取「完全不碰滚动容器」的干净基线 */}
-      {configView ? <ScrollView className='workflow-scroll' scrollY>
+      {/* 【P59 临时诊断】由「自动滚动」开关决定是否真正下发 scrollIntoView */}
+      {configView ? <ScrollView className='workflow-scroll' scrollY scrollIntoView={trialScroll ? scrollTarget : ''}>
         <View className='card'>
           <View className='config-card-head'>
             <Text className='card-title'>配置参数</Text>
