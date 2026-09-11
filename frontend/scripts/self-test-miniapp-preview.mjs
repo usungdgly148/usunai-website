@@ -247,13 +247,26 @@ const allTree = LayoutBlocks({ layout: { page: 'home', blocks: [allSource] }, co
 const allCards = collect(allTree, (node) => String(node.props.className || '').includes('mini-content-card--compact'));
 check('数据源=全部 + limit=4 → 真渲出 4 张', allCards.length === 4, `实际 ${allCards.length}`);
 
-/* ------------------------------------------------- 5. 跳转文案（读出行） */
+/* ------------------------------------ 5. 画布元素默认值（最容易漏、且一漏就整页塌） */
+const adapterCss = fs.readFileSync(path.join(FRONTEND, 'src/miniapp-preview/adapter.css'), 'utf8');
+const ruleBlocks = adapterCss.match(/[^{}]+\{[^}]*\}/g) || [];
+const viewRules = ruleBlocks.filter((block) => /\.miniapp-stage view\s*[,{]/.test(block));
+check('adapter：<view> 在画布里是 display:block（浏览器自定义元素默认 inline，漏了整页排版会塌）',
+  viewRules.some((block) => /display:\s*block/.test(block)));
+check('adapter：<text> 保持 inline（与小程序一致）',
+  ruleBlocks.some((block) => /\.miniapp-stage text\s*\{/.test(block) && /display:\s*inline/.test(block)));
+check('adapter：<image>/<swiper> 是 display:block',
+  ruleBlocks.some((block) => /\.miniapp-stage image\s*,/.test(block) && /display:\s*block/.test(block)));
+check('adapter：底栏 fixed 改 absolute（画布要固定在「手机屏」内）',
+  ruleBlocks.some((block) => /\.miniapp-stage \.mini-tab-bar\s*\{/.test(block) && /position:\s*absolute/.test(block)));
+
+/* ------------------------------------------------- 6. 跳转文案（读出行） */
 check('读出行：有 id 且能查到名字', describeTarget('/pages/chat/index?id=ag1', content) === '打开AI 智能体对话「智能体1」', describeTarget('/pages/chat/index?id=ag1', content));
 check('读出行：id 已下架要明说', describeTarget('/pages/chat/index?id=ghost', content).includes('已找不到'), describeTarget('/pages/chat/index?id=ghost', content));
 check('读出行：带 title 的分类页', describeTarget('/pages/category/index?category=private&title=%E7%A7%81%E5%9F%9F%E8%BF%90%E8%90%A5', content).includes('私域运营'));
 check('读出行：外链 webview', describeTarget('/pages/webview/index?url=https%3A%2F%2Fusunai.top', content) === '打开小程序内置浏览器');
 
-/* ------------------------------------------------------------- 6. 收尾报告 */
+/* ------------------------------------------------------------- 7. 收尾报告 */
 fs.rmSync(`${TEMP}.entry.mjs`, { force: true });
 fs.rmSync(`${TEMP}.bundle.cjs`, { force: true });
 
