@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Taro, { useRouter } from '@tarojs/taro';
 import { Button, Image, ScrollView, Text, View } from '@tarojs/components';
 import { PageState } from '../../components/page-state';
-import { MarkdownContent } from '../../components/markdown-content';
 import { EntityInfoCard, SideDrawer, timeAgo } from '../../components/inner-ui';
 import { TdIcon } from '../../components/td-icon';
 import { fetchAllRecords, getHistoryDetail, getMe, getPublicContent, saveRuntimeAsset, saveRuntimeHistory, streamAgentChat, uploadRuntimeFile } from '../../services/api';
@@ -57,6 +56,31 @@ const SENDER_PRESETS = [{ name: 'send', type: 'icon' }];
 const SENDER_TEXTAREA_PROPS = { autosize: { minHeight: 44, maxHeight: 400 } };
 /** 官方 chat-actionbar 的动作项；iconMap 只认这 6 个固定动作，自定义动作（加入资产库）只能自绘并排拼条 */
 const MESSAGE_ACTIONS = ['copy', 'replay', 'good', 'bad'];
+
+/**
+ * 开场白交给官方 `t-chat-markdown` 的解析选项（直传 marked 的 Lexer）。
+ *
+ * ⚠️ `breaks` 必须显式写成 false —— 这条很反直觉，是查官方源码 + wxss 才定下来的：
+ *   · breaks:true  → marked 把软换行吐成独立的 `br` 节点，
+ *                    而 chat-markdown-node.wxml 渲染成 `<view class="…-br">`，
+ *                    官方 wxss 里**根本没有 `.t-chat-markdown-br` 这条规则**（0 高度）→ 换行凭空消失；
+ *   · breaks:false → 软换行以 `\n` 留在 text 节点里，微信 `<text>` 会正常折行。
+ * 运营在后台写开场白几乎都是「一行一句」，所以这里必须是 false。
+ *
+ * 模块级常量：引用恒定，避免每次渲染都给自定义组件塞新对象而触发无谓的 setData。
+ */
+const OPENING_MARKDOWN_OPTIONS = { gfm: true, breaks: false };
+
+/**
+ * 流式光标 ▋ 的开关（喂给官方 chat-message 的 `chatContentProps.markdown`）。
+ *
+ * 官方 chat-message 的 props 里**没有** markdownProps，它的 wxml 也没把 markdownProps
+ * 透传给 chat-content —— 所以官方文档上的 `streaming` 能力从消息链路根本走不到。
+ * `postbuild-chat-markdown-streaming.js` 在产物 wxml 里补了一行透传
+ * （`markdownProps="{{chatContentProps.markdown}}"`），这里才能生效。
+ * `completeSyntax` 在 tdesign-miniprogram@1.16.0 的实现里并未被读取，故不传。
+ */
+const STREAMING_MARKDOWN_PROPS = { markdown: { streaming: { hasNextChunk: true, tail: true } } };
 
 /** 消息时间戳：当天只显示 HH:mm，跨天补上 MM-DD */
 function formatStamp(iso?: string) {
@@ -295,6 +319,39 @@ export default function ChatPage() {
     if (name === 'bad') { toast('收到，会继续改进', 'info'); }
   };
 
+  /**
+   * 官方 chat-markdown 的节点点击。
+   *
+   * 官方规范里 markdown 内容**自己不开链接**：所有节点都绑了 `bindtap="nodeClick"`，
+   * 一路 triggerEvent 成 `click({ event, node })`，由业务决定行为（文档示例就是自己调
+   * wx.previewImage）。这条链路是 chat-markdown → chat-content → chat-message 逐层 re-emit，
+   * 以前我们没接 bind:click，所以 AI 回复里的链接/图片**点了完全没反应**。
+   *
+   * node.type 取值见 chat-markdown-node.wxml 的 wx:elif 分支；注意它**对每种节点都触发**
+   * （段落/标题/空行都会来一发），所以非 image/link 一律直接返回。
+   */
+  const handleMarkdownNode = (event: { detail?: { node?: { type?: string; href?: string; text?: string } } }) => {
+    const node = event?.detail?.node;
+    if (!node || typeof node !== 'object') return;
+    const href = typeof node.href === 'string' ? node.href.trim() : '';
+    if (!href) return;
+
+    if (node.type === 'image') {
+      // 官方文档示例口径：图片节点自己调预览
+      void Taro.previewImage({ urls: [href], current: href });
+      return;
+    }
+    if (node.type !== 'link') return;
+
+    // https 走站内 webview 页（与布局区块 / 内容卡的外链同一套跳转口径）
+    if (/^https:\/\//i.test(href)) {
+      void Taro.navigateTo({ url: `/pages/webview/index?url=${encodeURIComponent(href)}` });
+      return;
+    }
+    // 其余（http、相对路径、mailto: 等小程序打不开的形态）复制到剪贴板，至少不把链接弄丢
+    void Taro.setClipboardData({ data: href }).then(() => toast('已复制链接', 'success'));
+  };
+
   const startNewChat = async () => {
     if (sending) return;
     if (messages.length && !(await confirmDialog({
@@ -431,7 +488,16 @@ export default function ChatPage() {
       <ScrollView className='chat-scroll' scrollY scrollIntoView={messages.length ? `message-${messages[messages.length - 1].id}` : undefined}>
         {agent.opening && messages.length === 0 && (
           <ScrollView className='chat-opening-scroll' scrollY>
-            <View className='chat-bubble assistant-bubble chat-opening-bubble'><MarkdownContent value={agent.opening} selectable /></View>
+            {/* 开场白与助手消息**同一套渲染**（官方 t-chat-markdown）：
+                不再自绘气泡 —— 官方 variant='base' 的 assistant 消息本身就是「透明底 + 零内边距」，
+                这里沿用同一排布（头像 + 无气泡正文），否则会出现「一条有气泡一条没有」。
+                外层 ScrollView 保留：长开场白不能把输入框顶出屏幕。 */}
+            <View className='chat-row chat-row-assistant chat-opening-row'>
+              <View className='message-avatar chat-opening-avatar'>{renderAvatar('message')}</View>
+              <View className='chat-row-body'>
+                <t-chat-markdown content={agent.opening} options={OPENING_MARKDOWN_OPTIONS} />
+              </View>
+            </View>
           </ScrollView>
         )}
         {!!suggestions.length && messages.length === 0 && !sending && <View className='suggestion-row'>
@@ -458,6 +524,12 @@ export default function ChatPage() {
                   avatar={message.role === 'user' ? userAvatar : undefined}
                   name={message.role === 'user' ? (userName || '我') : agent.name}
                   datetime={formatStamp(message.createdAt)}
+                  /* 流式光标：官方 chat-message 默认不透传这个属性，
+                     由 postbuild-chat-markdown-streaming.js 在产物里补了一行 markdownProps 透传。
+                     只在真正流式的最后一条上给，否则历史消息尾巴上也会挂光标。 */
+                  chatContentProps={streaming ? STREAMING_MARKDOWN_PROPS : undefined}
+                  /* 官方 markdown 节点点击（图片预览 / 链接跳转），以前这条链路是断的 */
+                  onClick={handleMarkdownNode}
                 />
                 {/* 官方 chat-actionbar（复制/重新生成/点赞/点踩）+ 自绘「加入资产库」
                     注：Taro 出于性能考虑不会给 View 生成 slot 属性（其源码注释原文是

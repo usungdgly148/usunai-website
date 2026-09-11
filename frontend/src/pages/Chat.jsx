@@ -8,6 +8,10 @@ import { HistoryPanel, InfoCard, Drawer, SubHeader, RequireLoginModal, Toast, ge
 import { fetchEstimate, estimateTokens, BILLING } from '../billing.js';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+// 软换行变成 <br>。react-markdown 默认 breaks=false（段落内的单个 \n 被折成空格，一行到底），
+// 而小程序真机里 <text> 对 \n 就是**真的换行** —— 不装这个插件，同一份开场白在网页上会挤成一段。
+// 注意：它只作用于段落/标题等行内上下文，代码块不受影响。
+import remarkBreaks from 'remark-breaks';
 import { extractResultMedia, classifyAsset, resolveAssetCategory, ASSET_TYPE_NAMES, SOURCE_TYPE_NAMES } from '../assetUtils.js';
 import { copyText } from '../clipboard.js';
 import { compressImage } from '../imageCompress.js';
@@ -34,35 +38,53 @@ function AutoResizeTextarea({ value, onChange, placeholder, className, onKeyDown
   );
 }
 
-// 开场白区 Markdown 组件：支持标题/粗体/表格/列表/引用/代码，风格贴合欢迎区
+/**
+ * 开场白区 Markdown 组件。
+ *
+ * ⚠️ 这份映射必须与下方的 `assistantMarkdownComponents` **保持同一组标签**。
+ * 同一份 markdown 在这个页面会出现在两个位置（开场白 / AI 回复），两套映射一旦漂移，
+ * 就会出现「同一个语法在这里渲染得好、在那边裸露或点不动」的分裂 —— 而且分开看都「能用」，
+ * 极难发现。改任意一套时请两套一起改；`scripts/check-web-opening-markdown.mjs`
+ * 会断言两边标签集合一致，不一致直接报错。
+ */
 const welcomeMarkdownComponents = {
   h1: ({ children }) => <h1 className="text-xl font-bold text-slate-900 mb-3 pb-2 border-b border-slate-200/70">{children}</h1>,
   h2: ({ children }) => <h2 className="text-lg font-bold text-slate-900 mb-2.5 mt-4">{children}</h2>,
   h3: ({ children }) => <h3 className="text-base font-bold text-slate-900 mb-2 mt-3">{children}</h3>,
   h4: ({ children }) => <h4 className="text-sm font-bold text-slate-800 mb-1.5 mt-2.5">{children}</h4>,
-  p: ({ children }) => <p className="text-slate-600 leading-relaxed mb-2.5">{children}</p>,
+  p: ({ children }) => <p className="text-slate-600 mb-2.5">{children}</p>,
   strong: ({ children }) => <strong className="font-bold text-slate-900">{children}</strong>,
   em: ({ children }) => <em className="italic text-slate-700">{children}</em>,
   hr: () => <hr className="my-3 border-slate-200/70" />,
   ul: ({ children }) => <ul className="list-disc pl-5 mb-2.5 text-slate-600">{children}</ul>,
   ol: ({ children }) => <ol className="list-decimal pl-5 mb-2.5 text-slate-600">{children}</ol>,
-  li: ({ children }) => <li className="mb-1 leading-relaxed">{children}</li>,
+  // ⚠️ 行高只在 index.css 的 `.md-render` 上设一处（对齐官方 1.75）。
+  // 这里**不要**加 `leading-*`：Tailwind 的 leading 类是直接设在元素上的，
+  // 会盖掉从 `.md-render` 继承下来的行高 —— 曾经 p/li 都写了 `leading-relaxed`(1.625)，
+  // 导致「改了 .md-render 的 line-height 却完全不生效」。
+  li: ({ children }) => <li className="mb-1">{children}</li>,
   blockquote: ({ children }) => <blockquote className="border-l-4 border-blue-300 pl-4 py-1 my-2.5 italic text-slate-500 bg-slate-100/50 rounded-r-lg">{children}</blockquote>,
   a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-700">{children}</a>,
+  img: ({ src, alt }) => <img src={src} alt={alt || ''} loading="lazy" decoding="async" className="max-w-full h-auto rounded-xl" />,
   table: ({ children }) => <div className="overflow-x-auto mb-3"><table className="w-full border-collapse text-sm">{children}</table></div>,
   thead: ({ children }) => <thead className="bg-slate-100/70">{children}</thead>,
   th: ({ children }) => <th className="border border-slate-200 px-3 py-2 text-left font-semibold text-slate-900">{children}</th>,
   td: ({ children }) => <td className="border border-slate-200 px-3 py-2 text-slate-700">{children}</td>,
   code: ({ className, children, ...props }) => <code className={className} {...props}>{children}</code>,
-  pre: ({ children }) => <pre className="p-3 rounded-xl bg-slate-900 text-slate-100 text-[13px] font-mono overflow-x-auto mb-3">{children}</pre>,
+  // ⚠️ 代码块的外观（背景 / 内边距 / 圆角 / 横向滚动）统一由 index.css 的 `.md-render pre` 提供。
+  // 那个选择器的特异性是 (0,1,1)，比这里加的任何 Tailwind 类 (0,1,0) 都高 ——
+  // 所以在这里写 bg-* / p-* / rounded-* 是死代码；更危险的是写 color 类：
+  // 背景会被压掉而文字色照样生效，直接变成「浅灰底 + 近白字」（曾经线上就是这个状态，文字看不见）。
+  // 要改代码块外观，改 index.css 那一段。这里只保留真正生效的两条。
+  pre: ({ children }) => <pre className="font-mono text-[13px]">{children}</pre>,
 };
 
 function Welcome({ agent, onPick }) {
   const suggestions = getSuggestions(agent);
   return (
     <div className="animate-fade-up pt-2">
-      <div className="md-render text-sm text-slate-600 leading-relaxed mb-5">
-        <Markdown remarkPlugins={[remarkGfm]} components={welcomeMarkdownComponents}>
+      <div className="md-render text-sm text-slate-600 mb-5">
+        <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={welcomeMarkdownComponents}>
           {agent.opening || agent.instructions || '你好，我是你的智能助手。'}
         </Markdown>
       </div>
@@ -143,24 +165,36 @@ function UserBubble({ content, images, files }) {
   );
 }
 
+/**
+ * AI 回复区 Markdown 组件。
+ * ⚠️ 标签集合必须与上方 `welcomeMarkdownComponents` 一致（原因见那里的注释）。
+ */
 const assistantMarkdownComponents = {
   h1: ({ children }) => <h1 className="text-2xl font-bold text-slate-900 mb-4 pb-2 border-b border-slate-200/70">{children}</h1>,
   h2: ({ children }) => <h2 className="text-xl font-bold text-slate-900 mb-3 mt-5">{children}</h2>,
   h3: ({ children }) => <h3 className="text-lg font-bold text-slate-900 mb-2 mt-4">{children}</h3>,
-  p: ({ children }) => <p className="text-slate-700 leading-relaxed mb-3">{children}</p>,
+  h4: ({ children }) => <h4 className="text-base font-bold text-slate-800 mb-2 mt-3">{children}</h4>,
+  p: ({ children }) => <p className="text-slate-700 mb-3">{children}</p>,
   strong: ({ children }) => <strong className="font-bold text-slate-900">{children}</strong>,
+  em: ({ children }) => <em className="italic text-slate-700">{children}</em>,
   hr: () => <hr className="my-4 border-slate-200/70" />,
   ul: ({ children }) => <ul className="list-disc pl-5 mb-3 text-slate-700">{children}</ul>,
   ol: ({ children }) => <ol className="list-decimal pl-5 mb-3 text-slate-700">{children}</ol>,
-  li: ({ children }) => <li className="mb-1 leading-relaxed">{children}</li>,
+  // ⚠️ 行高只在 index.css 的 `.md-render` 上设一处（对齐官方 1.75）。
+  // 这里**不要**加 `leading-*`：Tailwind 的 leading 类是直接设在元素上的，
+  // 会盖掉从 `.md-render` 继承下来的行高 —— 曾经 p/li 都写了 `leading-relaxed`(1.625)，
+  // 导致「改了 .md-render 的 line-height 却完全不生效」。
+  li: ({ children }) => <li className="mb-1">{children}</li>,
   blockquote: ({ children }) => <blockquote className="border-l-4 border-blue-300 pl-4 py-1 my-3 italic text-slate-600 bg-slate-100/50 rounded-r-lg">{children}</blockquote>,
-  table: ({ children }) => <table className="w-full border-collapse mb-4 text-sm">{children}</table>,
+  a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-700">{children}</a>,
+  img: ({ src, alt }) => <img src={src} alt={alt || ''} loading="lazy" decoding="async" className="max-w-full h-auto rounded-xl" />,
+  table: ({ children }) => <div className="overflow-x-auto mb-4"><table className="w-full border-collapse text-sm">{children}</table></div>,
   thead: ({ children }) => <thead className="bg-slate-100/70">{children}</thead>,
   th: ({ children }) => <th className="border border-slate-200 px-3 py-2 text-left font-semibold text-slate-900">{children}</th>,
   td: ({ children }) => <td className="border border-slate-200 px-3 py-2 text-slate-700">{children}</td>,
   code: ({ className, children, ...props }) => <code className={className} {...props}>{children}</code>,
-  pre: ({ children }) => <pre className="p-3 rounded-xl bg-slate-900 text-slate-100 text-sm font-mono overflow-x-auto mb-3">{children}</pre>,
-  img: ({ src, alt }) => <img src={src} alt={alt || ''} loading="lazy" decoding="async" className="max-w-full h-auto rounded-xl" />,
+  // 代码块外观同样归 index.css 的 `.md-render pre` 管，理由见 `welcomeMarkdownComponents` 的注释
+  pre: ({ children }) => <pre className="font-mono text-sm">{children}</pre>,
 };
 
 function AssistantBubble({ content, reasoning, agent, onCopy, onRegenerate, onAsset, usage }) {
@@ -174,8 +208,8 @@ function AssistantBubble({ content, reasoning, agent, onCopy, onRegenerate, onAs
           <summary className="cursor-pointer font-medium text-violet-700">查看思考过程</summary>
           <div className="mt-2 whitespace-pre-wrap leading-relaxed">{reasoning}</div>
         </details>}
-        <div className="md-render rounded-2xl px-5 py-4 text-[15px] leading-relaxed bg-transparent border border-slate-200/40 text-slate-800">
-          <Markdown remarkPlugins={[remarkGfm]} components={assistantMarkdownComponents}>{content}</Markdown>
+        <div className="md-render rounded-2xl px-5 py-4 text-[15px] bg-transparent border border-slate-200/40 text-slate-800">
+          <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={assistantMarkdownComponents}>{content}</Markdown>
         </div>
         <div className="flex items-center gap-1 mt-2 ml-1">
           <button onClick={onCopy} title="复制内容" className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition">

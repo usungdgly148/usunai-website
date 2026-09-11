@@ -5,6 +5,8 @@ import { useState, useEffect } from 'react';
 import { ArrowLeft, Save, Eye, EyeOff, Plus, X, Trash2, KeyRound, MessageSquareText, Sparkles, Tag as TagIcon, Hash, ArrowUpDown, ListChecks } from 'lucide-react';
 import { Card, AdminIconPicker, TutorialSettings, renderIcon, PrimaryButton, SecondaryButton } from '../adminUI.jsx';
 import CozeBotPicker, { MOCK_PROVIDER_ID } from '../components/CozeBotPicker.jsx';
+import OpeningEditor from '../components/OpeningEditor.jsx';
+import { OfficialMarkdown } from '../officialMarkdown.jsx';
 import { listKnowledgeBases } from '../knowledgeApi.js';
 import { ASSET_CATEGORY_OPTIONS } from '../assetUtils.js';
 
@@ -683,8 +685,8 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
 
           <Card className="p-5 space-y-4">
             <h2 className="font-semibold text-slate-900 flex items-center gap-2"><MessageSquareText size={16} className="text-blue-600" /> 对话配置</h2>
-            <Field label="开场白（Opening）" hint="用户进入聊天页看到的引导文字">
-              <textarea value={form.opening} onChange={e => set({ opening: e.target.value })} rows={5} placeholder="请输入开场引导语..." className={`${inputCls} resize-none`} />
+            <Field label="开场白（Opening）" hint="用户进入聊天页看到的引导文字，支持 Markdown —— 小程序端用官方 chat-markdown 渲染，标题/列表/代码/表格/图片都能显示">
+              <OpeningEditor value={form.opening} onChange={(next) => set({ opening: next })} />
             </Field>
             <Field label={`建议问题（最多 5 个，对应开场小字按钮）`}>
               <div className="space-y-2">
@@ -723,9 +725,11 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
             )}
           </div>
           <div>
-            <div className="text-xs text-slate-400 mb-1.5">开场白效果</div>
-            <div className="rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600 whitespace-pre-wrap max-h-40 overflow-auto">
-              {form.opening || '（未设置开场白）'}
+            <div className="text-xs text-slate-400 mb-1.5">开场白效果（官方 chat-markdown 渲染）</div>
+            <div className="rounded-xl border border-slate-200 bg-white p-3 max-h-40 overflow-auto">
+              {form.opening
+                ? <OfficialMarkdown value={form.opening} />
+                : <p className="text-xs text-slate-300">（未设置开场白）</p>}
             </div>
           </div>
           {form.suggestedQuestions.length > 0 && (

@@ -40,15 +40,26 @@
   font-size: inherit;
 }
 /* Markdown 富文本排版：标题 / 列表 / 图片 / 链接 / 引用 / 段落，支持图文混排 */
-.md-render { line-height: 1.7; word-break: break-word; }
+.md-render { line-height: 1.75; word-break: break-word; }
 .md-render > *:first-child { margin-top: 0; }
 .md-render > *:last-child { margin-bottom: 0; }
-.md-render h1, .md-render h2, .md-render h3, .md-render h4 {
+/* ⚠️ 标题字号必须**六个级别逐个写全**，且用 em —— 与 TDesign 官方 chat-markdown 同一套比例
+   （官方：h1 2em / h2 1.75em / h3 1.5em / h4 1.25em / h5 1em / h6 .75em，相对容器字号）。
+   用 em 而不是写死 px，是为了让**同一份开场白**在网页（正文 14–15px）与小程序（正文 16px）
+   按同一比例缩放 —— 两端观感一致靠的是比例一致，不是 px 相等。
+   另外 Tailwind 的 preflight 会执行 `h1..h6 { font-size: inherit; font-weight: inherit }`，
+   把浏览器默认的标题字号/字重**清空**。所以漏掉哪一级，那一级就与正文段落完全同款
+   （曾经漏了 h4/h5/h6 → `##### 五级标题` 看起来就是普通正文）。新增/修改时六级别漏。 */
+.md-render h1, .md-render h2, .md-render h3,
+.md-render h4, .md-render h5, .md-render h6 {
   font-weight: 700; color: rgb(15 23 42); margin: 0.8em 0 0.4em; line-height: 1.3;
 }
-.md-render h1 { font-size: 1.15rem; }
-.md-render h2 { font-size: 1.05rem; }
-.md-render h3 { font-size: 0.98rem; }
+.md-render h1 { font-size: 2em; }
+.md-render h2 { font-size: 1.75em; }
+.md-render h3 { font-size: 1.5em; }
+.md-render h4 { font-size: 1.25em; }
+.md-render h5 { font-size: 1em; }
+.md-render h6 { font-size: 0.75em; }
 .md-render p { margin: 0.5em 0; }
 .md-render ul, .md-render ol { margin: 0.5em 0; padding-left: 1.4em; }
 .md-render ul { list-style: disc; }
@@ -64,8 +75,14 @@
   background: rgb(241 245 249); padding: 0.1em 0.4em; border-radius: 0.3rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8125rem; color: rgb(30 41 59);
 }
+/* ⚠️ 这里是**块级代码块**的唯一权威样式（背景 / 内边距 / 圆角 / 横向滚动都在这一段）。
+   它的特异性是 (0,1,1)，高于任何单类 Tailwind 工具类 (0,1,0) —— 所以**别**再在组件映射里
+   用 `bg-slate-900 text-slate-100` 这类类去改代码块外观：背景会被这里的 background 压掉，
+   而 color 没有竞争者依然生效，结果就是「浅灰底 + 近白字」——代码文字直接看不见
+   （实测对比度 1.00，线上曾经就是这个状态）。要改外观，改这一段。
+   `color` 在这里显式声明，就是为了不让继承链再把文字色带跑。 */
 .md-render pre {
-  background: rgb(241 245 249); padding: 0.75em 0.9em; border-radius: 0.5rem; overflow-x: auto; margin: 0.6em 0;
+  background: rgb(241 245 249); color: rgb(30 41 59); padding: 0.75em 0.9em; border-radius: 0.5rem; overflow-x: auto; margin: 0.6em 0;
 }
 .md-render table { border-collapse: collapse; width: 100%; margin: 0.6em 0; font-size: 0.85rem; }
 .md-render th, .md-render td { border: 1px solid rgb(226 232 240); padding: 0.35em 0.6em; text-align: left; }

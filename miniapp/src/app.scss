@@ -126,9 +126,29 @@ button::after { border: 0; }
 /* 骨架屏加载容器 */
 .state-skeleton { padding: 40px 10px; }
 .state-skeleton .t-skeleton { width: 100%; }
-.chat-bubble { max-width: 86%; padding: 20px 22px; border-radius: 20px; line-height: 1.55; white-space: pre-wrap; }
-.assistant-bubble { background: var(--mini-surface); border: 1px solid var(--mini-line); }
-.chat-opening-bubble { max-width: 100%; box-sizing: border-box; white-space: normal; }
+/* ===== 开场白（官方 t-chat-markdown）=====
+   开场白不再自绘气泡：官方 variant='base' 的 assistant 消息本身就是「透明底 + 零内边距」，
+   开场白与助手消息走同一套排布（左侧头像 + 无气泡正文），避免「一条有气泡一条没有」。
+   旧的 .chat-bubble / .assistant-bubble / .chat-opening-bubble 已随本次迁移删除
+   （自研 MarkdownContent 仍服务公告页 / 法律条款页，只是不再用于对话页）。 */
+.chat-opening-row { margin: 14px 0 4px; }
+.chat-opening-avatar { padding-top: 0; }
+/* 官方 chat-content 的正文规格 = --td-font-body-large（32rpx/48rpx）。
+   开场白渲染的是裸 t-chat-markdown，不经过 chat-content，必须自己补齐**字号**，
+   才能和助手消息逐字对齐（此前自研渲染器是 27px，比消息小一号）。
+
+   ⚠️ 只补 font-size，**不要补 line-height**。
+   官方 `chat-content` 虽然写了 `font: 32rpx/48rpx`，但行高是设在 chat-content 元素上的；
+   而 chat-markdown 自己有一条 `.t-chat-markdown { line-height: 1.75 }`，直接作用于
+   md 元素本身 → 助手消息正文的实际行高是 **1.75 × 32rpx = 56rpx**，不是 48rpx。
+   这里再写 line-height: 1.5（=48rpx）会把官方值压掉，开场白就比助手消息更紧 ——
+   正是「明明同一份 markdown，开场白和回复行距不一样」的成因。让它继承官方的 1.75。 */
+.chat-opening-row .t-chat-markdown { font-size: 32px; }
+/* 官方 chat-markdown 的图片分支是 <view class="t-chat-markdown-image"><image mode="widthFix">，
+   但官方 wxss 里**没有 .t-chat-markdown-image 这条规则**，而微信 <image> 默认尺寸是 320×240px
+   —— mode=widthFix 只让高度自适应，宽度仍锁在 320px，图片既不满宽比例也怪。
+   chat-markdown.json 的 styleIsolation 是 shared（node 是 apply-shared），app.wxss 的选择器落得进去。 */
+.t-chat-markdown-image image { display: block; width: 100%; margin: 12px 0; border-radius: 12px; }
 .mini-markdown { color: var(--mini-text-2); font-size: 27px; line-height: 1.72; white-space: normal; }
 .mini-markdown-block { display: block; margin-bottom: 14px; }
 .mini-markdown-block:last-child { margin-bottom: 0; }
@@ -736,8 +756,10 @@ button::after { border: 0; }
 .chat-page { height: 100vh; overflow: hidden; padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
 .header-actions { display: flex; flex-shrink: 0; gap: 12px; margin-top: 8px; }
 .header-icon-btn { padding: 6px 16px; border: 1px solid var(--mini-line-strong); border-radius: 14px; background: var(--mini-surface); color: var(--mini-text-2); font-size: 32px; line-height: 1.2; }
-/* 开场白最高可视高度 = 17 行：`.mini-markdown` 行高 27px × 1.72 ≈ 46.4px，
-   气泡上下内边距共 40px → (840 - 40) / 46.4 ≈ 17.2 行（原 700px 约 14 行，本次 +3 行） */
+/* 开场白最高可视高度 = 15 行：正文走官方规格 —— font-size 32px × 官方行高 1.75 = 56px，
+   且不再有气泡内边距 → 840 / 56 = 15 行。超过就内部滚动，
+   避免长开场白把底部输入框顶出屏幕。
+   （改过开场白的字号/行高就要重算这里：行数 = 840 / (font-size × line-height)。） */
 .chat-opening-scroll { max-height: 840px; }
 .drawer-panel { display: flex; width: 85vw; max-width: 640px; height: 100%; flex-direction: column; background: var(--mini-surface); box-shadow: -8px 0 30px rgba(17, 42, 88, .15); }
 .drawer-header { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; height: 96px; padding: 0 28px; border-bottom: 1px solid var(--mini-line-faint); }

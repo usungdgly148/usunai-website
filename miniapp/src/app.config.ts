@@ -21,6 +21,8 @@ export default {
   ],
   usingComponents: {
     't-chat-message': 'tdesign-miniprogram/chat-message/chat-message',
+    // 开场白直接用官方 markdown 组件渲染（与消息链路的 chat-content → chat-markdown 同一套实现）
+    't-chat-markdown': 'tdesign-miniprogram/chat-markdown/chat-markdown',
     't-chat-sender': 'tdesign-miniprogram/chat-sender/chat-sender',
     't-chat-actionbar': 'tdesign-miniprogram/chat-actionbar/chat-actionbar',
     // 工作流附件字段：用官方 attachments 直接拿到「status 驱动的加载态」（pending → t-loading）

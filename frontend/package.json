@@ -4,12 +4,14 @@
   "version": "0.2.0",
   "type": "module",
   "scripts": {
-    "gen:miniapp-preview": "node scripts/gen-miniapp-preview-style.mjs",
+    "gen:miniapp-preview": "node scripts/gen-miniapp-preview-style.mjs && node scripts/gen-official-markdown-style.mjs",
     "predev": "npm run gen:miniapp-preview",
     "dev": "vite",
     "prebuild": "npm run gen:miniapp-preview",
     "build": "vite build",
     "preview": "vite preview --host",
+    "preview:opening-editor": "node scripts/preview-opening-editor.mjs",
+    "check:web-markdown": "node scripts/check-web-opening-markdown.mjs && node scripts/check-web-markdown-render.mjs",
     "server": "node server/index.mjs"
   },
   "dependencies": {
@@ -20,6 +22,7 @@
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
     "react-router-dom": "7.18.2",
+    "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {

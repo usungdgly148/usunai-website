@@ -8,3 +8,5 @@ dist/
 tmp/
 .preview/
 .selftest-miniapp-preview.*
+.selftest-chat-markdown.*
+.preview-opening-editor.*

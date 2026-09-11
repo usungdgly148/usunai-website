@@ -1,0 +1,58 @@
+/* ============================================================================
+ * 自动生成，请勿手改 —— 源文件是 tdesign-miniprogram 的 chat-markdown wxss。
+ * 生成器：frontend/scripts/gen-official-markdown-style.mjs
+ * 作用：后台「开场白编辑器」的预览与真机跑同一套官方样式，避免运营照着错的预览排版。
+ * 本次：49 条规则（作用域 .official-md，rpx ÷2）
+ * ========================================================================== */
+.official-md { color: var(--td-text-color-primary,var(--td-font-gray-1,rgba(0,0,0,.9))); word-wrap: break-word; word-break: break-word; line-height: 1.75; }
+.official-md .t-chat-markdown-inline { display: inline; }
+.official-md .t-chat-markdown-p { -webkit-margin-before: var(--td-spacer-1,12px); margin-block-start: var(--td-spacer-1,12px); -webkit-margin-after: var(--td-spacer-1,12px); margin-block-end: var(--td-spacer-1,12px); }
+.official-md .t-chat-markdown-p:first-child { -webkit-margin-before: 0; margin-block-start: 0; }
+.official-md .t-chat-markdown-p:last-child { -webkit-margin-after: 0; margin-block-end: 0; }
+.official-md .t-chat-markdown-blockquote { padding: 0 .75em; color: var(--td-text-color-primary,var(--td-font-gray-1,rgba(0,0,0,.9))); background-color: var(--td-bg-color-secondarycontainer,var(--td-gray-color-1,#f3f3f3)); border-left: 2px solid var(--td-component-border,var(--td-gray-color-4,#dcdcdc)); margin-bottom: var(--td-spacer-1,12px); }
+.official-md .t-chat-markdown-h { font-size: 1em; margin: var(--td-spacer-1,12px) 0; font-weight: 700; }
+.official-md .t-chat-markdown-h1 { font-size: 2em; }
+.official-md .t-chat-markdown-h2 { font-size: 1.75em; }
+.official-md .t-chat-markdown-h3 { font-size: 1.5em; }
+.official-md .t-chat-markdown-h4 { font-size: 1.25em; }
+.official-md .t-chat-markdown-h5 { font-size: 1em; }
+.official-md .t-chat-markdown-h6 { font-size: .75em; }
+.official-md .t-chat-markdown-em { font-style: italic; }
+.official-md .t-chat-markdown-strong { font-weight: 700; }
+.official-md .t-chat-markdown-hr { height: 3px; padding: 0; margin: var(--td-spacer-1,12px) 0; background-color: var(--td-component-border,var(--td-gray-color-4,#dcdcdc)); border: 0; }
+.official-md .t-chat-markdown-list { display: block; padding: 0; margin: 0 0 var(--td-spacer,8px) 1.5em; }
+.official-md .t-chat-markdown-list__decimal { list-style-type: decimal; }
+.official-md .t-chat-markdown-list-item { display: list-item; margin-bottom: var(--td-spacer-1,12px); }
+.official-md .t-chat-markdown-link { color: var(--td-brand-color,var(--td-primary-color-7,#0052d9)); }
+.official-md .t-chat-markdown-del { text-decoration: line-through; }
+.official-md .t-chat-markdown-codespan { padding: 2px 4px; margin: 0 2px; border-radius: 4px; font-size: .8em; overflow-x: auto; background-color: var(--td-bg-color-page,var(--td-gray-color-1,#f3f3f3)); border: 0.5px solid var(--td-component-border,var(--td-gray-color-4,#dcdcdc)); }
+.official-md .t-chat-markdown .t-chat-markdown-table { width: 100%; overflow-y: hidden; overflow-x: auto; }
+.official-md .t-chat-markdown .t-chat-markdown-table__container { display: table; min-width: 100%; max-width: max-content; border-collapse: collapse; white-space: nowrap; }
+.official-md .t-chat-markdown .t-chat-markdown-table__container-thead { display: table-header-group; }
+.official-md .t-chat-markdown .t-chat-markdown-table__container-tbody { display: table-row-group; }
+.official-md .t-chat-markdown .t-chat-markdown-table__container-tr { display: table-row; }
+.official-md .t-chat-markdown .t-chat-markdown-table__container-th { display: table-cell; vertical-align: middle; background-color: var(--td-bg-color-component,var(--td-gray-color-3,#e7e7e7)); font-weight: 700; padding: 2.5px 5px; border: 0.5px solid var(--td-component-border,var(--td-gray-color-4,#dcdcdc)); }
+.official-md .t-chat-markdown .t-chat-markdown-table__container-td { display: table-cell; vertical-align: middle; padding: 2.5px 5px; border: 0.5px solid var(--td-component-border,var(--td-gray-color-4,#dcdcdc)); }
+.official-md .t-chat-markdown-tail { display: inline-block; color: #d9d9d9; margin-left: 4px; transform: scaleX(.25); transform-origin: left center; }
+.official-md .t-chat-markdown-table { width: 100%; overflow-y: hidden; overflow-x: auto; border: 0.5px solid var(--td-component-border,var(--td-gray-color-4,#dcdcdc)); }
+.official-md .t-chat-markdown-table__container { display: table; min-width: 100%; max-width: max-content; border-collapse: collapse; white-space: nowrap; }
+.official-md .t-chat-markdown-table__thead { display: table-header-group; }
+.official-md .t-chat-markdown-table__tbody { display: table-row-group; }
+.official-md .t-chat-markdown-table__tr { display: table-row; border-bottom: 0.5px solid var(--td-component-border,var(--td-gray-color-4,#dcdcdc)); }
+.official-md .t-chat-markdown-table__tr:last-child { border-bottom: none; }
+.official-md .t-chat-markdown-table__tr:nth-child(2n+1) { background-color: var(--td-bg-color-container,var(--td-font-white-1,#fff)); }
+.official-md .t-chat-markdown-table__tr:nth-child(2n) { background-color: var(--td-bg-color-secondarycontainer,var(--td-gray-color-1,#f3f3f3)); }
+.official-md .t-chat-markdown-table__th { display: table-cell; vertical-align: middle; background-color: var(--td-bg-color-secondarycontainer,var(--td-gray-color-1,#f3f3f3)); padding: 2.5px 5px; color: var(--td-text-color-secondary,var(--td-font-gray-2,rgba(0,0,0,.6))); border-right: 0.5px solid var(--td-component-border,var(--td-gray-color-4,#dcdcdc)); }
+.official-md .t-chat-markdown-table__th:last-child { border-right: none; }
+.official-md .t-chat-markdown-table__td { display: table-cell; vertical-align: middle; padding: 2.5px 5px; border-right: 0.5px solid var(--td-component-border,var(--td-gray-color-4,#dcdcdc)); }
+.official-md .t-chat-markdown-table__td:last-child { border-right: none; }
+.official-md .t-chat-markdown-code { margin: 8px 0; border-radius: 4px; background-color: #f6f8fa; border: 0.5px solid #e1e4e8; overflow: hidden; }
+.official-md .t-chat-markdown-code__header { padding: 4px 8px; background-color: #e1e4e8; border-bottom: 0.5px solid #d0d7de; }
+.official-md .t-chat-markdown-code__lang { font-size: 12px; color: #656d76; font-weight: 500; }
+.official-md .t-chat-markdown-code__content { padding: 8px; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; white-space: nowrap; height: auto; }
+.official-md .t-chat-markdown-code__text { font: var(--td-font-body-medium,14px / 22px var(--td-font-family,PingFang SC,Microsoft YaHei,Arial Regular)); font-family: 'SF Mono',Monaco,'Cascadia Code','Roboto Mono',Consolas,'Courier New',monospace; color: #24292f; white-space: pre; word-wrap: normal; word-break: normal; overflow-wrap: normal; display: inline; vertical-align: top; }
+.official-md .t-chat-markdown-code-light .t-chat-markdown-code-block { background-color: #fff; border-color: #d0d7de; }
+.official-md .t-chat-markdown-code-light .t-chat-markdown-code-header { background-color: #f6f8fa; border-bottom-color: #d0d7de; }
+/* ---- 补丁：官方 wxss 未覆盖、由小程序 app.scss 提供的规则（见生成器注释） ---- */
+.official-md { font-size: 16px; }
+.official-md .t-chat-markdown-image img { display: block; width: 100%; margin: 6px 0; border-radius: 6px; }
