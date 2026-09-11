@@ -47,3 +47,28 @@ export function readWindowHeight() {
     return 0;
   }
 }
+
+/**
+ * 键盘避让高度订阅：回调参数是「页面还要额外让位多少 px」。
+ *
+ * - iOS（键盘是浮层）：= 键盘高度，页面按它收窄即可。
+ * - Android 部分版本（键盘把 webview 压缩）：窗口高度已经少了键盘那一截 → 返回 0，避免重复让位。
+ *
+ * 对话页与工作流配置页共用同一套判定，避免两边各写一份、其中一边漏了 Android 处理。
+ */
+export function subscribeKeyboardOffset(handler: (offset: number) => void) {
+  /** 键盘弹起前的窗口高度基准（Android 压缩判定的参照） */
+  let baseWindowHeight = 0;
+  return subscribeKeyboardHeight((result) => {
+    const height = Math.max(0, Number(result?.height) || 0);
+    const windowHeight = readWindowHeight();
+    if (height <= 0) {
+      if (windowHeight > 0) baseWindowHeight = windowHeight;
+      handler(0);
+      return;
+    }
+    if (!baseWindowHeight && windowHeight > 0) baseWindowHeight = windowHeight;
+    const resizedByKeyboard = baseWindowHeight > 0 && windowHeight > 0 && baseWindowHeight - windowHeight > 60;
+    handler(resizedByKeyboard ? 0 : height);
+  });
+}

@@ -8,10 +8,17 @@ import { fetchAllRecords, getHistoryDetail, getPublicContent, getRuntimeTask, sa
 import { fileToDataUrl, runtimeId } from '../../services/runtime';
 import { hideFeedbackToast, loadingToast, toast } from '../../utils/feedback';
 import { resolveEntityAvatar } from '../../utils/entity-visual';
+import { subscribeKeyboardOffset } from '../../utils/keyboard';
 import type { ContentItem, FormField, FormFieldOption, RuntimeTask } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
 
 const ACTIVE_TASK_PREFIX = 'usunai_miniapp_active_workflow_';
+/**
+ * 字段锚点 id（`scroll-into-view` 的目标）。
+ * 用下标而不是 fieldKey：微信要求该 id 不能以数字开头，而配置里的字段 key 是后端自由文本
+ * （可能是 `1`、`2name` 这类），下标锚点既唯一又不会踩这个限制。
+ */
+const fieldAnchorId = (index: number) => `wf-field-${index}`;
 type HistoryRecord = Record<string, unknown> & { id?: string; title?: string; createdAt?: string; workflowId?: string; taskId?: string };
 /** 历史详情（点开某条记录才拉取；列表接口已剥离 inputs/result 等大字段） */
 type HistoryDetail = Record<string, unknown> & { id?: string; taskId?: string; result?: unknown; inputs?: Record<string, unknown>; createdAt?: string; cost?: number };
@@ -150,6 +157,10 @@ function WorkflowPage() {
   /** false = 历史记录视图，true = 配置参数视图（对齐网页版手机端的单视图切换） */
   const [configView, setConfigView] = useState(true);
   const [infoOpen, setInfoOpen] = useState(false);
+  /** 软键盘需要页面额外让位的高度（px，0 = 不用让位）；Android 已压缩 webview 时为 0 */
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  /** 正在编辑（输入框聚焦）或已展开选择弹层的字段键：驱动聚焦态样式 + 键盘避让的滚动目标 */
+  const [editingKey, setEditingKey] = useState('');
   const [historyList, setHistoryList] = useState<HistoryRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   /** 历史详情缓存 / 拉取中标记（key = 记录 id） */
@@ -191,6 +202,21 @@ function WorkflowPage() {
   }, [params.id]);
 
   useEffect(() => () => { audioRef.current?.destroy(); }, []);
+
+  /**
+   * 键盘避让：配置页是 `height:100vh` 的 flex 布局（表单在 ScrollView 里），软键盘弹起时
+   * 既不会让位、ScrollView 也不会自动把编辑中的字段滚进可视区 → 底部字段会被键盘盖住。
+   * 这里订阅键盘让位高度把页面收窄到键盘上沿，再由下面的 `scrollTarget` 把编辑中的字段滚到顶部。
+   */
+  useEffect(() => subscribeKeyboardOffset(setKeyboardHeight), []);
+
+  /**
+   * 编辑中的字段要滚进可视区（对齐需求「编辑/选择组件必须落在键盘上方」）。
+   * 用 `scroll-into-view` 而不是 `scroll-top`：后者要先量元素位置、还要自己维护当前偏移。
+   * 锚点带下标，所以 `editingKey` 为空时给空串，同一个字段二次聚焦也能重新触发滚动。
+   */
+  const editingIndex = editingKey ? fields.findIndex((field, index) => fieldKey(field, index) === editingKey) : -1;
+  const scrollTarget = editingIndex >= 0 ? fieldAnchorId(editingIndex) : '';
 
   const refreshTask = async (taskId: string, workflowId: string) => {
     try {
@@ -562,13 +588,13 @@ function WorkflowPage() {
       const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
       return !!text ? <View key={index}>
         <Text className='media-section-title'>{name}</Text>
-        <Text className='result-text code-text'>{text}</Text>
+        <Text className='result-text code-text' selectable>{text}</Text>
       </View> : null;
     }
     const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
     return !!text ? <View key={index}>
       <Text className='media-section-title'>{name}</Text>
-      <Text className='result-text'>{text}</Text>
+      <Text className='result-text' selectable>{text}</Text>
     </View> : null;
   };
 
@@ -584,13 +610,13 @@ function WorkflowPage() {
       const extra = Object.entries(data).filter(([entryKey]) => !known.has(entryKey));
       return <View>
         {outputFields.filter((field) => field.enabled !== false).map((field, index) => renderTaggedField(field, data[String(field.key || field.name)], index))}
-        {!!extra.length && <Text className='extra-json'>{JSON.stringify(Object.fromEntries(extra), null, 2)}</Text>}
+        {!!extra.length && <Text className='extra-json' selectable>{JSON.stringify(Object.fromEntries(extra), null, 2)}</Text>}
       </View>;
     }
     const found = extractResultMedia(value);
     const fallbackText = found.text || (result.kind === 'json' ? JSON.stringify(result.data, null, 2) : '');
     return <View>
-      {!!fallbackText && <Text className='result-text'>{fallbackText}</Text>}
+      {!!fallbackText && <Text className='result-text' selectable>{fallbackText}</Text>}
       {!!found.images.length && <View className='media-grid'>{found.images.map((url, mediaIndex) => <Image key={url} className='media-thumb' src={url} mode='aspectFill' onClick={() => setViewer({ urls: found.images, current: mediaIndex })} />)}</View>}
       {!!found.videos.length && <View className='media-grid'>{found.videos.map((url) => <Video key={url} className='media-thumb' src={url} controls />)}</View>}
       {!!found.audios.length && renderAudioRows(found.audios, '音频')}
@@ -606,8 +632,14 @@ function WorkflowPage() {
     const options = (advanced?.options || field.options || []).map(normalizeOption);
     const hintText = String(advanced?.hint || field.hint || '');
     const value = values[key];
+    /** 编辑态（输入框聚焦、或已展开日期/下拉弹层）：驱动聚焦态样式，同时作为键盘避让的滚动目标 */
+    const editing = editingKey === key;
+    const startEdit = () => setEditingKey(key);
+    const endEdit = () => setEditingKey((current) => (current === key ? '' : current));
+    /** 编辑态视觉反馈（蓝色描边 + 很淡光晕）；picker-value 展开弹层时同样高亮 */
+    const boxClass = (base: string) => `${base}${editing ? ' runtime-control-focus' : ''}`;
 
-    return <View className='runtime-field' key={key}>
+    return <View className='runtime-field' key={key} id={fieldAnchorId(index)}>
       <Text className='form-label'>{fieldLabel(field, index)}{field.required ? ' *' : ''}</Text>
       {isFileField(field) ? <>
         {/* 官方 attachments：pending/error 时自带 t-loading 与失败文案，逐张可见上传状态 */}
@@ -655,15 +687,15 @@ function WorkflowPage() {
               }}
             />
           </View>
-            : (advComponent === 'date' || style === 'date') ? <View className='form-input picker-value' onClick={() => setFieldPicker({ kind: 'date', key })}>
+            : (advComponent === 'date' || style === 'date') ? <View className={boxClass('form-input picker-value')} onClick={() => { startEdit(); setFieldPicker({ kind: 'date', key }); }}>
               {String(value || '请选择日期')}
             </View>
-              : options.length ? <View className='form-input picker-value' onClick={() => setFieldPicker({ kind: 'select', key })}>
+              : options.length ? <View className={boxClass('form-input picker-value')} onClick={() => { startEdit(); setFieldPicker({ kind: 'select', key }); }}>
                 {String(value ?? field.placeholder ?? '请选择')}
               </View>
-                : (style === 'number' || /number|integer/.test(rawType)) ? <Input className='form-input' type='number' value={String(value ?? '')} placeholder={field.placeholder || '请输入数字'} onInput={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />
-                  : /textarea|multiline/.test(`${style} ${rawType}`) ? <Textarea className='runtime-textarea' value={String(value || '')} placeholder={field.placeholder || '请输入'} onInput={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />
-                    : <Input className='form-input' value={String(value ?? '')} placeholder={field.placeholder || '请输入'} onInput={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />}
+                : (style === 'number' || /number|integer/.test(rawType)) ? <Input className={boxClass('form-input')} type='number' value={String(value ?? '')} placeholder={field.placeholder || '请输入数字'} cursorSpacing={24} onFocus={startEdit} onBlur={endEdit} onInput={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />
+                  : /textarea|multiline/.test(`${style} ${rawType}`) ? <Textarea className={boxClass('runtime-textarea')} value={String(value || '')} placeholder={field.placeholder || '请输入'} cursorSpacing={24} onFocus={startEdit} onBlur={endEdit} onInput={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />
+                    : <Input className={boxClass('form-input')} value={String(value ?? '')} placeholder={field.placeholder || '请输入'} cursorSpacing={24} onFocus={startEdit} onBlur={endEdit} onInput={(event) => setValues((current) => ({ ...current, [key]: event.detail.value }))} />}
       {!!hintText && <Text className='field-hint'>{hintText}</Text>}
     </View>;
   };
@@ -718,7 +750,7 @@ function WorkflowPage() {
               {failed ? '运行失败' : task.status === 'queued' ? '排队中' : '运行中…'}
             </Text>
           </View>
-          <Text className='run-running-hint'>{failed ? (task.error || '本次运行失败，请调整参数后重试') : 'AI 正在生成，请稍候…'}</Text>
+          <Text className='run-running-hint' selectable>{failed ? (task.error || '本次运行失败，请调整参数后重试') : 'AI 正在生成，请稍候…'}</Text>
         </View>
       </View>
     </View>;
@@ -774,7 +806,11 @@ function WorkflowPage() {
     </View>;
   };
 
-  const closeFieldPicker = () => setFieldPicker(null);
+  /** 关闭弹层：同时退出编辑态（撤掉聚焦态描边、清空键盘避让的滚动目标） */
+  const closeFieldPicker = () => {
+    setFieldPicker(null);
+    setEditingKey('');
+  };
 
   const activePickerField = fieldPicker
     ? fields.find((field, index) => fieldKey(field, index) === fieldPicker.key)
@@ -791,17 +827,24 @@ function WorkflowPage() {
   const confirmDatePicker = (event: { detail?: { value?: unknown } }) => {
     const picked = String(event.detail?.value ?? '');
     if (fieldPicker) setValues((current) => ({ ...current, [fieldPicker.key]: picked }));
-    setFieldPicker(null);
+    closeFieldPicker();
   };
 
   const confirmSelectPicker = (event: { detail?: { value?: unknown[] } }) => {
     const picked = Array.isArray(event.detail?.value) ? event.detail.value[0] : undefined;
     if (fieldPicker) setValues((current) => ({ ...current, [fieldPicker.key]: picked === undefined ? '' : picked }));
-    setFieldPicker(null);
+    closeFieldPicker();
   };
 
   const { pageStyle } = useThemePage();
-  return <View className='runtime-page' style={pageStyle}>
+  /**
+   * 键盘弹起时把页面收窄到键盘上沿：内联 px 不参与 rpx 转换，微信按逻辑像素处理，
+   * 正好等于键盘高度的单位（与对话页同一套做法）。`.runtime-page` 带 min-height:100vh，
+   * min-height 会压过 height，所以内联里必须一并归零，否则收窄失效。
+   */
+  const keyboardStyle = keyboardHeight ? `height:calc(100vh - ${keyboardHeight}px);min-height:0` : '';
+  const rootStyle = [pageStyle, keyboardStyle].filter(Boolean).join(';');
+  return <View className={`runtime-page${keyboardHeight ? ' runtime-page-kb' : ''}`} style={rootStyle}>
     <PageState loading={loading} error={error && !workflow ? error : ''} empty={!loading && !error && !workflow} />
     {workflow && <>
       <View className='runtime-header header-row'>
@@ -825,7 +868,7 @@ function WorkflowPage() {
         </View>
       </View>
 
-      {configView ? <ScrollView className='workflow-scroll' scrollY>
+      {configView ? <ScrollView className='workflow-scroll' scrollY scrollWithAnimation scrollIntoView={scrollTarget}>
         <View className='card'>
           <View className='config-card-head'>
             <Text className='card-title'>配置参数</Text>
@@ -833,7 +876,7 @@ function WorkflowPage() {
           </View>
           {fields.length ? fields.map(renderField) : <Text className='muted'>该工作流无需输入参数</Text>}
         </View>
-        {!!error && <Text className='runtime-error'>{error}</Text>}
+        {!!error && <Text className='runtime-error' selectable>{error}</Text>}
       </ScrollView> : <ScrollView className='workflow-scroll' scrollY>
         {historyLoading && !historyList.length ? <Text className='history-empty'>加载中…</Text>
           : !historyList.length && !task ? <View className='run-empty'>
@@ -845,7 +888,7 @@ function WorkflowPage() {
               {renderActiveCard()}
               {historyList.map(renderRunCard)}
             </>}
-        {!!error && <Text className='runtime-error'>{error}</Text>}
+        {!!error && <Text className='runtime-error' selectable>{error}</Text>}
       </ScrollView>}
       {configView && <Button className='primary-button runtime-submit' loading={task?.status === 'queued' || task?.status === 'running'} disabled={task?.status === 'queued' || task?.status === 'running'} onClick={submit}>开始运行</Button>}
 

@@ -9,7 +9,7 @@ import { fetchAllRecords, getHistoryDetail, getMe, getPublicContent, saveRuntime
 import { collectMediaUrls, fileToDataUrl, runtimeId } from '../../services/runtime';
 import { confirmDialog, hideFeedbackToast, loadingToast, toast } from '../../utils/feedback';
 import { resolveEntityAvatar, toAvatarUrl, toMiniappUrl } from '../../utils/entity-visual';
-import { subscribeKeyboardHeight, readWindowHeight } from '../../utils/keyboard';
+import { subscribeKeyboardOffset } from '../../utils/keyboard';
 import type { ContentItem } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
 
@@ -97,8 +97,6 @@ export default function ChatPage() {
   const [focused, setFocused] = useState(false);
   /** 软键盘高度（px）：键盘弹起时页面整体收窄，避免底部按钮/提示被遮挡 */
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  /** 键盘弹起前的窗口高度基准：识别 Android「键盘压缩 webview」的情形，避免重复让位 */
-  const baseWindowHeight = useRef(0);
   /** 用户头像/昵称（聊天气泡的 role=user 侧） */
   const [userName, setUserName] = useState('我');
   const [userAvatar, setUserAvatar] = useState('');
@@ -137,20 +135,9 @@ export default function ChatPage() {
    * 键盘遮挡：页面是 height:100vh + overflow:hidden 的 flex 布局，软键盘弹起时不会自动让位，
    * 底部的加号、发送按钮和提示行会被键盘盖住。这里监听键盘高度，把页面高度收窄到键盘上方。
    * 注意 `.runtime-page` 带 min-height:100vh，min-height 会压过 height，所以内联里必须一并归零。
+   * 让位高度由 `subscribeKeyboardOffset` 统一给出（内部已处理 Android「键盘压缩 webview」的重复让位）。
    */
-  useEffect(() => subscribeKeyboardHeight((result) => {
-    const height = Math.max(0, Number(result?.height) || 0);
-    const windowHeight = readWindowHeight();
-    if (height <= 0) {
-      if (windowHeight > 0) baseWindowHeight.current = windowHeight;
-      setKeyboardHeight(0);
-      return;
-    }
-    if (!baseWindowHeight.current && windowHeight > 0) baseWindowHeight.current = windowHeight;
-    // Android 部分版本是「键盘把 webview 压缩」而不是浮层覆盖 → 100vh 已不含键盘，再减就重复让位
-    const resizedByKeyboard = baseWindowHeight.current > 0 && windowHeight > 0 && baseWindowHeight.current - windowHeight > 60;
-    setKeyboardHeight(resizedByKeyboard ? 0 : height);
-  }), []);
+  useEffect(() => subscribeKeyboardOffset(setKeyboardHeight), []);
 
   /**
    * 加号上传：官方内置弹层只能单张取图，这里自建「拍摄 / 从相册选择」并支持一次多选。

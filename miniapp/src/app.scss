@@ -192,6 +192,13 @@ button::after { border: 0; }
 .runtime-error { display: block; margin: 12px 0; padding: 16px; border-radius: 12px; background: var(--mini-danger-soft); color: var(--mini-danger); font-size: 24px; }
 .runtime-field { margin-bottom: 20px; }
 .runtime-textarea { width: 100%; min-height: 180px; padding: 18px 22px; border: 1px solid var(--mini-line-strong); border-radius: 16px; background: var(--mini-surface); }
+/* 编辑态视觉反馈：蓝色描边 + 很淡的外发光（与对话页输入框同一套语言）。
+   覆盖多行文本框、单行输入框，以及展开了日期/下拉弹层的 picker-value。 */
+.form-input, .runtime-textarea { transition: border-color .2s ease, box-shadow .2s ease; }
+.form-input.runtime-control-focus, .runtime-textarea.runtime-control-focus {
+  border-color: var(--mini-primary);
+  box-shadow: 0 0 0 6rpx rgba(40, 100, 234, .10), 0 8rpx 26rpx rgba(40, 100, 234, .16);
+}
 .picker-value { display: flex; align-items: center; color: var(--mini-text-2); }
 .file-button { margin: 0; border: 1px dashed var(--mini-line-strong); border-radius: 16px; background: var(--mini-primary-pale); color: var(--mini-text-2); font-size: 26px; }
 .runtime-submit { flex-shrink: 0; }
@@ -611,6 +618,8 @@ button::after { border: 0; }
 /* 键盘弹起：页面高度已由内联样式收窄到键盘上方（`.runtime-page` 的 min-height:100vh 会压过
    height，故内联里一并 min-height:0），底部安全区留白改回常规值，否则提示行会悬在键盘上方一大截 */
 .chat-page.chat-page-kb { min-height: 0; padding-bottom: 10px; }
+/* 工作流配置页同一套键盘让位：高度已由内联样式收窄，这里只把底部安全区留白改回常规值 */
+.runtime-page.runtime-page-kb { min-height: 0; padding-bottom: 10px; }
 
 /* 工作流内页补充：提示、开关/滑块/日期、文件预览、输入回显、音频、文档 */
 .field-hint { display: block; margin-top: 8px; color: var(--mini-subtle-2); font-size: 21px; }
