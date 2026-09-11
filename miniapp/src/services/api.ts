@@ -200,7 +200,7 @@ const defaultBlocks = (types: MiniappLayoutBlockType[]) => types.map((type, inde
 }));
 
 const DEFAULT_LAYOUTS: Record<'home' | 'category', MiniappLayout> = {
-  home: { page: 'home', blocks: defaultBlocks(['carousel', 'announcements', 'search', 'categories', 'featured-agents', 'featured-workflows']) },
+  home: { page: 'home', blocks: defaultBlocks(['carousel', 'announcements', 'search', 'categories', 'featured-agents', 'tool-cards', 'featured-workflows']) },
   category: { page: 'category', blocks: defaultBlocks(['search', 'categories', 'featured-agents', 'featured-workflows']) },
 };
 

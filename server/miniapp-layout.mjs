@@ -13,8 +13,12 @@ export const MINIAPP_LAYOUT_TYPES = new Set([
   'categories',
   'featured-agents',
   'featured-workflows',
+  'tool-cards',
   'spacer',
 ]);
+
+/** 「实用AI工具」区块最多几张卡（卡片是运营手配的，不是自动取数，需要有个上限兜底） */
+export const MAX_TOOL_CARDS = 20;
 
 /**
  * 小程序内页白名单 —— 「点击链接」选「小程序页面」时只能从这里挑。
@@ -63,7 +67,8 @@ const LINK_KINDS = new Set(['agent', 'workflow', 'page', 'category', 'external',
 const TARGET_ID_PATTERN = /^[a-zA-Z0-9_-]{1,100}$/;
 
 const defaults = {
-  home: ['carousel', 'announcements', 'search', 'categories', 'featured-agents', 'featured-workflows'],
+  // 「实用AI工具」紧随「热门智能体」之后（运营放置口径：热门智能体下方）
+  home: ['carousel', 'announcements', 'search', 'categories', 'featured-agents', 'tool-cards', 'featured-workflows'],
   category: ['search', 'categories', 'featured-agents', 'featured-workflows'],
 };
 
@@ -188,6 +193,36 @@ function safeLinkMap(value, label, max = 60) {
   return result;
 }
 
+/**
+ * 「实用AI工具」卡片校验：一组运营手配的双列卡片（背景图 + 主标 + 副标 + 跳转）。
+ *
+ * 与 slides 同一套路，但**空字符串一律原样保留**（不能像图片那样把空值 filter 掉）——
+ * 「主标/副标留空＝不显示」是需求，所以在数据里必须有「空」这个状态。
+ *
+ * 只有「图、字、链接全没有」的卡才丢掉（纯占位，留着只会越积越多）。
+ * ⚠️ **只配了链接、还没配图文**的卡要留住：它是运营配了一半的成果，
+ *    在服务端丢掉＝运营保存后一刷新发现链接没了（静默数据丢失）。
+ *    这种卡由渲染器决定不显示（没图没字＝没有可点的东西），后台面板会明确提示
+ *    「共 N 张，其中 M 张不会显示」，所以不会变成「配了没反应」。
+ */
+function safeToolCards(value) {
+  if (value == null || value === '') return [];
+  if (!Array.isArray(value)) throw new Error('工具卡片格式无效');
+  if (value.length > MAX_TOOL_CARDS) throw new Error(`工具卡片最多支持 ${MAX_TOOL_CARDS} 张`);
+  return value.map((card, index) => {
+    if (!card || typeof card !== 'object' || Array.isArray(card)) throw new Error(`第 ${index + 1} 张工具卡片无效`);
+    const id = text(card.id, 80) || `tool-${crypto.randomUUID().slice(0, 8)}`;
+    if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error(`第 ${index + 1} 张工具卡片的 ID 无效`);
+    return {
+      id,
+      image: safeImage(card.image),
+      title: text(card.title, 20),
+      subtitle: text(card.subtitle, 30),
+      link: safeLink(card.link, `第 ${index + 1} 张工具卡片的跳转`),
+    };
+  }).filter((card) => card.image || card.title || card.subtitle || card.link);
+}
+
 export function defaultMiniappLayout(page) {
   const pageKey = MINIAPP_LAYOUT_PAGES.has(page) ? page : 'home';
   return {
@@ -206,6 +241,7 @@ export function defaultMiniappLayout(page) {
       categoryImages: {},
       categoryLinks: {},
       cardLinks: {},
+      toolCards: [],
       dataSource: type.startsWith('featured-') ? 'recommended' : '',
       limit: defaultLimitFor(type),
       searchPlaceholder: '',
@@ -251,6 +287,8 @@ export function validateMiniappLayout(input, expectedPage = '') {
       // 逐项跳转：分类导航每张分类卡 / 推荐区每张卡片（键＝分类标识 / 内容 id）
       categoryLinks: safeLinkMap(block.categoryLinks, '分类卡跳转', 30),
       cardLinks: safeLinkMap(block.cardLinks, '卡片跳转', 60),
+      // 「实用AI工具」：双列手配卡片（背景图 + 主标 + 副标 + 跳转），空文案是合法状态
+      toolCards: safeToolCards(block.toolCards),
       // 可配文案（B）：搜索框提示语 / 「更多」的文字 / 是否显示「更多」
       searchPlaceholder: text(block.searchPlaceholder, 40),
       moreText: text(block.moreText, 12),

@@ -111,6 +111,19 @@ const block = (type, patch = {}) => ({
   searchPlaceholder: '', moreText: '', showMore: true, ...patch,
 });
 
+const TOOL_CARDS = [
+  // ① 图 + 主标 + 副标 + 站内页链接
+  { id: 't1', image: '/api/blob/serve?key=t1', title: '文案生成', subtitle: '一句话出稿', link: { kind: 'page', path: '/pages/chat/index' } },
+  // ② 全空：运营没配完 → 点击/渲染都跳过，不占位（服务端保存时也会把这行丢掉）
+  { id: 't2', image: '', title: '', subtitle: '', link: '' },
+  // ③ 图 + 主标，副标留空 → 副标这一行不渲染；外链
+  { id: 't3', image: '/api/blob/serve?key=t3', title: '图像处理', subtitle: '', link: { kind: 'external', url: 'https://usunai.top' } },
+  // ④ 没背景图、只有文字 → 走 --plain 深色字；链接留空 → 点了不跳
+  { id: 't4', image: '', title: '只有文字', subtitle: '没有背景图', link: '' },
+  // ⑤ 只配了链接、没图没字 → 服务端会留住这条配置（不静默丢运营的输入），但真机上不渲染
+  { id: 't5', image: '', title: '', subtitle: '', link: { kind: 'page', path: '/pages/recharge/index' } },
+];
+
 const layout = {
   page: 'home',
   blocks: [
@@ -119,6 +132,8 @@ const layout = {
     block('search'),
     block('categories', { limit: 2, categoryLinks: { 'short-video': { kind: 'page', path: '/pages/recharge/index' } } }),
     block('featured-agents', { limit: 3, cardLinks: { ag2: { kind: 'workflow', id: 'wf3' } } }),
+    // 「实用AI工具」：真机上就放在热门智能体下方
+    block('tool-cards', { toolCards: TOOL_CARDS }),
     block('featured-workflows', { limit: 2 }),
   ],
 };
@@ -167,6 +182,20 @@ check('公告栏 = .mini-announce-bar + 铃铛 PNG 图标', has('mini-announce-b
 // 3.7 旧假画布的痕迹必须消失
 const oldArtifacts = ['aspect-[4/3]', 'line-clamp-2', 'text-shadow:0_1px_6px', 'max-h-[640px]', 'bg-[#f4f8ff]'];
 check('旧假画布痕迹已清除', oldArtifacts.every((cls) => !has(cls)), `残留 ${oldArtifacts.filter(has).join(', ')}`);
+// 3.8 「实用AI工具」：双列 21:9 手配卡片
+//     ⚠️ 计数不能用 count('class="mini-tool-card')：它会连带命中 mini-tool-card-image 这些前缀相同的子元素
+const toolCardCount = count('class="mini-tool-card"') + count('class="mini-tool-card mini-tool-card--plain"');
+check('工具卡数量＝3（5 张里只有 3 张有图或字；全空的、只配链接的都跳过）', toolCardCount === 3, `实际 ${toolCardCount}`);
+const titlePositions = ['>文案生成<', '>图像处理<', '>只有文字<'].map((needle) => html.indexOf(needle));
+check('卡片顺序＝后台数组顺序', titlePositions[0] < titlePositions[1] && titlePositions[1] < titlePositions[2], titlePositions.join(','));
+check('没配背景图的卡走 --plain（否则白字直接消失）', count('mini-tool-card--plain') === 1, `实际 ${count('mini-tool-card--plain')}`);
+check('背景图 .mini-tool-card-image 只渲有图的 2 张', count('mini-tool-card-image') === 2, `实际 ${count('mini-tool-card-image')}`);
+check('压暗遮罩 .mini-tool-card-scrim 只跟有图的卡走', count('mini-tool-card-scrim') === 2, `实际 ${count('mini-tool-card-scrim')}`);
+check('工具区容器 .mini-tool-grid 在', has('mini-tool-grid'));
+check('主标 3 行全渲染（文案生成 / 图像处理 / 只有文字）', ['>文案生成<', '>图像处理<', '>只有文字<'].every(has));
+check('副标只渲 2 行 —— 留空的那张不显示', count('mini-tool-card-subtitle') === 2, `实际 ${count('mini-tool-card-subtitle')}`);
+check('留空文案不留空标签残骸', !html.includes('mini-tool-card-subtitle"></text>'));
+check('区块标题默认「实用AI工具」渲染出来了', has('>实用AI工具<'));
 
 /* ------------------------------------------- 4. 行为一致性（真点，看跳转） */
 const calls = [];
@@ -247,6 +276,29 @@ const allTree = LayoutBlocks({ layout: { page: 'home', blocks: [allSource] }, co
 const allCards = collect(allTree, (node) => String(node.props.className || '').includes('mini-content-card--compact'));
 check('数据源=全部 + limit=4 → 真渲出 4 张', allCards.length === 4, `实际 ${allCards.length}`);
 
+// 4.7 「实用AI工具」：真按每一张卡，看跳到哪 / 没配链接的是不是真的不跳
+const toolBlock = layout.blocks.find((item) => item.type === 'tool-cards');
+const toolTree = LayoutBlocks({ layout: { page: 'home', blocks: [toolBlock] }, content });
+// 卡壳自身的 class 正好是 'mini-tool-card' 或 'mini-tool-card mini-tool-card--plain'
+// （子元素是 -image / -scrim / -body / -title，前缀相同，必须用「后面是空格或结尾」卡住）
+const toolShells = collect(toolTree, (node) => typeof node.props.className === 'string' && /^mini-tool-card(\s|$)/.test(node.props.className));
+check('取到 3 张可点工具卡（顺序＝数组顺序）', toolShells.length === 3, `实际 ${toolShells.length}`);
+check('只配了链接、没图没字的卡不渲染（否则真机上是个看不见的点击区）',
+  !toolShells.some((node) => String(node.key) === 't5'), toolShells.map((node) => String(node.key)).join(','));
+check('工具卡①（站内页）→ /pages/chat/index', clickAndRead(toolShells[0]) === '/pages/chat/index', `实际 ${clickAndRead(toolShells[0])}`);
+check('工具卡②（外链）→ 内置浏览器 /pages/webview/index?url=…', clickAndRead(toolShells[1]) === '/pages/webview/index?url=https%3A%2F%2Fusunai.top', `实际 ${clickAndRead(toolShells[1])}`);
+check('工具卡③（没配链接）→ 点了什么都不做', clickAndRead(toolShells[2]) === undefined, `实际 ${clickAndRead(toolShells[2])}`);
+
+// 4.8 一张卡都没配 / 全空 → 整块不渲染（连区块标题都不出现），不能空挂一个标题在首页
+const emptyToolMarkup = renderToStaticMarkup(React.createElement(React.Fragment, null,
+  LayoutBlocks({ layout: { page: 'home', blocks: [block('tool-cards', { toolCards: [] })] }, content })));
+check('一张卡都没配 → 整块不渲染（无网格、无标题）',
+  !emptyToolMarkup.includes('mini-tool-grid') && !emptyToolMarkup.includes('实用AI工具'),
+  `实际 ${JSON.stringify(emptyToolMarkup.slice(0, 60))}`);
+const blankOnlyMarkup = renderToStaticMarkup(React.createElement(React.Fragment, null,
+  LayoutBlocks({ layout: { page: 'home', blocks: [block('tool-cards', { toolCards: [{ id: 'x', image: '', title: '', subtitle: '', link: '' }] })] }, content })));
+check('只有全空卡 → 同样整块不渲染', !blankOnlyMarkup.includes('mini-tool-grid'), `实际 ${JSON.stringify(blankOnlyMarkup.slice(0, 60))}`);
+
 /* ------------------------------------ 5. 画布元素默认值（最容易漏、且一漏就整页塌） */
 const adapterCss = fs.readFileSync(path.join(FRONTEND, 'src/miniapp-preview/adapter.css'), 'utf8');
 const ruleBlocks = adapterCss.match(/[^{}]+\{[^}]*\}/g) || [];
@@ -259,6 +311,16 @@ check('adapter：<image>/<swiper> 是 display:block',
   ruleBlocks.some((block) => /\.miniapp-stage image\s*,/.test(block) && /display:\s*block/.test(block)));
 check('adapter：底栏 fixed 改 absolute（画布要固定在「手机屏」内）',
   ruleBlocks.some((block) => /\.miniapp-stage \.mini-tab-bar\s*\{/.test(block) && /position:\s*absolute/.test(block)));
+
+/* ------------------------- 5b. 「实用AI工具」的样式真的被生成器搬进了画布 CSS
+   （画布 CSS 是脚本从 app.scss 生成的 —— 源码写了但生成器没搬过去，就会出现
+     「真机有、画布没有」这种最隐蔽的不一致） */
+const previewCss = fs.readFileSync(path.join(FRONTEND, 'src/miniappPreview.css'), 'utf8');
+const previewRules = previewCss.match(/[^{}]+\{[^}]*\}/g) || [];
+const toolGridRule = previewRules.find((rule) => /^\.miniapp-stage \.mini-tool-grid\s*\{/.test(rule.trim()));
+const toolCardRule = previewRules.find((rule) => /^\.miniapp-stage \.mini-tool-card\s*\{/.test(rule.trim()));
+check('画布 CSS：工具区是双列网格', !!toolGridRule && /repeat\(2,\s*minmax\(0,\s*1fr\)\)/.test(toolGridRule), toolGridRule || '未找到规则');
+check('画布 CSS：卡片比例 21:9', !!toolCardRule && /aspect-ratio:\s*21\s*\/\s*9/.test(toolCardRule), toolCardRule || '未找到规则');
 
 /* ------------------------------------------------- 6. 跳转文案（读出行） */
 check('读出行：有 id 且能查到名字', describeTarget('/pages/chat/index?id=ag1', content) === '打开AI 智能体对话「智能体1」', describeTarget('/pages/chat/index?id=ag1', content));

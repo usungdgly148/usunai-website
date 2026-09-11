@@ -6,7 +6,7 @@ import { SearchBar, gotoGlobalSearch } from './search-bar';
 import { API_BASE } from '../services/api';
 import { navigateLink, resolveLink } from '../utils/link';
 import { ANN_SEEN_EVENT, announcementTime, getAnnouncementSeen, sortAnnouncements, type Announcement } from '../services/announcements';
-import type { ContentItem, MiniappLayout, MiniappLayoutBlock, PublicContent } from '../types';
+import type { ContentItem, MiniappLayout, MiniappLayoutBlock, MiniappToolCard, PublicContent } from '../types';
 
 function absoluteImageUrl(value: string) {
   const source = String(value || '').trim();
@@ -60,6 +60,7 @@ export const titles: Record<MiniappLayoutBlock['type'], string> = {
   categories: '快捷分类',
   'featured-agents': '热门智能体',
   'featured-workflows': '热门工作流',
+  'tool-cards': '实用AI工具',
   spacer: '',
 };
 
@@ -184,6 +185,21 @@ function AnnouncementBar({ announcements, onTap }: { announcements: Announcement
   );
 }
 
+/**
+ * 「实用AI工具」：运营手配的双列 21:9 卡片（背景图 + 主标 + 副标，整张卡可点）。
+ *
+ * ⚠️ 文案留空＝**这一行不渲染**，不是「用默认文案兜底」——需求原文
+ *    「卡片上的文字标题如果不填写则为空不显示」，所以这里刻意不写任何 fallback。
+ *
+ * 渲染写在 LayoutBlocks 里、**不抽成子组件**：抽出去以后卡片节点的 onClick 就被包在
+ * 组件内部，后台画布的自测（遍历元素树、真按一下看跳到哪）够不到它，只能退回肉眼验收。
+ * 分类卡同理，也是内联的。
+ */
+export function toolCardsOf(block: { toolCards?: MiniappToolCard[] }): MiniappToolCard[] {
+  // 只保留「有图或有字」的卡：全空的卡是还没配完，别在真机上留一块空白占位
+  return (block.toolCards || []).filter((card) => card.image || card.title || card.subtitle);
+}
+
 export function LayoutBlocks({ layout, content, category = '', type = '' }: { layout: MiniappLayout; content: PublicContent; category?: string; type?: string }) {
   return <>{layout.blocks.filter(block => block.visible !== false).map(block => {
     const style = blockStyle(block);
@@ -251,6 +267,29 @@ export function LayoutBlocks({ layout, content, category = '', type = '' }: { la
       return <View key={block.id} className={`section ${className}`} style={style}>
         <SectionTitle title={heading} more={moreLabel(block)} onMore={() => navigateLink(block.link || '/pages/hot/index?type=workflow')} />
         <View className='mini-content-list'>{items.map(entry => <ContentCard item={entry.item} type={entry.kind} variant='compact' key={entry.item.id} link={block.cardLinks?.[entry.item.id]} />)}</View>
+      </View>;
+    }
+    if (block.type === 'tool-cards') {
+      const cards = toolCardsOf(block);
+      // 一张有效的都没有时整块不渲染（连同区块标题），避免首页空挂一个「实用AI工具」
+      if (!cards.length) return null;
+      return <View key={block.id} className={`section ${className}`} style={style}>
+        <SectionTitle title={heading} />
+        <View className='mini-tool-grid'>{cards.map((card) => (
+          <View
+            className={`mini-tool-card${card.image ? '' : ' mini-tool-card--plain'}`}
+            key={card.id}
+            onClick={() => navigateLink(card.link)}
+          >
+            {card.image && <ResilientImage className='mini-tool-card-image' src={card.image} width={840} height={360} lazyLoad />}
+            {/* 有底图才加压暗遮罩：白字压在浅色图上会看不清；没底图的卡走 --plain 的中性深色字 */}
+            {card.image && <View className='mini-tool-card-scrim' />}
+            {(card.title || card.subtitle) && <View className='mini-tool-card-body'>
+              {card.title && <Text className='mini-tool-card-title'>{card.title}</Text>}
+              {card.subtitle && <Text className='mini-tool-card-subtitle'>{card.subtitle}</Text>}
+            </View>}
+          </View>
+        ))}</View>
       </View>;
     }
     return null;

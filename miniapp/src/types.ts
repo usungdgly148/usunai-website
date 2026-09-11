@@ -113,7 +113,7 @@ export interface PublicContent {
   customerService: CustomerService;
 }
 
-export type MiniappLayoutBlockType = 'carousel' | 'announcements' | 'search' | 'categories' | 'featured-agents' | 'featured-workflows' | 'spacer';
+export type MiniappLayoutBlockType = 'carousel' | 'announcements' | 'search' | 'categories' | 'featured-agents' | 'featured-workflows' | 'tool-cards' | 'spacer';
 
 /**
  * 后台可视化设计器里配置的跳转目标。
@@ -140,6 +140,18 @@ export interface MiniappCarouselSlide {
   subtitle?: string;
   link?: MiniLinkValue;
 }
+/**
+ * 「实用AI工具」区块的一张卡片（后台逐张手配，21:9 双列）。
+ * ⚠️ `title` / `subtitle` 的空串是**合法状态**，语义是「这一行不显示」——
+ *    不要把空串当缺失去兜底，也不要给它填默认文案（需求就是「不填写则为空不显示」）。
+ */
+export interface MiniappToolCard {
+  id: string;
+  image: string;
+  title: string;
+  subtitle: string;
+  link?: MiniLinkValue;
+}
 export interface MiniappLayoutBlock {
   id: string;
   type: MiniappLayoutBlockType;
@@ -162,6 +174,8 @@ export interface MiniappLayoutBlock {
    * 缺省时回落到「打开这个智能体 / 工作流自身」。
    */
   cardLinks?: Record<string, MiniLinkValue>;
+  /** 「实用AI工具」：双列手配卡片，顺序即展示顺序；空的清空后整块不渲染 */
+  toolCards?: MiniappToolCard[];
   dataSource?: 'recommended' | 'all' | 'current-category' | '';
   limit?: number;
   /** 搜索块：搜索框里的提示语，空则用渲染器默认文案 */

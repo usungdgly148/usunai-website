@@ -3,7 +3,7 @@ import '../miniappPreview.css';
 import './adapter.css';
 // ⚠️ 直接 import 小程序真机那份渲染器 / 组件。画布「跟真机一致」不是靠肉眼比对，
 //    而是构造性事实：改小程序组件，画布自动跟着变。
-import { LayoutBlocks, featuredEntries, titles as BLOCK_TITLES } from '../../../miniapp/src/components/layout-blocks';
+import { LayoutBlocks, featuredEntries, titles as BLOCK_TITLES, toolCardsOf } from '../../../miniapp/src/components/layout-blocks';
 import { MiniappTabBar } from '../../../miniapp/src/components/miniapp-tab-bar';
 import { onPreviewNavigate } from './taro';
 
@@ -11,6 +11,8 @@ import { onPreviewNavigate } from './taro';
 export const DEFAULT_TITLES = BLOCK_TITLES;
 /** 供后台属性面板复用：推荐区「会显示哪些卡片」的口径（唯一事实来源在 layout-blocks.tsx） */
 export { featuredEntries };
+/** 供后台属性面板复用：「实用AI工具」哪些卡会真的显示（空图空字的卡不算） */
+export { toolCardsOf };
 
 /**
  * 内容兜底。与 miniapp/src/pages/home/index.tsx 的 normalizeContent 口径一致：

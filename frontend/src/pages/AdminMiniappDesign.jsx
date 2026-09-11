@@ -4,14 +4,25 @@ import { AdminPageHeader } from '../adminUI.jsx';
 import { getMiniappLayout, getMiniappPreviewContent, publishMiniappLayout, rollbackMiniappLayout, saveMiniappLayoutDraft } from '../miniappLayoutApi.js';
 import LinkPicker, { categoryRef, isAllCategory } from '../miniappLinkPicker.jsx';
 // 画布 + 两个「唯一事实来源」：区块默认标题、推荐区取数口径，都直接取小程序渲染器那份
-import MiniappStage, { DEFAULT_TITLES, featuredEntries, normalizeContent } from '../miniapp-preview/index.jsx';
+import MiniappStage, { DEFAULT_TITLES, featuredEntries, normalizeContent, toolCardsOf } from '../miniapp-preview/index.jsx';
 import { tryUploadToBlob } from '../blobUpload.js';
 
 const COMPONENTS = [
   ['carousel', '轮播横幅'], ['announcements', '公告'], ['search', '搜索'], ['categories', '分类导航'],
-  ['featured-agents', '推荐智能体'], ['featured-workflows', '推荐工作流'], ['spacer', '间距'],
+  ['featured-agents', '推荐智能体'], ['featured-workflows', '推荐工作流'], ['tool-cards', '实用AI工具'],
+  ['spacer', '间距'],
 ];
 const LABELS = Object.fromEntries(COMPONENTS);
+
+/**
+ * 工具卡片数量上限。**与 `server/miniapp-layout.mjs` 的 `MAX_TOOL_CARDS` 保持一致** ——
+ * 服务端是硬校验（超了直接报错），这里只是防呆、让「添加卡片」到点就置灰。
+ */
+const TOOL_CARD_MAX = 20;
+const emptyToolCard = () => ({
+  id: `tool-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+  image: '', title: '', subtitle: '', link: '',
+});
 
 /** 每个区块的「点击链接」语义不同，面板上要写清楚它到底管哪一次点击。 */
 const LINK_FIELDS = {
@@ -40,6 +51,9 @@ const PANEL_FIELDS = {
   categories: { title: true, colors: true, spacing: true, more: true, placeholder: false, dataSource: false, perItem: 'categories', limit: '最多显示几个分类' },
   'featured-agents': { title: true, colors: true, spacing: true, more: true, placeholder: false, dataSource: true, perItem: 'cards', limit: '最多显示几个（首页建议 6，与网页版同源）' },
   'featured-workflows': { title: true, colors: true, spacing: true, more: true, placeholder: false, dataSource: true, perItem: 'cards', limit: '最多显示几个（首页建议 6，与网页版同源）' },
+  // 工具卡片：卡数由「添加/删除卡片」直接决定，没有「展示数量」这个概念；配色也不给 ——
+  // 卡片文案自带颜色（有底图走白字+遮罩、没底图走中性色），区块的 textColor 在这里配了看不出来。
+  'tool-cards': { title: true, colors: false, spacing: true, more: false, placeholder: false, dataSource: false, perItem: 'tools', limit: '' },
   spacer: { title: false, colors: false, spacing: true, more: false, placeholder: false, dataSource: false, limit: '' },
 };
 
@@ -53,6 +67,8 @@ const blockFor = (type) => ({
   categoryImages: type === 'categories' ? {} : undefined,
   categoryLinks: type === 'categories' ? {} : undefined,
   cardLinks: type.startsWith('featured-') ? {} : undefined,
+  // 新加的工具区先给两个空位，正好是双列的第一行，运营一眼看出是双列布局
+  toolCards: type === 'tool-cards' ? [emptyToolCard(), emptyToolCard()] : undefined,
 });
 
 export default function AdminMiniappDesign() {
@@ -111,6 +127,19 @@ export default function AdminMiniappDesign() {
     updateSelected({ slides });
   };
   const removeCarouselSlide = (index) => updateSelected({ slides: (selected?.slides || []).filter((_, itemIndex) => itemIndex !== index) });
+  /** 「实用AI工具」：卡片数组的增删改 —— 数组顺序就是小程序上的展示顺序 */
+  const toolCards = selected?.toolCards || [];
+  const setToolCards = (cards) => updateSelected({ toolCards: cards });
+  const updateToolCard = (index, patch) => setToolCards(toolCards.map((card, itemIndex) => itemIndex === index ? { ...card, ...patch } : card));
+  const removeToolCard = (index) => setToolCards(toolCards.filter((_, itemIndex) => itemIndex !== index));
+  const moveToolCard = (index, offset) => {
+    const target = index + offset;
+    if (target < 0 || target >= toolCards.length) return;
+    const next = [...toolCards];
+    [next[index], next[target]] = [next[target], next[index]];
+    setToolCards(next);
+  };
+  const addToolCard = () => { if (toolCards.length < TOOL_CARD_MAX) setToolCards([...toolCards, emptyToolCard()]); };
   const uploadImage = async (file, apply) => {
     if (!file) return;
     setBusy(true); setMessage(null);
@@ -150,6 +179,37 @@ export default function AdminMiniappDesign() {
       </section>
       <section className="rounded-2xl bg-white p-4 shadow-sm"><h2 className="mb-4 font-semibold text-slate-900">属性设置</h2>{!selected && <p className="text-sm text-slate-400">请选择一个区块</p>}{selected && <div className="space-y-4 text-sm">
 {selected.type === 'carousel' && <div className="space-y-3 rounded-xl border border-blue-100 bg-blue-50 p-3"><div><p className="font-semibold text-slate-800">小程序轮播图（16:9）</p><p className="mt-1 text-xs text-slate-500">仅展示图片，不显示标题或副标题；不影响网页端 Banner。上传后保存草稿并发布。</p></div>{(selected.slides || []).map((slide, index) => <div key={`${slide.image}-${index}`} className="rounded-xl border border-slate-200 bg-white p-3"><div className="mb-2 flex gap-3">{slide.image ? <img src={slide.image} alt="" className="h-16 w-28 rounded-lg object-cover" /> : <div className="h-16 w-28 rounded-lg bg-slate-100" />}<label className="inline-flex h-9 cursor-pointer items-center gap-1 self-center rounded-lg border border-blue-200 bg-white px-3 text-xs text-blue-700"><Upload size={14} />上传图片<input type="file" accept="image/*" className="hidden" onChange={event => void uploadImage(event.target.files?.[0], url => updateCarouselSlide(index, { image: url }))} /></label></div><div className="mt-1"><LinkPicker compact label="这张图的点击跳转" value={slide.link} onChange={link => updateCarouselSlide(index, { link })} content={content} pages={pages} /></div><button type="button" onClick={() => removeCarouselSlide(index)} className="mt-2 inline-flex items-center gap-1 text-xs text-rose-600"><Trash2 size={13} />删除此图</button></div>)}<button type="button" disabled={(selected.slides || []).length >= 8} onClick={() => updateSelected({ slides: [...(selected.slides || []), { image: '', link: '' }] })} className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-medium text-blue-700"><Plus size={14} />添加轮播图</button></div>}
+        {panel?.perItem === 'tools' && <div className="space-y-3 rounded-xl border border-blue-100 bg-blue-50 p-3">
+          <div><p className="font-semibold text-slate-800">工具卡片（双列，卡片比例 21:9）</p><p className="mt-1 text-xs text-slate-500">顺序＝小程序上的展示顺序。主标 / 副标<b>留空＝这一行不显示</b>；一张卡连背景图和文字都没有，小程序上就不显示它。至少配好一张卡，首页才会出现这个模块。</p></div>
+          {toolCards.map((card, index) => <div key={card.id} className="space-y-2 rounded-xl border border-slate-200 bg-white p-2.5">
+            <div className="flex items-center gap-3">
+              <div className="flex shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-100 text-[10px] text-slate-400" style={{ width: 116, aspectRatio: '21 / 9' }}>{card.image ? <img src={card.image} alt="" className="h-full w-full object-cover" /> : '无背景图'}</div>
+              <div className="min-w-0 flex-1"><p className="text-xs font-medium text-slate-700">第 {index + 1} 张</p><p className="mt-1 text-[11px] text-slate-400">背景图建议 21:9；上传后保存草稿并发布才生效</p></div>
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                <label className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-xs text-blue-700"><Upload size={13} />上传<input type="file" accept="image/*" className="hidden" onChange={event => void uploadImage(event.target.files?.[0], url => updateToolCard(index, { image: url }))} /></label>
+                {!!card.image && <button type="button" onClick={() => updateToolCard(index, { image: '' })} className="text-[11px] text-slate-500">清除背景图</button>}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block text-xs text-slate-600">主标<input value={card.title || ''} onChange={event => updateToolCard(index, { title: event.target.value })} placeholder="留空＝不显示" className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-1.5" /></label>
+              <label className="block text-xs text-slate-600">副标<input value={card.subtitle || ''} onChange={event => updateToolCard(index, { subtitle: event.target.value })} placeholder="留空＝不显示" className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-1.5" /></label>
+            </div>
+            <LinkPicker compact label="这张卡片的跳转" hint="留空＝这张卡点了不跳转" value={card.link} onChange={link => updateToolCard(index, { link })} content={content} pages={pages} />
+            <div className="flex items-center gap-3 text-xs">
+              <button type="button" disabled={index === 0} onClick={() => moveToolCard(index, -1)} className="inline-flex items-center gap-1 text-slate-600 disabled:text-slate-300"><ArrowUp size={13} />上移</button>
+              <button type="button" disabled={index === toolCards.length - 1} onClick={() => moveToolCard(index, 1)} className="inline-flex items-center gap-1 text-slate-600 disabled:text-slate-300"><ArrowDown size={13} />下移</button>
+              <button type="button" onClick={() => removeToolCard(index)} className="ml-auto inline-flex items-center gap-1 text-rose-600"><Trash2 size={13} />删除此卡</button>
+            </div>
+          </div>)}
+          {!toolCards.length && <p className="text-xs text-slate-400">还没有卡片，点下面的「添加卡片」开始。</p>}
+          {/* 直接用渲染器那份口径算「真机会显示几张」，避免运营以为配了没反应 */}
+          {!!toolCards.length && (() => {
+            const visible = toolCardsOf({ type: 'tool-cards', toolCards }).length;
+            if (visible === toolCards.length) return <p className="text-xs text-emerald-700">这 {visible} 张都会显示在小程序上。</p>;
+            return <p className="text-xs text-amber-700">共 {toolCards.length} 张，其中 {toolCards.length - visible} 张既没背景图也没文字，小程序上不会显示。</p>;
+          })()}
+          <button type="button" disabled={toolCards.length >= TOOL_CARD_MAX} onClick={addToolCard} className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-medium text-blue-700 disabled:text-slate-300"><Plus size={14} />添加卡片（最多 {TOOL_CARD_MAX} 张）</button>
+        </div>}
         {panel?.perItem === 'categories' && <div className="space-y-3 rounded-xl border border-blue-100 bg-blue-50 p-3"><div><p className="font-semibold text-slate-800">分类卡（背景图 + 逐张跳转）</p><p className="mt-1 text-xs text-slate-500">「全部」不会在小程序分类区显示；每张卡可单独配背景图和点击跳转，跳转留空＝进该分类的列表页。</p></div>{categoryList.map(category => { const key = categoryRef(category); const image = selected.categoryImages?.[key] || ''; return <div key={key} className="space-y-2 rounded-xl border border-slate-200 bg-white p-2.5"><div className="flex items-center gap-3">{image ? <img src={image} alt="" className="h-16 w-24 shrink-0 rounded-lg object-cover" /> : <div className="h-16 w-24 shrink-0 rounded-lg bg-gradient-to-br from-blue-100 to-slate-100" />}<div className="min-w-0 flex-1"><p className="truncate font-medium text-slate-800">{category.label || category.name || key}</p><p className="mt-1 text-xs text-slate-400">背景图推荐 4:3</p></div><label className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-lg border border-blue-200 bg-white px-2.5 py-2 text-xs text-blue-700"><Upload size={13} />上传<input type="file" accept="image/*" className="hidden" onChange={event => void uploadImage(event.target.files?.[0], url => updateSelected({ categoryImages: { ...(selected.categoryImages || {}), [key]: url } }))} /></label></div><LinkPicker compact label="这张分类卡的跳转" hint={`留空＝进「${category.label || category.name || key}」分类列表页`} value={selected.categoryLinks?.[key]} onChange={link => updateLinkMap('categoryLinks', key, link)} content={content} pages={pages} /></div>; })}{!categoryList.length && <p className="text-xs text-slate-400">公共内容里还没有分类。</p>}</div>}
         {panel?.perItem === 'cards' && <div className="space-y-3 rounded-xl border border-blue-100 bg-blue-50 p-3"><div><p className="font-semibold text-slate-800">每张卡片的跳转</p><p className="mt-1 text-xs text-slate-500">按当前的「数据源 / 展示数量」列出这一块会显示的卡片；跳转留空＝默认打开该智能体 / 工作流自身。</p></div>{cardEntries.map(entry => <LinkPicker key={entry.item.id} compact label={entry.item.name || entry.item.id} hint={`留空＝打开${entry.kind === 'agent' ? '智能体' : '工作流'}「${entry.item.name || entry.item.id}」`} value={selected.cardLinks?.[entry.item.id]} onChange={link => updateLinkMap('cardLinks', entry.item.id, link)} content={content} pages={pages} />)}{!cardEntries.length && <p className="text-xs text-slate-400">这一块当前取不到内容，没有卡片可配跳转。</p>}</div>}
         {panel?.title && <label className="block">区块标题<input value={selected.title} onChange={e => updateSelected({ title: e.target.value })} placeholder={`留空＝显示默认标题「${DEFAULT_TITLES[selected.type]}」`} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label>}

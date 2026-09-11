@@ -8,7 +8,8 @@
  * 数据源：优先拉线上已发布的首页布局与公共内容（头像/封面都是真的），
  *         拉不到就退化成本地 fixture，脚本不会因此失败。
  *
- * 用法：node scripts/preview-canvas-snapshot.mjs [输出路径]
+ * 用法：node scripts/preview-canvas-snapshot.mjs [输出路径] [--demo-tools]
+ *       --demo-tools：额外追加一个「实用AI工具」演示区块（只为看双列 21:9 版式，不写进线上）
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -70,6 +71,27 @@ const [liveLayout, liveContent] = await Promise.all([
 const layout = liveLayout || FALLBACK_LAYOUT;
 const content = liveContent || FALLBACK_CONTENT;
 console.log(`[snapshot] 布局来源：${liveLayout ? '线上已发布' : '本地 fixture'}；内容来源：${liveContent ? '线上公共内容' : '本地 fixture'}`);
+
+/*
+ * --demo-tools：往布局末尾追加一个「实用AI工具」区块，插几张**演示卡片**。
+ * 目的只是让运营在卡片还没配之前，也能看到双列 21:9 的版式长什么样。
+ * 底图借线上真实的 Banner / 分类图（不落任何新资源），文案是演示用的假数据，
+ * 且这张 HTML 只是本地产物 —— 不会写进线上布局。线上那块现在是一张卡都没有（整块不渲染）。
+ */
+if (process.argv.includes('--demo-tools')) {
+  const pool = [
+    ...(content.banners || []).map((banner) => String(banner.image || banner.imageUrl || '')),
+    ...(content.categories || []).map((category) => String(category.miniappImage || '')),
+  ].filter(Boolean);
+  const demo = [
+    { title: '文案生成', subtitle: '一句话出稿' },
+    { title: '图像处理', subtitle: '去水印 · 换背景' },
+    { title: '爆款拆解', subtitle: '对标视频转干货' },
+    { title: '数据看板', subtitle: '算力与用量' },
+  ].map((card, index) => ({ id: `demo-tool-${index + 1}`, image: pool[index % Math.max(pool.length, 1)] || '', ...card }));
+  layout.blocks = [...layout.blocks, { id: 'tool-cards-demo', type: 'tool-cards', visible: true, title: '', spacing: 16, toolCards: demo }];
+  console.log(`[snapshot] 已追加演示用的「实用AI工具」区块（${demo.length} 张，借用了 ${pool.length} 张线上真实底图）`);
+}
 
 /* --------------------------------------------------------------- 2. 渲染 */
 fs.writeFileSync(`${TEMP}.mjs`, `
@@ -156,6 +178,7 @@ const html = `<!doctype html>
   <h1>后台「小程序设计」手机画布 · 快照</h1>
   <p>这张页面里的手机屏之内，跑的是小程序真机组件本身（<code>LayoutBlocks</code> / <code>ContentCard variant=compact</code> / <code>MiniappTabBar</code>），样式来自 <code>miniapp/src/app.scss</code> 经生成器作用域化后的产物 —— 所以「画布＝真机」是构造性结果，不是照着画的。</p>
   <p>布局来源：${liveLayout ? '线上已发布布局' : '本地 fixture'}　·　内容来源：${liveContent ? '线上公共内容（头像即真实数据）' : '本地 fixture'}　·　生成时间：${new Date().toLocaleString('zh-CN')}</p>
+  ${process.argv.includes('--demo-tools') ? `<p style="color:#b45309">⚠️ 这张快照末尾的「实用AI工具」是 <b>--demo-tools</b> 加的演示卡片（底图借用线上真实 Banner/分类图，文案是假的），只为看双列 21:9 的版式。线上这一块现在一张卡都没配，所以真机上是整块不显示的。</p>` : ''}
 </div>
 <div class="snap-wrap">
   <div class="snap-phone">
