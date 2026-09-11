@@ -236,19 +236,13 @@ button::after { border: 0; }
 .mini-content-grid .tag { padding: 5px 9px; font-size: 18px; }
 .mini-content-grid .record-main { margin: 16px 18px 0; font-size: 20px; }
 .mini-page-heading { display: block; margin: 10px 0 26px; color: var(--mini-ink); font-size: 43px; font-weight: 750; text-align: center; }
-.mini-profile-head { display: flex; align-items: center; gap: 18px; margin: 16px 0 22px; }
 .mini-profile-avatar { display: flex; width: 88px; height: 88px; align-items: center; justify-content: center; border-radius: 50%; background: linear-gradient(135deg, #2f69ec, #785de7); color: #fff; font-size: 37px; font-weight: 750; }
-.mini-profile-name { display: block; margin-bottom: 6px; color: var(--mini-ink); font-size: 34px; font-weight: 750; }
-.mini-membership-card { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; padding: 28px; border-radius: 24px; background: linear-gradient(135deg, var(--mini-primary-soft), var(--mini-primary-pale)); }
-.mini-membership-title, .mini-bind-title { display: block; color: var(--mini-ink); font-size: 30px; font-weight: 700; }
-.mini-membership-desc, .mini-bind-desc { display: block; margin-top: 8px; color: var(--mini-subtle); font-size: 22px; }
-.mini-membership-points { color: var(--mini-primary-strong); font-size: 42px; font-weight: 800; }
-.mini-membership-points Text:last-child { margin-left: 5px; font-size: 22px; }
+.mini-profile-name { display: block; color: var(--mini-ink); font-size: 34px; font-weight: 750; }
+.mini-bind-title { display: block; color: var(--mini-ink); font-size: 30px; font-weight: 700; }
+.mini-bind-desc { display: block; margin-top: 8px; color: var(--mini-subtle); font-size: 22px; }
 .mini-bind-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 22px; padding: 22px; border: 1px solid var(--mini-primary-border); border-radius: 22px; background: var(--mini-surface); }
 .mini-bind-button { flex-shrink: 0; margin: 0; padding: 0 18px; border-radius: 16px; background: var(--mini-primary); color: #fff; font-size: 23px; }
-.mini-settings-list, .mini-asset-panel { overflow: hidden; border-radius: 24px; background: var(--mini-surface); box-shadow: 0 8px 24px rgba(17, 42, 88, .05); }
-.mini-settings-row { display: flex; align-items: center; justify-content: space-between; padding: 28px; border-bottom: 1px solid var(--mini-line-faint); color: var(--mini-ink); font-size: 29px; }
-.mini-settings-row:last-child { border-bottom: 0; }
+.mini-asset-panel { overflow: hidden; border-radius: 24px; background: var(--mini-surface); box-shadow: 0 8px 24px rgba(17, 42, 88, .05); }
 .mini-settings-arrow { color: var(--mini-subtle-2); font-size: 42px; line-height: .6; }
 .mini-asset-tabs { margin: 0 -28px 22px; white-space: nowrap; }
 .mini-asset-tab-row { display: flex; gap: 14px; padding: 0 28px; }
@@ -398,45 +392,86 @@ button::after { border: 0; }
 .mini-page-heading { margin: 0; color: var(--mini-ink); font-size: 44px; letter-spacing: -1px; text-align: left; }
 .mini-page-caption { display: block; margin-top: 8px; color: var(--mini-subtle); font-size: 23px; }
 .mini-category-page .layout-block-home { margin-top: 28px; }
-.mini-profile-head { min-height: 112px; margin: 6px 0 22px; padding: 18px; border: 1px solid var(--mini-line); border-radius: 26px; background: var(--mini-glass); box-shadow: 0 10px 24px rgba(45, 79, 135, .05); }
-.mini-profile-avatar { width: 80px; height: 80px; background: linear-gradient(135deg, #2e67e9, #765fe8); font-size: 33px; }
-.mini-profile-name { color: var(--mini-ink); font-size: 31px; }
-.mini-membership-card { min-height: 150px; margin-bottom: 18px; padding: 25px; border: 1px solid var(--mini-primary-border); border-radius: 26px; background: linear-gradient(135deg, var(--mini-primary-pale), var(--mini-primary-border)); box-shadow: 0 12px 28px rgba(43, 95, 212, .10); }
-.mini-membership-kicker { display: block; color: var(--mini-primary-strong); font-size: 18px; font-weight: 700; letter-spacing: 1px; }
-.mini-membership-title { margin-top: 4px; color: var(--mini-ink); font-size: 31px; }
-.mini-membership-points { color: var(--mini-primary-strong); font-size: 49px; }
-.mini-settings-list, .mini-asset-panel { border: 1px solid var(--mini-line); border-radius: 26px; box-shadow: 0 12px 28px rgba(45, 80, 135, .06); }
-.mini-settings-row { min-height: 92px; padding: 0 26px; color: var(--mini-text-2); font-size: 26px; }
-.mini-settings-left { display: flex; align-items: center; gap: 18px; min-width: 0; }
-.mini-settings-icon { width: 42px; height: 42px; flex-shrink: 0; }
+/* ===== 个人中心（P61 改版）：① 个人信息+算力合并卡 ② 我的服务 ③ 设置 ===== */
 
-/* ===== 个人中心重排（P32）：账号行 / 算力卡 / 常用功能 / 协议入口 ===== */
-.mini-account-row {
-  display: flex; align-items: center; gap: 18px;
-  min-height: 112px; margin: 6px 0 22px; padding: 18px;
-  border: 1px solid var(--mini-line); border-radius: 26px;
-  background: var(--mini-glass); box-shadow: 0 10px 24px rgba(45, 79, 135, .05);
+/* —— 分组容器：标题与卡片同处一块（对齐参考图），卡面 token 与全站其它卡片一致 —— */
+.mini-group { margin-bottom: 22px; }
+.mini-group-card {
+  padding: 26px 24px 22px;
+  border: 1px solid var(--mini-line); border-radius: 28px;
+  background: var(--mini-surface); box-shadow: 0 12px 28px rgba(45, 80, 135, .06);
 }
-.mini-account-row .mini-settings-arrow { flex-shrink: 0; color: var(--mini-subtle-2); }
+/* 「设置」卡：行自带左右内边距，卡片本体不留内边距，只给标题留位 */
+.mini-group-card-flush { padding: 26px 0 8px; }
+.mini-group-title { display: block; color: var(--mini-ink); font-size: 32px; font-weight: 750; letter-spacing: -.4px; }
+.mini-group-card-flush .mini-group-title { padding: 0 26px 8px; }
 
-.mini-membership-left { min-width: 0; flex: 1; }
-.mini-membership-right { display: flex; flex-direction: column; align-items: flex-end; gap: 14px; }
+/* —— 模块①：账号信息行 + 算力点数面板（同一张卡，中间一条细分隔线） —— */
+.mini-account-card {
+  overflow: hidden; margin-bottom: 22px;
+  border: 1px solid var(--mini-line); border-radius: 28px;
+  background: var(--mini-surface); box-shadow: 0 12px 28px rgba(45, 80, 135, .06);
+}
+.mini-account-row { display: flex; align-items: center; gap: 18px; padding: 26px 24px; }
+.mini-account-row .mini-settings-arrow { flex-shrink: 0; color: var(--mini-subtle-2); }
+/* VIP / 已过期徽标：与昵称同行 */
+.mini-vip-badge {
+  display: flex; flex-shrink: 0; align-items: center; gap: 6px;
+  padding: 4px 14px; border-radius: 999px;
+  background: linear-gradient(135deg, #4a86f7, #2c5fe0);
+  color: #fff; font-size: 20px; font-weight: 700; letter-spacing: .6px;
+}
+.mini-vip-crown { width: 22px; height: 22px; flex-shrink: 0; }
+.mini-vip-badge-expired { background: var(--mini-soft); color: var(--mini-subtle); font-weight: 600; letter-spacing: 0; }
+
+/* 算力点数面板：浅蓝渐变底 + 顶部细线，把「点数」从账号信息里视觉分层 */
+.mini-points-panel {
+  display: flex; align-items: center; gap: 16px;
+  padding: 20px 24px 24px;
+  border-top: 1px solid var(--mini-line-faint);
+  background: linear-gradient(135deg, var(--mini-primary-pale), var(--mini-primary-border));
+}
+.mini-points-icon-wrap {
+  display: flex; width: 96px; height: 96px; flex-shrink: 0; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 42%, rgba(88, 148, 255, .26), rgba(88, 148, 255, 0) 72%);
+}
+.mini-points-icon { width: 78px; height: 78px; }
+.mini-points-main { min-width: 0; flex: 1; }
+.mini-points-kicker { display: block; color: var(--mini-subtle); font-size: 22px; }
+.mini-points-value { display: flex; align-items: baseline; margin-top: 2px; }
+.mini-points-number { color: var(--mini-ink); font-size: 54px; font-weight: 800; letter-spacing: -1px; line-height: 1.1; }
+.mini-points-unit { margin-left: 6px; color: var(--mini-subtle); font-size: 23px; font-weight: 600; }
+.mini-points-expire { display: block; margin-top: 2px; color: var(--mini-subtle-2); font-size: 20px; }
 .mini-membership-recharge {
-  margin: 0; padding: 0 26px; height: 58px; line-height: 58px;
+  flex-shrink: 0; margin: 0; padding: 0 30px; height: 64px; line-height: 64px;
   border-radius: 999px; background: var(--mini-primary); color: #fff;
-  font-size: 24px; font-weight: 650; box-shadow: 0 8px 18px rgba(48, 92, 224, .25);
+  font-size: 25px; font-weight: 650; box-shadow: 0 8px 18px rgba(48, 92, 224, .25);
 }
 .mini-membership-recharge::after { border: 0; }
 
-.mini-common-section { margin-bottom: 22px; }
-.mini-common-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-.mini-common-item {
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
-  min-height: 168px; border: 1px solid var(--mini-line); border-radius: 26px;
-  background: var(--mini-surface); box-shadow: 0 12px 28px rgba(45, 80, 135, .06);
+/* —— 模块②：我的服务（四宫格，彩色图标 + 同色系浅底圆角块） —— */
+.mini-common-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 20px; }
+.mini-common-item { display: flex; min-width: 0; align-items: center; flex-direction: column; gap: 12px; }
+.mini-common-tile { display: flex; width: 88px; height: 88px; align-items: center; justify-content: center; border-radius: 26px; }
+.mini-common-icon { width: 46px; height: 46px; }
+.mini-common-label { color: var(--mini-text-2); font-size: 24px; white-space: nowrap; }
+/* 底色统一走语义 token，深色模式自动跟随（勿写死浅色） */
+.mini-common-tile-assets { background: var(--mini-accent-soft); }
+.mini-common-tile-compute { background: var(--mini-success-soft); }
+.mini-common-tile-orders { background: var(--mini-warn-soft); }
+.mini-common-tile-service { background: var(--mini-primary-soft); }
+
+/* —— 模块③：设置行（使用协议 / 隐私政策 / 模式切换） —— */
+.mini-settings-row {
+  display: flex; align-items: center; justify-content: space-between;
+  min-height: 104px; padding: 0 26px;
+  border-bottom: 1px solid var(--mini-line-faint);
+  color: var(--mini-text-2); font-size: 27px;
 }
-.mini-common-icon { width: 48px; height: 48px; }
-.mini-common-label { color: var(--mini-text-2); font-size: 25px; }
+.mini-settings-row:last-child { border-bottom: 0; }
+.mini-settings-left { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.mini-settings-icon { width: 42px; height: 42px; flex-shrink: 0; }
 
 /* 账号与安全头像图标圆底 */
 .mini-security-icon--avatar { overflow: hidden; border-radius: 50%; background: linear-gradient(135deg, #2e67e9, #765fe8); color: #fff; font-size: 24px; font-weight: 700; }

@@ -9,7 +9,11 @@ import { useThemePage } from '../../hooks/use-theme-page';
 import { type ThemeMode, readMode, resolveTheme, setMode } from '../../utils/theme';
 import { toast } from '../../utils/feedback';
 
-const validDate = (value: string | null) => value ? new Date(value).toLocaleDateString('zh-CN') : '有效期未设置';
+/** 有效期文案：后端未配到期时间时给中性提示，别渲染出 "Invalid Date" */
+const expireText = (value: string | null) => value ? `有效期至 ${new Date(value).toLocaleDateString('zh-CN')}` : '有效期未设置';
+
+/** 千分位：小程序 JS 核心对 toLocaleString 支持不稳，自己按 3 位断点插逗号 */
+const formatPoints = (value: number) => String(Math.max(0, Math.trunc(Number(value) || 0))).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
 const MODE_OPTIONS: { value: ThemeMode; label: string; hint: string }[] = [
   { value: 'light', label: '浅色', hint: '始终使用明亮外观' },
@@ -19,11 +23,16 @@ const MODE_OPTIONS: { value: ThemeMode; label: string; hint: string }[] = [
 
 const modeLabel = (mode: ThemeMode) => MODE_OPTIONS.find((item) => item.value === mode)?.label || '浅色';
 
+/**
+ * 「我的服务」四宫格。
+ * 图标是 gen-ui-icons.js 生成的彩色实心 PNG（tileClass 给同色系浅底圆角块），
+ * 底色一律用语义 token（--mini-accent-soft 等）以便深色模式自动跟随。
+ */
 const COMMON_ITEMS = [
-  { label: '我的资产', url: '/pages/assets/index', iconClass: 'ui-icon-assets' },
-  { label: '算力记录', url: '/pages/compute/index', iconClass: 'ui-icon-compute' },
-  { label: '订单记录', url: '/pages/orders/index', iconClass: 'ui-icon-orders' },
-  { label: '联系客服', url: '/pages/service/index', iconClass: 'ui-icon-service' },
+  { label: '我的资产', url: '/pages/assets/index', iconClass: 'ui-icon-assets', tileClass: 'mini-common-tile-assets' },
+  { label: '算力记录', url: '/pages/compute/index', iconClass: 'ui-icon-compute', tileClass: 'mini-common-tile-compute' },
+  { label: '订单记录', url: '/pages/orders/index', iconClass: 'ui-icon-orders', tileClass: 'mini-common-tile-orders' },
+  { label: '联系客服', url: '/pages/service/index', iconClass: 'ui-icon-service', tileClass: 'mini-common-tile-service' },
 ];
 
 export default function ProfilePage() {
@@ -73,72 +82,87 @@ export default function ProfilePage() {
     ) : state.data ? (
       /* ===== 已登录主内容 ===== */
       <>
-        {/* 账号信息行：头像 + 昵称 + 用户 ID，右侧 ">" 进入「账号与安全」 */}
-        <View className='mini-account-row' onClick={() => Taro.navigateTo({ url: '/pages/account-security/index' })}>
-          <View className='mini-profile-avatar'>
-            {state.data.avatar
-              ? <Image className='mini-profile-avatar-img' src={state.data.avatar} mode='aspectFill' />
-              : <Text>{String(state.data.nickname || state.data.name || '友').slice(0, 1)}</Text>}
-          </View>
-          <View className='mini-profile-head-main'>
-            <Text className='mini-profile-name'>{state.data.nickname || state.data.name || '微信用户'}</Text>
-            <View className='mini-profile-id-row'>
-              <Text className='muted'>用户 ID：{state.data.id}</Text>
+        {/* 模块①：个人信息 + 算力点数合并成一张卡（上：账号信息行，下：算力点数面板） */}
+        <View className='mini-account-card'>
+          <View className='mini-account-row' onClick={() => Taro.navigateTo({ url: '/pages/account-security/index' })}>
+            <View className='mini-profile-avatar'>
+              {state.data.avatar
+                ? <Image className='mini-profile-avatar-img' src={state.data.avatar} mode='aspectFill' />
+                : <Text>{String(state.data.nickname || state.data.name || '友').slice(0, 1)}</Text>}
             </View>
+            <View className='mini-profile-head-main'>
+              <View className='mini-profile-name-row'>
+                <Text className='mini-profile-name'>{state.data.nickname || state.data.name || '微信用户'}</Text>
+                {state.data.expired
+                  ? <View className='mini-vip-badge mini-vip-badge-expired'><Text>已过期</Text></View>
+                  : <View className='mini-vip-badge'><View className='mini-vip-crown ui-icon-vip' /><Text>VIP</Text></View>}
+              </View>
+              <View className='mini-profile-id-row'>
+                <Text className='muted'>ID：{state.data.id}</Text>
+              </View>
+            </View>
+            <Text className='mini-settings-arrow'>›</Text>
           </View>
-          <Text className='mini-settings-arrow'>›</Text>
-        </View>
 
-        {/* 算力会员卡：可用点数 + 充值入口 */}
-        <View className='mini-membership-card'>
-          <View className='mini-membership-left'>
-            <Text className='mini-membership-kicker'>我的算力</Text>
-            <Text className='mini-membership-title'>可用点数</Text>
-            <Text className='mini-membership-desc'>有效期至 {validDate(state.data.validTo)}</Text>
-          </View>
-          <View className='mini-membership-right'>
-            <View className='mini-membership-points'><Text>{state.data.points}</Text><Text>点</Text></View>
+          {/* 算力点数：立体六边形图标 + 数字（千分位）+ 有效期，右侧充值 */}
+          <View className='mini-points-panel'>
+            <View className='mini-points-icon-wrap'><View className='mini-points-icon ui-icon-power' /></View>
+            <View className='mini-points-main'>
+              <Text className='mini-points-kicker'>算力点数</Text>
+              <View className='mini-points-value'>
+                <Text className='mini-points-number'>{formatPoints(state.data.points)}</Text>
+                <Text className='mini-points-unit'>点</Text>
+              </View>
+              <Text className='mini-points-expire'>{expireText(state.data.validTo)}</Text>
+            </View>
             <Button className='mini-membership-recharge' onClick={() => Taro.navigateTo({ url: '/pages/recharge/index' })}>充值</Button>
           </View>
         </View>
 
-        {/* 常用功能：3 个链接入口 */}
-        <View className='mini-common-section'>
-          <Text className='mini-section-heading'>常用功能</Text>
-          <View className='mini-common-grid'>
-            {COMMON_ITEMS.map((item) => (
-              <View key={item.label} className='mini-common-item' onClick={() => Taro.navigateTo({ url: item.url })}>
-                <View className={`mini-common-icon ${item.iconClass}`} />
-                <Text className='mini-common-label'>{item.label}</Text>
-              </View>
-            ))}
+        {/* 模块②：我的服务（四宫格） */}
+        <View className='mini-group'>
+          <View className='mini-group-card'>
+            <Text className='mini-group-title'>我的服务</Text>
+            <View className='mini-common-grid'>
+              {COMMON_ITEMS.map((item) => (
+                <View key={item.label} className='mini-common-item' onClick={() => Taro.navigateTo({ url: item.url })}>
+                  <View className={`mini-common-tile ${item.tileClass}`}>
+                    <View className={`mini-common-icon ${item.iconClass}`} />
+                  </View>
+                  <Text className='mini-common-label'>{item.label}</Text>
+                </View>
+              ))}
+            </View>
           </View>
         </View>
 
-        {/* 使用协议 / 隐私政策 / 模式切换（同一容器） */}
-        <View className='mini-settings-list'>
-          <View className='mini-settings-row' onClick={() => Taro.navigateTo({ url: '/pages/legal/index?type=terms' })}>
-            <View className='mini-settings-left'>
-              <View className='mini-settings-icon ui-icon-terms' />
-              <Text>使用协议</Text>
-            </View>
-            <Text className='mini-settings-arrow'>›</Text>
-          </View>
-          <View className='mini-settings-row' onClick={() => Taro.navigateTo({ url: '/pages/legal/index?type=privacy' })}>
-            <View className='mini-settings-left'>
-              <View className='mini-settings-icon ui-icon-privacy' />
-              <Text>隐私政策</Text>
-            </View>
-            <Text className='mini-settings-arrow'>›</Text>
-          </View>
-          <View className='mini-settings-row' onClick={() => setShowThemeSheet(true)}>
-            <View className='mini-settings-left'>
-              <View className='mini-settings-icon ui-icon-theme' />
-              <Text>模式切换</Text>
-            </View>
-            <View className='mini-settings-pick'>
-              <Text className='mini-settings-current'>{themeMode === 'auto' ? '跟随系统' : modeLabel(themeMode)}</Text>
+        {/* 模块③：设置（使用协议 / 隐私政策 / 模式切换） */}
+        <View className='mini-group'>
+          <View className='mini-group-card mini-group-card-flush'>
+            <Text className='mini-group-title'>设置</Text>
+            <View className='mini-settings-row' onClick={() => Taro.navigateTo({ url: '/pages/legal/index?type=terms' })}>
+              <View className='mini-settings-left'>
+                <View className='mini-settings-icon ui-icon-terms' />
+                <Text>使用协议</Text>
+              </View>
               <Text className='mini-settings-arrow'>›</Text>
+            </View>
+            <View className='mini-settings-row' onClick={() => Taro.navigateTo({ url: '/pages/legal/index?type=privacy' })}>
+              <View className='mini-settings-left'>
+                <View className='mini-settings-icon ui-icon-privacy' />
+                <Text>隐私政策</Text>
+              </View>
+              <Text className='mini-settings-arrow'>›</Text>
+            </View>
+            <View className='mini-settings-row' onClick={() => setShowThemeSheet(true)}>
+              <View className='mini-settings-left'>
+                <View className='mini-settings-icon ui-icon-theme' />
+                <Text>模式切换</Text>
+              </View>
+              <View className='mini-settings-pick'>
+                <Text className='mini-settings-current'>{themeMode === 'auto' ? '跟随系统' : modeLabel(themeMode)}</Text>
+                <Text className='mini-settings-arrow'>›</Text>
+              </View>
             </View>
           </View>
         </View>
