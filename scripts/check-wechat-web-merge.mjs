@@ -78,6 +78,29 @@ assert.ok(maSource.includes('resolved.unionConflict'), '小程序端必须处理
 assert.ok(maSource.includes('deps.KV.kvMergeEmptyAccountByUnion'), '小程序端必须调用空壳归并');
 assert.ok(source.includes('resolved.unionConflict'), '网页端必须处理归并键冲突');
 assert.ok(source.includes('KV.kvMergeEmptyAccountByUnion'), '网页端必须调用空壳归并');
+
+// 阶段2D：头像语义 —— avatar（用户主动设置）与 wechatAvatar（微信授权带回）不得混用。
+// 线上事故（2026-09-12）：网页扫码登录把 headimgurl 当 avatar 兜底并写进用户表，
+// 用户表的 avatar 又被回灌进登录态 → 同一账号「网页端显示微信头像、小程序端显示用户上传图」。
+assert.ok(!/avatar:\s*u\.avatar \|\| headimgurl/.test(feStore), '微信登录不得把 headimgurl 当作 avatar 兜底');
+assert.ok(!/avatar:\s*headimgurl \|\| x\.avatar/.test(feStore), '用户表 avatar 不得被微信头像覆盖');
+assert.ok(!feStore.includes('patch.avatar = latest.avatar'), '用户表 avatar 不得回灌进登录态（会把用户上传的头像顶掉）');
+assert.ok(feStore.includes('wechatAvatar: u.wechatAvatar || headimgurl'), '微信头像必须只进 wechatAvatar');
+assert.ok(!/avatar: profile\.headimgurl/.test(source), '服务端账号记录不得把微信头像写成 avatar');
+assert.ok(!source.includes('avatar: rec.avatar || profile.headimgurl'), '绑定微信不得顺手把头像换成微信头像');
+// 两端头像兜底规则必须一致：用户设置的头像 → 微信头像 → 首字
+for (const [label, text] of [['网页顶栏', feComponents], ['网页个人中心', feProfile]]) {
+  assert.ok(text.includes('user.avatar || user.wechatAvatar'), label + '头像必须按「用户设置 → 微信头像」兜底');
+}
+const maApi = fs.readFileSync(path.join(root, 'server/miniapp-api.mjs'), 'utf8');
+assert.ok(maApi.includes('wechatAvatar: merged.wechatAvatar'), '小程序 /me 必须下发 wechatAvatar，否则两端兜底规则不一致');
+const maVisual = fs.readFileSync(path.join(root, 'miniapp/src/utils/entity-visual.ts'), 'utf8');
+assert.ok(maVisual.includes('export function resolveUserAvatar'), '小程序用户头像必须走统一 resolver');
+assert.ok(maVisual.includes("profile?.avatar || profile?.wechatAvatar || ''"), '小程序 resolver 必须按「用户设置 → 微信头像」兜底');
+for (const page of ['profile', 'account-security']) {
+  const src = fs.readFileSync(path.join(root, `miniapp/src/pages/${page}/index.tsx`), 'utf8');
+  assert.ok(src.includes('resolveUserAvatar(state.data)'), `小程序 ${page} 页必须用统一 resolver（含相对路径补全）`);
+}
 console.log('wechat: cross-app key derivation + source contract ok');
 
 /* ── B/C：需要 better-sqlite3 ───────────────────────────────── */

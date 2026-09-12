@@ -597,14 +597,17 @@ export function StoreProvider({ children }) {
       setPoints(latest.points);
     }
   }, [adminUsers]);
-  // 后台用户表的非余额字段（avatar / name / wechat / phone）变化后，同步到 user state，
-  // 保证 hydrate 后/管理员后台改动后，前台 Profile 与顶栏展示保持一致
+  // 后台用户表的非余额字段（name / wechat / phone / 套餐有效期）变化后，同步到 user state，
+  // 保证 hydrate 后/管理员后台改动后，前台 Profile 与顶栏展示保持一致。
+  // ⚠️ avatar 不在同步之列 —— 见下面 patch 处的说明。
   useEffect(() => {
     if (!user || adminUsers.length === 0) return;
     const latest = adminUsers.find(u => u.id === user.id);
     if (!latest) return;
     const patch = {};
-    if (latest.avatar != null && latest.avatar !== user.avatar) patch.avatar = latest.avatar;
+    // ⚠️ 这里**故意不同步 avatar**（2026-09-12）：用户表(adminUsers)历史上会被微信头像污染
+    // （登录时写进 avatar），一旦回灌就会把用户上传的头像顶掉，而且会落到 localStorage 里反复发作。
+    // 头像真值统一走服务端：启动时 /api/auth/me 全量替换 + refreshCurrentUser() 回读 user_<id>。
     if (latest.name && latest.name !== user.name) patch.name = latest.name;
     if (latest.phone && latest.phone !== user.phone) patch.phone = latest.phone;
     if (latest.email && latest.email !== user.email) patch.email = latest.email;
@@ -1308,11 +1311,19 @@ export function StoreProvider({ children }) {
       if (!j || !j.ok) return false;
       const u = j.user;
       saveToken(j.token || '');
-      setUser({ id: u.id, email: u.email || '', name: u.name || nickname, avatar: u.avatar || headimgurl, points: u.points ?? 0, role: 'user', status: 'active', provider: 'wechat', wechat: u.wechat || nickname, wechatOpenid: u.wechatOpenid || openid, wechatAvatar: u.wechatAvatar || headimgurl });
+      // ⚠️ 头像语义（2026-09-12 修复「同一账号两端头像不一致」）：
+      //   avatar      = 用户**主动设置**的头像（上传/选择的图），只有改头像的接口能写；
+      //   wechatAvatar= 微信授权返回的 headimgurl，两者互不替代。
+      // 旧实现在这里用「服务端 avatar 为空就退到 headimgurl」的兜底、并把它写进用户表，而用户表的
+      // avatar 又会被下面的同步 effect 回灌回 user.avatar —— 于是「网页扫码登录」会把用户辛苦
+      // 上传的头像顶成微信头像（小程序端没有用户表回灌，所以两端看起来不一样）。
+      // 用户没设过头像时，由展示层统一 fallback 到 wechatAvatar，绝不在数据层混用。
+      setUser({ id: u.id, email: u.email || '', name: u.name || nickname, avatar: u.avatar || '', points: u.points ?? 0, role: 'user', status: 'active', provider: 'wechat', wechat: u.wechat || nickname, wechatOpenid: u.wechatOpenid || openid, wechatAvatar: u.wechatAvatar || headimgurl });
       setPoints(u.points ?? 0);
+      // 用户表里 avatar 一栏同理只放「用户设置的头像」（服务端真值为准）；头像是微信头像时留在 wechatAvatar。
       setAdminUsers(prev => prev.some(x => x.id === u.id)
-        ? prev.map(x => x.id === u.id ? { ...x, avatar: headimgurl || x.avatar, wechat: nickname, wechatOpenid: openid, provider: 'wechat' } : x)
-        : [{ id: u.id, name: u.name || nickname, email: '', phone: '', points: u.points ?? 0, avatar: headimgurl || '', role: 'user', status: 'active', provider: 'wechat', wechat: nickname, wechatOpenid: openid, wechatAvatar: headimgurl, createdAt: u.createdAt || new Date().toISOString().split('T')[0] }, ...prev]);
+        ? prev.map(x => x.id === u.id ? { ...x, avatar: u.avatar || '', wechat: nickname, wechatOpenid: openid, provider: 'wechat', wechatAvatar: u.wechatAvatar || headimgurl } : x)
+        : [{ id: u.id, name: u.name || nickname, email: '', phone: '', points: u.points ?? 0, avatar: u.avatar || '', role: 'user', status: 'active', provider: 'wechat', wechat: nickname, wechatOpenid: openid, wechatAvatar: u.wechatAvatar || headimgurl, createdAt: u.createdAt || new Date().toISOString().split('T')[0] }, ...prev]);
       setLoginModalOpen(false);
       if (pendingAction) { const { type, id: pid } = pendingAction; setPendingAction(null); window.location.href = type === 'chat' ? `/chat/${pid}` : `/workflow/${pid}`; }
       return true;

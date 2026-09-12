@@ -206,6 +206,9 @@ export function safeUser(reg, user, getPlanValidity) {
     name: merged.name || merged.nickname || '',
     nickname: merged.nickname || merged.name || '',
     avatar: merged.avatar || '',
+    // 微信头像单独下发：用户没设过头像时前端用它兜底 —— 与网页端 (avatar || wechatAvatar) 同规则。
+    // 不下发这个字段的话，同一个账号会出现「网页显示微信头像、小程序显示昵称首字」的新不一致。
+    wechatAvatar: merged.wechatAvatar || '',
     email: merged.email || '',
     phone: merged.phone || '',
     provider: merged.provider || '',

@@ -98,6 +98,22 @@ export function toAvatarUrl(value?: string) {
   return `${url}${url.includes('?') ? '&' : '?'}format=webp&w=164&h=164`;
 }
 
+/**
+ * 用户头像的统一取值（与网页端同规则）：用户设置的头像 → 微信头像 → 空串（调用方渲染昵称首字）。
+ *
+ * ⚠️ avatar 与 wechatAvatar 是两个语义：avatar = 用户**主动设置**的（上传/选择的图），
+ * wechatAvatar = 微信授权带回来的 headimgurl。2026-09-12 修复前，网页端扫码登录会把微信头像
+ * 写进 avatar，于是「网页端显示微信头像、小程序端显示上传图」——两端不一致。
+ * 现在数据层已收口（登录只写 wechatAvatar），这里补展示层兜底：
+ * 没设过头像的用户两端都显示微信头像，设过的都显示自己那张。
+ *
+ * 顺带把「相对路径补全」收进来：avatar 可能是 `/api/blob/serve?...`（历史数据里就有），
+ * 小程序直接拿它当 src 是加载不出来的（静默空白）。
+ */
+export function resolveUserAvatar(profile?: { avatar?: string; wechatAvatar?: string } | null) {
+  return toAvatarUrl(profile?.avatar || profile?.wechatAvatar || '');
+}
+
 export type EntityAvatar = {
   /** 可直接给 <Image src> 的地址；空串表示该实体没有可用头像 */
   url: string;

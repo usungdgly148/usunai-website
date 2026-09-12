@@ -156,7 +156,8 @@ function UserMenuDropdown({ user, onClose, onLogout, onRecharge }) {
     <div className="absolute right-0 top-full mt-2 w-[280px] bg-white rounded-2xl shadow-xl border border-slate-100 p-3 z-50 origin-top-right">
       <div className="flex items-center gap-3 p-3">
         <div className="w-12 h-12 rounded-full bg-orange-500 text-white flex items-center justify-center text-lg font-bold overflow-hidden shrink-0">
-          {user.avatar ? <img src={user.avatar} alt="" className="w-full h-full object-cover" /> : user.name?.[0] || 'U'}
+          {/* 头像兜底顺序统一为：用户设置的头像 → 微信头像 → 昵称首字（与小程序端同规则） */}
+          {user.avatar || user.wechatAvatar ? <img src={user.avatar || user.wechatAvatar} alt="" className="w-full h-full object-cover" /> : user.name?.[0] || 'U'}
         </div>
         <div className="flex-1 min-w-0">
           <div className="font-bold text-slate-900 truncate">{user.name}</div>
@@ -291,7 +292,8 @@ export function Header() {
         {user ? (
           <div className="relative shrink-0" ref={menuRef}>
             <button data-testid="user-avatar-menu" onClick={() => { if (refreshCurrentUser) refreshCurrentUser(); setMenuOpen(v => !v); }} className="w-9 h-9 rounded-full bg-orange-500 text-white flex items-center justify-center text-sm font-bold hover:bg-orange-600 overflow-hidden shrink-0">
-              {user.avatar ? <img src={user.avatar} alt="" className="w-full h-full object-cover" /> : user.name?.slice(0, 1) || 'U'}
+              {/* 头像兜底顺序统一为：用户设置的头像 → 微信头像 → 昵称首字（与小程序端同规则） */}
+              {user.avatar || user.wechatAvatar ? <img src={user.avatar || user.wechatAvatar} alt="" className="w-full h-full object-cover" /> : user.name?.slice(0, 1) || 'U'}
             </button>
             {menuOpen && (
               <UserMenuDropdown

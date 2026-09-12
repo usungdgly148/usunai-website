@@ -6,6 +6,7 @@ import { useLoad } from '../../hooks/use-load';
 import { changePassword, getMe, isLoggedOut, logoutSession, updateProfile } from '../../services/api';
 import { useThemePage } from '../../hooks/use-theme-page';
 import { confirmDialog, toast } from '../../utils/feedback';
+import { resolveUserAvatar } from '../../utils/entity-visual';
 
 const maskPhone = (phone?: string) => {
   if (!phone) return '';
@@ -137,8 +138,9 @@ export default function AccountSecurityPage() {
             <View className='mini-security-row' onClick={pickAvatar}>
               <View className='mini-security-left'>
                 <View className='mini-security-icon mini-security-icon--avatar'>
-                  {state.data.avatar
-                    ? <Image className='mini-profile-avatar-img' src={state.data.avatar} mode='aspectFill' />
+                  {/* 头像兜底顺序统一：用户设置的头像 → 微信头像 → 昵称首字（与网页端同规则） */}
+                  {resolveUserAvatar(state.data)
+                    ? <Image className='mini-profile-avatar-img' src={resolveUserAvatar(state.data)} mode='aspectFill' />
                     : <Text>{String(state.data.nickname || state.data.name || '友').slice(0, 1)}</Text>}
                 </View>
                 <View className='mini-security-info'>

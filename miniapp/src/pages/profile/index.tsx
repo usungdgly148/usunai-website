@@ -7,6 +7,7 @@ import { useLoad } from '../../hooks/use-load';
 import { getMe, isBindingRequired, isLoggedOut, loginWithWechat } from '../../services/api';
 import { useThemePage } from '../../hooks/use-theme-page';
 import { type ThemeMode, readMode, resolveTheme, setMode } from '../../utils/theme';
+import { resolveUserAvatar } from '../../utils/entity-visual';
 import { toast } from '../../utils/feedback';
 
 /** 有效期文案：后端未配到期时间时给中性提示，别渲染出 "Invalid Date" */
@@ -86,8 +87,9 @@ export default function ProfilePage() {
         <View className='mini-account-card'>
           <View className='mini-account-row' onClick={() => Taro.navigateTo({ url: '/pages/account-security/index' })}>
             <View className='mini-profile-avatar'>
-              {state.data.avatar
-                ? <Image className='mini-profile-avatar-img' src={state.data.avatar} mode='aspectFill' />
+              {/* 头像兜底顺序统一：用户设置的头像 → 微信头像 → 昵称首字（与网页端同规则） */}
+              {resolveUserAvatar(state.data)
+                ? <Image className='mini-profile-avatar-img' src={resolveUserAvatar(state.data)} mode='aspectFill' />
                 : <Text>{String(state.data.nickname || state.data.name || '友').slice(0, 1)}</Text>}
             </View>
             <View className='mini-profile-head-main'>

@@ -7,7 +7,7 @@ import { TdIcon } from '../../components/td-icon';
 import { fetchAllRecords, getHistoryDetail, getMe, getPublicContent, saveRuntimeAsset, saveRuntimeHistory, streamAgentChat, uploadRuntimeFile } from '../../services/api';
 import { collectMediaUrls, fileToDataUrl, runtimeId } from '../../services/runtime';
 import { confirmDialog, hideFeedbackToast, loadingToast, toast } from '../../utils/feedback';
-import { resolveEntityAvatar, toAvatarUrl, toMiniappUrl } from '../../utils/entity-visual';
+import { resolveEntityAvatar, resolveUserAvatar, toMiniappUrl } from '../../utils/entity-visual';
 import { subscribeKeyboardOffset } from '../../utils/keyboard';
 import type { ContentItem } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
@@ -156,7 +156,7 @@ export default function ChatPage() {
   useEffect(() => {
     getMe().then((profile) => {
       if (profile.name) setUserName(profile.name);
-      setUserAvatar(toAvatarUrl(profile.avatar));
+      setUserAvatar(resolveUserAvatar(profile));
     }).catch(() => {});
   }, []);
 

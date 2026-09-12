@@ -191,7 +191,10 @@ export interface UserProfile {
   id: string;
   name: string;
   nickname: string;
+  /** 用户主动设置的头像（上传图 / data URL / blob 地址）；未设置过为空 */
   avatar?: string;
+  /** 微信授权带回来的头像（headimgurl）；仅用于展示兜底，不等同于 avatar */
+  wechatAvatar?: string;
   email?: string;
   phone?: string;
   points: number;

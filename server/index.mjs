@@ -277,7 +277,9 @@ async function resolveWebWechatAccount(profile) {
     id: placeholderId,
     email: '',
     name: String(profile.nickname || '微信用户').slice(0, 30),
-    avatar: profile.headimgurl || '',
+    // avatar = 用户主动设置的头像。微信授权头像一律只进 wechatAvatar，
+    // 否则「扫码登录」会替用户把头像定成微信头像，之后用户在小程序端上传的图就与网页端打架。
+    avatar: '',
     points: 0,
     balance: 0,
     role: 'user',
@@ -405,7 +407,8 @@ async function bindWebWechatToAccount(userId, profile) {
     wechatOpenid: profile.openid,
     wechatAvatar: profile.headimgurl || rec.wechatAvatar || '',
     unionid: profile.unionid || rec.unionid || '',
-    avatar: rec.avatar || profile.headimgurl || '',
+    // 同上：绑定微信只写 wechatAvatar，绝不顺手把头像也换成微信头像
+    avatar: rec.avatar || '',
     provider: rec.provider || 'wechat',
     updatedAt: now,
   } : null);

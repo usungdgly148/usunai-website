@@ -159,7 +159,10 @@ export default function Profile() {
           <div className="flex flex-col items-center mb-6">
             <div className="relative mb-3">
               <div className="w-24 h-24 rounded-full bg-orange-500 text-white flex items-center justify-center text-3xl font-bold overflow-hidden">
-                {user.avatar ? <img src={user.avatar} alt="" className="w-full h-full object-cover" /> : user.name?.[0] || 'U'}
+                {/* 头像兜底顺序统一为：用户设置的头像 → 微信头像 → 昵称首字（与小程序端同规则） */}
+                {user.avatar || user.wechatAvatar
+                  ? <img src={user.avatar || user.wechatAvatar} alt="" className="w-full h-full object-cover" />
+                  : user.name?.[0] || 'U'}
               </div>
               <button onClick={() => fileRef.current?.click()} className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-white border border-slate-200 shadow-sm flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition">
                 <Camera size={14} />
