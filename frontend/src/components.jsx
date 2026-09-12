@@ -776,12 +776,16 @@ function LoginModal({ onClose }) {
             </form>
           )}
           {mode === 'wechat' && (
-            <div className="py-6 text-center">
-              <div className="w-16 h-16 mx-auto mb-3 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400">
-                <MessageCircle size={28} />
-              </div>
-              <p className="text-slate-700 font-medium">微信登录功能待开放</p>
-              <p className="text-xs text-slate-400 mt-1">我们正在加紧接入，敬请期待</p>
+            <div className="py-2">
+              {error && <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-3">{error}</div>}
+              {/* 扫码成功后只把服务端一次性票据交给 loginWithWechat；失败留在本页显示原因 */}
+              <WechatQrPanel
+                onSuccess={async (payload) => {
+                  const ok = await loginWithWechat(payload);
+                  if (!ok) { setError('微信登录失败，请重试'); return; }
+                  onClose();
+                }}
+              />
             </div>
           )}
           <p className="text-xs text-slate-400 text-center mt-4">登录即表示同意用户协议与隐私政策</p>

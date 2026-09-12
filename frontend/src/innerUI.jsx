@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useStore } from './store.jsx';
-import { CategoryIcon, formatCount, genCaptcha } from './components.jsx';
+import { CategoryIcon, formatCount, genCaptcha, WechatQrPanel } from './components.jsx';
 import {
   MessageSquare, SlidersHorizontal, Clock, Plus, X, Sparkles, Users, Zap, CheckCircle2, MessageCircle,
 } from 'lucide-react';
@@ -221,8 +221,8 @@ export function SubHeader({ entity, type, onToggleHistory, onToggleInfo, right, 
 /* ---------- lightweight login gate ---------- */
 
 export function RequireLoginModal({ onClose }) {
-  const { login, register, loginWithEmail } = useStore();
-  const [mode, setMode] = useState('phone'); // 'phone' | 'email'
+  const { login, register, loginWithEmail, loginWithWechat } = useStore();
+  const [mode, setMode] = useState('phone'); // 'phone' | 'email' | 'wechat'
 
   // 手机号模式
   const [phone, setPhone] = useState('');
@@ -310,6 +310,7 @@ export function RequireLoginModal({ onClose }) {
           <div className="flex bg-slate-100 rounded-lg p-1 mb-4">
             <button type="button" onClick={() => { setMode('phone'); setError(''); }} className={`flex-1 py-1.5 text-xs font-medium rounded-md transition ${mode === 'phone' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>手机号</button>
             <button type="button" onClick={() => { setMode('email'); setError(''); }} className={`flex-1 py-1.5 text-xs font-medium rounded-md transition ${mode === 'email' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>邮箱</button>
+            <button type="button" onClick={() => { setMode('wechat'); setError(''); }} className={`flex-1 py-1.5 text-xs font-medium rounded-md transition ${mode === 'wechat' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>微信</button>
           </div>
 
           {error && <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-3">{error}</div>}
@@ -382,14 +383,29 @@ export function RequireLoginModal({ onClose }) {
             </form>
           )}
 
-          <div className="flex items-center gap-3 my-4">
-            <div className="h-px bg-slate-200 flex-1" />
-            <span className="text-xs text-slate-400">其他登录方式</span>
-            <div className="h-px bg-slate-200 flex-1" />
-          </div>
-          <div className="w-full py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-400 text-sm font-medium flex items-center justify-center gap-2 cursor-not-allowed">
-            <MessageCircle size={16} /> 微信扫码登录（功能待开放）
-          </div>
+          {mode === 'wechat' ? (
+            <div className="mt-1">
+              {/* 扫码成功后只把服务端一次性票据交给 loginWithWechat；失败留在本页显示原因 */}
+              <WechatQrPanel
+                onSuccess={async (payload) => {
+                  const ok = await loginWithWechat(payload);
+                  if (!ok) { setError('微信登录失败，请重试'); return; }
+                  onClose();
+                }}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-3 my-4">
+                <div className="h-px bg-slate-200 flex-1" />
+                <span className="text-xs text-slate-400">其他登录方式</span>
+                <div className="h-px bg-slate-200 flex-1" />
+              </div>
+              <button type="button" onClick={() => { setError(''); setMode('wechat'); }} className="w-full py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 text-sm font-medium flex items-center justify-center gap-2 hover:bg-slate-50 hover:border-slate-300 transition">
+                <MessageCircle size={16} className="text-green-600" /> 微信扫码登录
+              </button>
+            </>
+          )}
           <p className="text-xs text-slate-400 text-center mt-4">登录即同意用户协议与隐私政策</p>
         </div>
       </div>
