@@ -31,7 +31,7 @@ export default function AdminAuthProviders() {
   const set = patch => setForm(value => ({ ...value, ...patch }));
   const chooseType = type => {
     const defaults = type === 'deepseek'
-      ? { baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-flash' }
+      ? { baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash' }
       : type === 'bailian-embedding'
         ? { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3.7-text-embedding', dimensions: 1024 }
         : { baseUrl: 'https://api.coze.cn' };
@@ -111,7 +111,13 @@ export default function AdminAuthProviders() {
         <input className={inputClass} value={form.baseUrl} onChange={e => set({ baseUrl: e.target.value })} placeholder="Base URL" readOnly={form.type === 'deepseek'} />
         {form.type === 'oauth' ? <div className="space-y-3"><input className={inputClass} value={form.clientId} onChange={e => set({ clientId: e.target.value })} placeholder="Client ID" /><input className={inputClass} value={form.keyId} onChange={e => set({ keyId: e.target.value })} placeholder="公钥指纹 kid" /><textarea className={`${inputClass} resize-none font-mono text-xs`} rows={6} value={form.privateKey} onChange={e => set({ privateKey: e.target.value })} placeholder={editingId ? '留空则保留服务器中的原私钥' : '-----BEGIN PRIVATE KEY-----'} /></div> : <input type="password" autoComplete="new-password" className={inputClass} value={form.apiKey} onChange={e => set({ apiKey: e.target.value })} placeholder={editingId && form.hasApiKey ? '留空则保留服务器中的原密钥' : 'API Key / Token'} />}
         {form.type === 'bailian-embedding' && <div className="grid grid-cols-2 gap-3"><input className={inputClass} value="qwen3.7-text-embedding" readOnly /><input className={inputClass} value="1024 维" readOnly /></div>}
-        {form.type === 'deepseek' && <select className={inputClass} value={form.model || 'deepseek-v4-flash'} onChange={e => set({ model: e.target.value })}><option value="deepseek-v4-flash">deepseek-v4-flash</option><option value="deepseek-v4-pro">deepseek-v4-pro</option></select>}
+        {form.type === 'deepseek' && <div className="space-y-2">
+          <select className={inputClass} value={form.model || 'deepseek-flash'} onChange={e => set({ model: e.target.value })}>
+            <option value="deepseek-flash">deepseek-flash</option>
+            <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+          </select>
+          <p className="text-xs text-slate-500">可选模型（2026-09-10 官方起）：deepseek-flash 为 V4.1 Flash，原生多模态；deepseek-v4-pro 不支持图片。此处仅作记录，实际调用模型由「智能体编辑 → 模型」决定。</p>
+        </div>}
         {result && (!result.target || result.target === 'new' || result.target === editingId) && <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs ${result.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{result.ok ? <ShieldCheck size={14} /> : <ShieldAlert size={14} />}{result.text}</div>}
         <SecondaryButton disabled={busy === 'new'} onClick={() => test({ ...form, ...(editingId ? { id: editingId } : {}) })}>{busy === 'new' ? <Loader2 size={14} className="animate-spin" /> : <Plug size={14} />}测试连接</SecondaryButton>
       </div>

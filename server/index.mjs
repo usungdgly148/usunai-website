@@ -47,13 +47,28 @@ const PORT = Number(process.env.PORT || 8787);
 const IMAGE_VARIANT_DIR = path.join(DATA_DIR, 'image-variants');
 const OPTIMIZABLE_IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp']);
 const DEEPSEEK_PLATFORM = 'deepseek-native';
-const DEEPSEEK_MODELS = new Set(['deepseek-v4-flash', 'deepseek-v4-pro']);
-const DEEPSEEK_VISION_MODEL = 'deepseek-v4-flash-vision-exp';
+// 2026-09-10 官方发布 DeepSeek V4.1 Flash：模型名改为 deepseek-flash（原生多模态），
+// 旧名 deepseek-v4-flash / deepseek-v4-flash-vision-exp 对应的模型已下线，官方仅出于兼容
+// 把这两个名字继续路由到 V4.1 Flash。白名单只保留在售的两个模型，旧名通过别名表统一归一化 ——
+// 存量 agent 配置里还有一堆旧名，不归一化会让「保存智能体」直接 500「模型无效」。
+const DEEPSEEK_MODELS = new Set(['deepseek-flash', 'deepseek-v4-pro']);
+const DEEPSEEK_MODEL_ALIASES = {
+  'deepseek-v4-flash': 'deepseek-flash',
+  'deepseek-v4-flash-vision-exp': 'deepseek-flash',
+};
+const DEEPSEEK_DEFAULT_MODEL = 'deepseek-flash';
+// deepseek-flash 原生多模态；deepseek-v4-pro 不支持图像理解 → 带图时统一走 flash。
+const DEEPSEEK_VISION_MODEL = 'deepseek-flash';
 const DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
 const DEEPSEEK_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 const MAX_DEEPSEEK_IMAGES = 4;
 const MAX_DEEPSEEK_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_DEEPSEEK_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024;
+// 把历史模型名归一到在售模型名；无法识别的原样返回，由白名单判定是否合法。
+function normalizeDeepseekModel(model) {
+  const name = String(model == null ? '' : model).trim();
+  return DEEPSEEK_MODEL_ALIASES[name] || name;
+}
 const BAILIAN_EMBEDDING_TYPE = 'bailian-embedding';
 const BAILIAN_EMBEDDING_MODEL = 'qwen3.7-text-embedding';
 const BAILIAN_EMBEDDING_DIMENSIONS = 1024;
@@ -579,7 +594,9 @@ function prepareAuthProvidersForStorage(incoming, existing) {
   const convert = (provider) => {
     if (!provider || typeof provider !== 'object' || !['deepseek', BAILIAN_EMBEDDING_TYPE].includes(provider.type)) return provider;
     const next = provider.type === 'deepseek'
-      ? { ...provider, baseUrl: DEEPSEEK_BASE_URL }
+      // 凭证上的 model 只是跟随下拉选项记录，真正决定调用模型的是智能体自己的 model（见 handleDeepseekNative）。
+      // 仍归一化一次，避免存量凭证留着已下线的旧名，后台下拉显示不出来。
+      ? { ...provider, baseUrl: DEEPSEEK_BASE_URL, model: normalizeDeepseekModel(provider.model) || DEEPSEEK_DEFAULT_MODEL }
       : {
           ...provider,
           baseUrl: String(provider.baseUrl || BAILIAN_DEFAULT_BASE_URL).replace(/\/+$/, ''),
@@ -668,21 +685,46 @@ function getPlanValidity(user) {
 }
 
 function deepseekPricing(model, at = new Date()) {
-  // 成本仅供后台运营分析，不参与用户算力扣费。2026-08-17 起按官方峰谷价格切换。
-  const postChange = at.getTime() >= Date.parse('2026-08-17T00:00:00+08:00');
-  if (!postChange) {
-    return model === 'deepseek-v4-pro'
+  // 成本仅供后台运营分析，不参与用户算力扣费。
+  // 官方两次调价：2026-08-17 起改为峰谷定价；2026-09-10 12:00 起 V4.1 Flash 上线并下调 Flash 单价（Pro 不变）。
+  // 高峰时段 = 北京时间周一至周五 9:00-12:00、14:00-18:00，其余（含周末全天）为空闲时段。
+  // 注：现行成本是按请求时刻的单价写入 compute/metric 记录的，所以这里的调整只影响新请求，不回算历史。
+  const isPro = normalizeDeepseekModel(model) === 'deepseek-v4-pro';
+  const ts = at.getTime();
+  const inPeakWindow = (() => {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Shanghai', weekday: 'short', hour: '2-digit', hour12: false,
+    }).formatToParts(at);
+    const pick = (type) => (parts.find((part) => part.type === type) || {}).value || '';
+    const workday = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(pick('weekday'));
+    const hour = Number(pick('hour'));
+    return workday && ((hour >= 9 && hour < 12) || (hour >= 14 && hour < 18));
+  })();
+
+  if (ts < Date.parse('2026-08-17T00:00:00+08:00')) {
+    return isPro
       ? { cacheHit: 0.025, cacheMiss: 3, output: 6, version: '2026-08-13' }
       : { cacheHit: 0.02, cacheMiss: 1, output: 2, version: '2026-08-13' };
   }
-  const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', hour12: false }).format(at));
-  const peak = (hour >= 9 && hour < 12) || (hour >= 14 && hour < 18);
-  if (model === 'deepseek-v4-pro') return peak
-    ? { cacheHit: 0.3, cacheMiss: 9, output: 27, version: '2026-08-17-peak' }
-    : { cacheHit: 0.15, cacheMiss: 4.5, output: 13.5, version: '2026-08-17-offpeak' };
-  return peak
-    ? { cacheHit: 0.1, cacheMiss: 3, output: 9, version: '2026-08-17-peak' }
-    : { cacheHit: 0.05, cacheMiss: 1.5, output: 4.5, version: '2026-08-17-offpeak' };
+
+  // V4.1 Flash 上线前（2026-08-17 ~ 2026-09-10 12:00）：Flash 沿用旧 V4 Flash 单价。
+  if (ts < Date.parse('2026-09-10T12:00:00+08:00')) {
+    const version = '2026-08-17-' + (inPeakWindow ? 'peak' : 'offpeak');
+    if (isPro) return inPeakWindow
+      ? { cacheHit: 0.3, cacheMiss: 9, output: 27, version }
+      : { cacheHit: 0.15, cacheMiss: 4.5, output: 13.5, version };
+    return inPeakWindow
+      ? { cacheHit: 0.1, cacheMiss: 3, output: 9, version }
+      : { cacheHit: 0.05, cacheMiss: 1.5, output: 4.5, version };
+  }
+
+  const version = '2026-09-10-' + (inPeakWindow ? 'peak' : 'offpeak');
+  if (isPro) return inPeakWindow
+    ? { cacheHit: 0.3, cacheMiss: 9, output: 27, version }
+    : { cacheHit: 0.15, cacheMiss: 4.5, output: 13.5, version };
+  return inPeakWindow
+    ? { cacheHit: 0.04, cacheMiss: 2, output: 8, version }
+    : { cacheHit: 0.02, cacheMiss: 1, output: 4, version };
 }
 
 function estimateDeepseekApiCost(model, usage, at = new Date()) {
@@ -869,7 +911,8 @@ async function handleDeepseekNative(res, session, cfg, body) {
   const startedAt = Date.now();
   const requestId = crypto.randomUUID();
   const sessionId = sanitizeIdSafe(body.sessionId || requestId).slice(0, 100);
-  const baseModel = DEEPSEEK_MODELS.has(cfg.model) ? cfg.model : 'deepseek-v4-flash';
+  const requestedModel = normalizeDeepseekModel(cfg.model);
+  const baseModel = DEEPSEEK_MODELS.has(requestedModel) ? requestedModel : DEEPSEEK_DEFAULT_MODEL;
   const thinkingEnabled = cfg.thinkingEnabled !== false;
   const provider = await getDeepseekProvider(cfg.authProviderId);
   const user = await KV.kvGet('user_' + sanitizeIdSafe(session.userId));
@@ -2126,7 +2169,7 @@ const server = http.createServer(async (req, res) => {
           : { apiKey: String(body.apiKey || '').trim() };
         if (!provider.apiKey) throw new Error('请填写 DeepSeek API Key');
         const upstream = await requestDeepseek(provider.apiKey, {
-          model: 'deepseek-v4-flash', messages: [{ role: 'user', content: '只回复 OK' }],
+          model: DEEPSEEK_DEFAULT_MODEL, messages: [{ role: 'user', content: '只回复 OK' }],
           stream: false, max_tokens: 8,
         }, 30000);
         const text = await readResponseText(upstream);
@@ -2995,6 +3038,8 @@ const server = http.createServer(async (req, res) => {
           ragThreshold: Math.max(0, Math.min(1, Number.isFinite(Number(body.ragThreshold)) ? Number(body.ragThreshold) : (Number(existing.ragThreshold) || 0.4))),
         };
         if (merged.platform === DEEPSEEK_PLATFORM) {
+          // 旧模型名（deepseek-v4-flash / deepseek-v4-flash-vision-exp）自动升级为 deepseek-flash 后再校验。
+          merged.model = normalizeDeepseekModel(merged.model);
           if (!DEEPSEEK_MODELS.has(merged.model)) throw new Error('原生模型配置无效');
           await getDeepseekProvider(merged.authProviderId);
           merged.baseUrl = DEEPSEEK_BASE_URL;
@@ -3941,6 +3986,13 @@ const server = http.createServer(async (req, res) => {
           const providerById = new Map(providers.filter(Boolean).map((item) => [String(item.id || ''), item]));
           for (const item of items) {
             if (!item || item.platform !== DEEPSEEK_PLATFORM) continue;
+            // 整个 agents 集合是「整份保存」的，存量里只要还有一个已下线的旧模型名，后台就再也存不进去。
+            // 这里就地把旧名升级为在售模型名，再校验、再落库，让存量数据自动愈合。
+            const normalizedModel = normalizeDeepseekModel(item.model);
+            if (normalizedModel !== item.model) {
+              console.log(`[deepseek] migrate agent ${item.id || item.name || ''} model ${item.model || '(empty)'} -> ${normalizedModel}`);
+              item.model = normalizedModel;
+            }
             if (!DEEPSEEK_MODELS.has(item.model)) throw new Error(`原生模型智能体「${item.name || item.id || ''}」的模型无效`);
             const provider = providerById.get(String(item.authProviderId || ''));
             if (!provider || provider.type !== 'deepseek' || provider.status === 'disabled' || !provider.apiKeyEncrypted) {
@@ -4746,6 +4798,30 @@ if (sanitizedCount > 0) {
     console.log(`[phase2-backend] cleaned ${sanitizedCount} agent(s) with corrupted apiKey from KV`);
 } catch (e) {
     console.error('[phase2-backend] failed to persist sanitized agents:', e.message || e);
+  }
+}
+
+// 启动时清道：把 KV 里存量 agent 的旧 DeepSeek 模型名升级为在售模型名。
+// 背景：2026-09-10 官方发布 V4.1 Flash（模型名 deepseek-flash），并下线 V4 Flash / V4 Flash
+//       Vision Exp —— 旧名只保留一条兼容路由。而 agents 是「整份保存」的：只要还有一个存量
+//       配置带着旧名，后台保存智能体就会被校验拦下（「模型无效」），整个后台再也存不进去。
+// 这里启动时就地迁移并落库，不必依赖手工改库。
+let modelMigrated = 0;
+for (const [id, cfg] of Object.entries(agents)) {
+  if (!cfg || cfg.platform !== DEEPSEEK_PLATFORM) continue;
+  const normalizedModel = normalizeDeepseekModel(cfg.model);
+  if (normalizedModel && normalizedModel !== cfg.model) {
+    console.log(`[phase2-backend] migrating agent ${id} deepseek model ${cfg.model} -> ${normalizedModel}`);
+    cfg.model = normalizedModel;
+    modelMigrated++;
+  }
+}
+if (modelMigrated > 0) {
+  try {
+    await KV.kvPut('agents', agents);
+    console.log(`[phase2-backend] migrated ${modelMigrated} agent(s) to current deepseek model names`);
+  } catch (e) {
+    console.error('[phase2-backend] failed to persist migrated agent models:', e.message || e);
   }
 }
 

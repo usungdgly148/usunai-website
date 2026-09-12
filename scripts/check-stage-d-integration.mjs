@@ -25,6 +25,8 @@ writeSeed('adminPassword', adminPassword);
 writeSeed('agents', [
   { id: 'coze-new-test', platform: 'coze-new', baseUrl: 'https://example.invalid', projectId: 'project-test', apiKey: cozeToken },
   { id: 'coze-old-test', platform: 'coze-old', baseUrl: 'https://api.coze.cn', botId: 'bot-test', authProviderId: 'coze-oauth-test' },
+  // 故意写入已下线的旧模型名 deepseek-v4-flash：验证启动清道会把它迁移到在售的 deepseek-flash。
+  // 线上存量 agents 里就有 10 个这样的配置，不迁移会让后台「保存智能体」直接 500。
   { id: 'deepseek-test', platform: 'deepseek-native', model: 'deepseek-v4-flash', authProviderId: 'deepseek-provider-test', thinkingEnabled: true },
 ]);
 writeSeed('workflows', [{ id: 'workflow-test', platform: 'coze', workflowId: 'workflow-provider-test', published: true }]);
@@ -158,6 +160,14 @@ try {
 
   const revealed = await request('/api/admin/agents/coze-new-test/reveal-token', { token: adminToken });
   assert.equal(revealed.data.apiKey, cozeToken, 'explicit admin reveal endpoint remains available');
+
+  const migratedModel = await request('/api/admin/agents/deepseek-test', { token: adminToken });
+  assert.equal(migratedModel.status, 200);
+  assert.equal(
+    migratedModel.data.model,
+    'deepseek-flash',
+    'a legacy deepseek-v4-flash config must be migrated to deepseek-flash on startup',
+  );
 
   const requestId = `adjust-${nonce}`;
   const adjusted = await request('/api/admin/users/adjust-points', {

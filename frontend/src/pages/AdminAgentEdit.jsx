@@ -18,7 +18,7 @@ const blankForm = {
   assetCategory: '',
   tutorialImage: '', tutorialUrl: '', tutorialTitle: '新手使用教程',
   platform: 'coze-new', apiKey: '', baseUrl: '', projectId: '', botId: '', authProviderId: '',
-  model: 'deepseek-v4-flash', thinkingEnabled: false, reasoningEffort: 'medium',
+  model: 'deepseek-flash', thinkingEnabled: false, reasoningEffort: 'medium',
   instructions: '', contextMaxTokens: 32000, maxTokens: 8192,
   ragEnabled: false, knowledgeBaseIds: [], ragTopK: 5, ragThreshold: 0.3,
   opening: '', suggestedQuestions: [],
@@ -637,12 +637,13 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
                 </Field>
                 <Field label="模型">
                   <select value={form.model} onChange={e => set({ model: e.target.value })} className={inputCls}>
-                    <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+                    <option value="deepseek-flash">deepseek-flash</option>
                     <option value="deepseek-v4-pro">deepseek-v4-pro</option>
                   </select>
                 </Field>
                 <p className="text-xs text-slate-600 bg-violet-50 border border-violet-100 rounded-lg px-3 py-2">
-                  纯文字对话使用所选模型；用户上传图片时，服务端会自动切换到 DeepSeek 官方视觉模型 deepseek-v4-flash-vision-exp。
+                  deepseek-flash（V4.1 Flash）原生支持图像理解，且能力、速度、单价均优于 deepseek-v4-pro；
+                  pro 不支持图片，因此用户上传图片时服务端会自动改用 deepseek-flash。
                 </p>
                 <label className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2.5">
                   <span className="text-sm font-medium text-slate-700">展示思考过程</span>

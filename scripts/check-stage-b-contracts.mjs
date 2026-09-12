@@ -4,7 +4,7 @@ import path from 'node:path';
 const root = path.resolve(import.meta.dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const checks = [
-  ['server/index.mjs', ['deepseek-native', '/api/deepseek/test', "event: message", 'kvRecordNativeUsage', 'deepseek-v4-flash-vision-exp', 'type: \'image_url\'', 'normalizeCurrentDeepseekImages']],
+  ['server/index.mjs', ['deepseek-native', '/api/deepseek/test', "event: message", 'kvRecordNativeUsage', "const DEEPSEEK_VISION_MODEL = 'deepseek-flash'", 'type: \'image_url\'', 'normalizeCurrentDeepseekImages']],
   ['server/rag.mjs', ['qwen3.7-text-embedding', 'EMBEDDING_DIMENSIONS = 1024', '/api/admin/knowledge-bases', 'const uploadMatch']],
   ['frontend/src/pages/AdminAuthProviders.jsx', ['bailian-embedding', 'DeepSeek 原生模型', 'adminFetch']],
   ['frontend/src/pages/AdminKnowledgeBases.jsx', ['创建并上传文档', 'replaceKnowledgeDocument', 'deleteKnowledgeBase']],

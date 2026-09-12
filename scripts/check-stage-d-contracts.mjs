@@ -6,7 +6,11 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const checks = [
   ['server/index.mjs', [
     "const DEEPSEEK_PLATFORM = 'deepseek-native'",
-    "const DEEPSEEK_MODELS = new Set(['deepseek-v4-flash', 'deepseek-v4-pro'])",
+    "const DEEPSEEK_MODELS = new Set(['deepseek-flash', 'deepseek-v4-pro'])",
+    // 旧模型名（V4 Flash / V4 Flash Vision Exp）必须仍能被归一化到在售模型名：
+    // 存量 agents 里还有旧名，缺了这段会让后台「保存智能体」直接 500。
+    "const DEEPSEEK_MODEL_ALIASES = {",
+    "function normalizeDeepseekModel(model) {",
     "if (p === '/api/coze/chat')",
     "if (platform === DEEPSEEK_PLATFORM)",
     "apiKey: ''",
