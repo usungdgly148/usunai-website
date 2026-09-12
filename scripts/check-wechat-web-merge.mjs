@@ -66,6 +66,18 @@ assert.ok(!feProfile.includes('功能待开放'), 'Profile 绑定入口不得再
 assert.ok(feProfile.includes('bindWechat({ ticket: w && w.ticket })'), 'Profile 绑定只许提交一次性票据');
 assert.ok(feComponents.includes("hintText = '扫码后，请在手机上确认登录'"), '扫码提示必须是「扫码后…」而非「已扫描…」');
 assert.ok(!/text-green-600 mt-2">已扫描/.test(feComponents), '不得再出现会误报「已被扫过」的提示');
+// 阶段2C：归并键自愈 / 本端身份登记 / 空壳归并 —— 线上「同一微信号两端两个 userId」事故的守卫
+const kvSource = fs.readFileSync(path.join(root, 'server/kv-local.js'), 'utf8');
+assert.ok(kvSource.includes("import { identityStorageKeys } from './miniapp-auth.mjs';"), '键派生必须复用唯一实现，不得在 kv-local 里复制一份');
+assert.ok(kvSource.includes('unionConflict:'), '归并键被他人占用时必须上报 unionConflict');
+assert.ok(kvSource.includes('unionHealed: true'), 'direct 命中时必须有 unionid 自愈分支');
+assert.ok(kvSource.includes('export async function kvMergeEmptyAccountByUnion'), '缺少空壳账号归并事务');
+assert.ok(kvSource.includes('function isEmptyShellAccount'), '缺少空壳判定（资产/会员/业务键三重检查）');
+const maSource = fs.readFileSync(path.join(root, 'server/miniapp-auth.mjs'), 'utf8');
+assert.ok(maSource.includes('resolved.unionConflict'), '小程序端必须处理归并键冲突');
+assert.ok(maSource.includes('deps.KV.kvMergeEmptyAccountByUnion'), '小程序端必须调用空壳归并');
+assert.ok(source.includes('resolved.unionConflict'), '网页端必须处理归并键冲突');
+assert.ok(source.includes('KV.kvMergeEmptyAccountByUnion'), '网页端必须调用空壳归并');
 console.log('wechat: cross-app key derivation + source contract ok');
 
 /* ── B/C：需要 better-sqlite3 ───────────────────────────────── */
@@ -224,6 +236,100 @@ if (!hasSqlite) {
   assert.equal(un3.ok, false);
   assert.equal(un3.reason, 'identity_mismatch');
   console.log('wechat: bind/unbind contract ok (idempotent / taken / already-bound / union-conflict / mismatch)');
+
+  // ── B3. 归并键自愈 / 本端登记 / 空壳归并（2026-09-12 线上「同一微信两端两个 userId」事故的回归锚点）──
+  // 事故根因：老身份建号时微信还没返回 unionid（当时未绑定开放平台），此后每次登录都走 direct
+  // 直接返回，永不补 unionid、也不建归并键 → 另一端算出的键查不到人 → 只能新建账号。
+  // 所以这里必须**造一个先无 unionid、再带 unionid 登录**的序列，光测「全新身份」是测不出来的。
+  process.env.USUN_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'usun-wx-heal-'));
+  const healUrl = new URL('../server/kv-local.js', import.meta.url);
+  healUrl.searchParams.set('case', crypto.randomBytes(6).toString('hex'));
+  const HK = await import(healUrl.href);
+
+  const resolveAs = async ({ appId, openid, unionid, userId, name = '测试' }) => {
+    const keys = identityStorageKeys(appId, openid, unionid, userId);
+    const now = new Date().toISOString();
+    const rec = { id: userId, name, points: 0, balance: 0, role: 'user', status: 'active', provider: 'wechat' };
+    return HK.kvResolveWechatIdentity({
+      identityKey: keys.identityKey,
+      unionKey: keys.unionKey,
+      userIndexKey: keys.userIndexKey,
+      identity: { id: keys.identityKey, appId, openid, unionid: unionid || null, userId, bindingState: 'unbound', createdAt: now, updatedAt: now },
+      reg: { ...rec },
+      user: { ...rec },
+    });
+  };
+
+  // 3.1 老身份（建号时没有 unionid）再次登录 → 必须自愈出 unionid 与归并键
+  const healUnion = 'union-heal-legacy';
+  await resolveAs({ appId: MINI_APPID, openid: 'openid-legacy', unionid: '', userId: 'u-legacy-mini', name: '老账号' });
+  const legacyKeys = identityStorageKeys(MINI_APPID, 'openid-legacy', healUnion, 'u-legacy-mini');
+  assert.equal(await HK.kvGet(legacyKeys.unionKey), null, '前提：老身份一开始没有归并键');
+  const healedRes = await resolveAs({ appId: MINI_APPID, openid: 'openid-legacy', unionid: healUnion, userId: 'u-legacy-ignored' });
+  assert.equal(healedRes.created, false, '老身份必须复用，不得新建账号');
+  assert.equal(healedRes.identity.userId, 'u-legacy-mini', '必须仍然指向老账号');
+  assert.equal(healedRes.unionHealed, true, '必须标记 unionHealed');
+  assert.equal((await HK.kvGet(legacyKeys.identityKey)).unionid, healUnion, '身份记录必须补上 unionid');
+  assert.equal(await HK.kvGet(legacyKeys.unionKey), legacyKeys.identityKey, '必须建立归并键');
+
+  // 3.2 另一端用同一 unionid 登录 → 归并到同一账号，**且本端身份必须落库**（旧实现漏了这步）
+  const webHealKeys = identityStorageKeys(WEB_APPID, 'openid-web-heal', healUnion, 'u-web-heal');
+  const webHealRes = await resolveAs({ appId: WEB_APPID, openid: 'openid-web-heal', unionid: healUnion, userId: 'u-web-heal' });
+  assert.equal(webHealRes.created, false, '第二端必须归并，不得新建账号');
+  assert.equal(webHealRes.identity.userId, 'u-legacy-mini', '两端必须落到同一个 userId');
+  const webIdentityRow = await HK.kvGet(webHealKeys.identityKey);
+  assert.ok(webIdentityRow, '归并命中时也必须登记本端 (appId, openid) 身份');
+  assert.equal(webIdentityRow.userId, 'u-legacy-mini');
+  // 索引键必须按**真实** userId 建（归并时传进来的是 placeholder id，写进去就等于制造幽灵索引）
+  const webOwnIndexKey = identityStorageKeys(WEB_APPID, '', '', 'u-legacy-mini').userIndexKey;
+  assert.equal(await HK.kvGet(webOwnIndexKey), webHealKeys.identityKey, '本端用户索引必须按真实 userId 落库');
+  assert.equal(await HK.kvGet(webHealKeys.userIndexKey), null, '不得把 placeholder userId 的索引键写进库里');
+
+  // 3.3 归并键被「空壳账号」占住 → 上报冲突，且允许自动归并
+  const shellUnion = 'union-shell';
+  await resolveAs({ appId: MINI_APPID, openid: 'openid-shell-mini', unionid: '', userId: 'u-shell-mini', name: '有资产的老账号' });
+  await HK.kvPut('user_u-shell-mini', { id: 'u-shell-mini', name: '有资产的老账号', points: 500, balance: 0, role: 'user', status: 'active' });
+  const shellWebRes = await resolveAs({ appId: WEB_APPID, openid: 'openid-shell-web', unionid: shellUnion, userId: 'u-shell-web', name: '空壳网页' });
+  assert.equal(shellWebRes.created, true, '网页先扫码会新建账号（空壳）');
+  const shellMiniKeys = identityStorageKeys(MINI_APPID, 'openid-shell-mini', shellUnion, 'u-shell-mini');
+  const shellWebKeys = identityStorageKeys(WEB_APPID, 'openid-shell-web', shellUnion, 'u-shell-web');
+  const shellConflict = await resolveAs({ appId: MINI_APPID, openid: 'openid-shell-mini', unionid: shellUnion, userId: 'u-shell-mini', name: '有资产的老账号' });
+  assert.ok(shellConflict.unionConflict, '归并键被空壳占用时必须上报 unionConflict，不得擅自改写');
+  assert.equal(shellConflict.unionConflict.ownerIdentityKey, shellWebKeys.identityKey);
+  const mergedShell = await HK.kvMergeEmptyAccountByUnion({
+    unionKey: shellWebKeys.unionKey,
+    keeperIdentityKey: shellMiniKeys.identityKey,
+    loserIdentityKey: shellWebKeys.identityKey,
+    updatedAt: new Date().toISOString(),
+  });
+  assert.equal(mergedShell.ok, true, '空壳账号必须可自动归并');
+  assert.equal(mergedShell.merged, true);
+  assert.equal(mergedShell.keeperUserId, 'u-shell-mini');
+  assert.equal(await HK.kvGet(shellWebKeys.identityKey), null, '空壳身份必须被注销');
+  assert.equal(await HK.kvGet(shellWebKeys.userIndexKey), null, '空壳用户索引必须被清理');
+  assert.equal(await HK.kvGet(shellWebKeys.unionKey), shellMiniKeys.identityKey, '归并键必须改指 keeper');
+  assert.equal((await HK.kvGet('user_u-shell-web')).status, 'merged', '空壳账号标记 merged，不物理删除');
+  assert.equal((await HK.kvGet('user_u-shell-mini')).points, 500, 'keeper 账号资产不得被动到');
+
+  // 3.4 归并键被「有资产的账号」占住 → 拒绝归并（宁可留两个账号，也不能吞资产）
+  const richUnion = 'union-rich';
+  const richWebRes = await resolveAs({ appId: WEB_APPID, openid: 'openid-rich-web', unionid: richUnion, userId: 'u-rich-web', name: '网页有钱' });
+  assert.equal(richWebRes.created, true);
+  await HK.kvPut('user_u-rich-web', { id: 'u-rich-web', name: '网页有钱', points: 999, balance: 0, role: 'user', status: 'active' });
+  await resolveAs({ appId: MINI_APPID, openid: 'openid-rich-mini', unionid: '', userId: 'u-rich-mini', name: '老账号' });
+  const richWebKeys = identityStorageKeys(WEB_APPID, 'openid-rich-web', richUnion, 'u-rich-web');
+  const richMiniKeys = identityStorageKeys(MINI_APPID, 'openid-rich-mini', richUnion, 'u-rich-mini');
+  const refused = await HK.kvMergeEmptyAccountByUnion({
+    unionKey: richWebKeys.unionKey,
+    keeperIdentityKey: richMiniKeys.identityKey,
+    loserIdentityKey: richWebKeys.identityKey,
+    updatedAt: new Date().toISOString(),
+  });
+  assert.equal(refused.ok, false, '有资产的账号绝不允许被自动归并');
+  assert.equal(refused.reason, 'loser_not_empty');
+  assert.ok(await HK.kvGet(richWebKeys.identityKey), '被拒绝时不得改动对方身份');
+  assert.equal((await HK.kvGet('user_u-rich-web')).points, 999, '被拒绝时不得改动对方资产');
+  console.log('wechat: union self-heal + own-end registration + empty-shell merge ok');
 
   // ── C. 票据 HTTP 链路 ──
   const reservePort = () => new Promise((resolve, reject) => {

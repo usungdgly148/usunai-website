@@ -126,7 +126,7 @@ async function login(req, res, requestId, deps) {
     provider: 'wechat-miniapp',
     createdAt: now.slice(0, 10),
   };
-  const resolved = await deps.KV.kvResolveWechatIdentity({
+  let resolved = await deps.KV.kvResolveWechatIdentity({
     identityKey: keys.identityKey,
     unionKey: keys.unionKey,
     userIndexKey: keys.userIndexKey,
@@ -134,6 +134,32 @@ async function login(req, res, requestId, deps) {
     reg,
     user: { ...reg },
   });
+  // 归并键被**别的**身份占用：同一个 unionid 同时挂在两个账号上 ⇒ 同一个微信。
+  // 只有「对方是空壳账号」时才自动并过来；有资产的一律不合并（记日志，留给人工）。
+  if (resolved.unionConflict && typeof deps.KV.kvMergeEmptyAccountByUnion === 'function') {
+    const merged = await deps.KV.kvMergeEmptyAccountByUnion({
+      unionKey: resolved.unionConflict.unionKey,
+      keeperIdentityKey: keys.identityKey,
+      loserIdentityKey: resolved.unionConflict.ownerIdentityKey,
+      updatedAt: now,
+    });
+    if (merged.ok) {
+      console.log('[miniapp-auth] union conflict resolved: merged=' + merged.merged
+        + ' keeper=' + merged.keeperUserId + ' loser=' + (merged.loserUserId || '-'));
+      // 冲突解除后重跑一次 —— 这次会走 direct 分支的「归并键自愈」，把 unionid 与归并键补齐。
+      resolved = await deps.KV.kvResolveWechatIdentity({
+        identityKey: keys.identityKey,
+        unionKey: keys.unionKey,
+        userIndexKey: keys.userIndexKey,
+        identity,
+        reg,
+        user: { ...reg },
+      });
+    } else {
+      console.warn('[miniapp-auth] union conflict kept as-is:', merged.reason,
+        'keeper=' + merged.keeperUserId, 'loser=' + (merged.loserUserId || '-'));
+    }
+  }
   const activeIdentity = resolved.identity;
   // session_key 每次登录都会刷新，且是虚拟支付用户态签名的密钥，必须写回身份记录。
   // kvResolveWechatIdentity 只保证「身份存在」，不保证字段更新，故这里显式覆盖。

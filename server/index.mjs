@@ -289,7 +289,7 @@ async function resolveWebWechatAccount(profile) {
     unionid: profile.unionid || '',
     createdAt: now.slice(0, 10),
   };
-  const resolved = await KV.kvResolveWechatIdentity({
+  let resolved = await KV.kvResolveWechatIdentity({
     identityKey: keys.identityKey,
     unionKey: keys.unionKey,
     userIndexKey: keys.userIndexKey,
@@ -297,6 +297,31 @@ async function resolveWebWechatAccount(profile) {
     reg: base,
     user: { ...base },
   });
+  // 与小程序端同一套冲突策略：union 键被别的身份占用 ⇒ 同一微信。
+  // 空壳账号才自动归并；有资产的一律不动，记日志留人工。
+  if (resolved.unionConflict && typeof KV.kvMergeEmptyAccountByUnion === 'function') {
+    const merged = await KV.kvMergeEmptyAccountByUnion({
+      unionKey: resolved.unionConflict.unionKey,
+      keeperIdentityKey: keys.identityKey,
+      loserIdentityKey: resolved.unionConflict.ownerIdentityKey,
+      updatedAt: now,
+    });
+    if (merged.ok) {
+      console.log('[wechat-web] union conflict resolved: merged=' + merged.merged
+        + ' keeper=' + merged.keeperUserId + ' loser=' + (merged.loserUserId || '-'));
+      resolved = await KV.kvResolveWechatIdentity({
+        identityKey: keys.identityKey,
+        unionKey: keys.unionKey,
+        userIndexKey: keys.userIndexKey,
+        identity,
+        reg: base,
+        user: { ...base },
+      });
+    } else {
+      console.warn('[wechat-web] union conflict kept as-is:', merged.reason,
+        'keeper=' + merged.keeperUserId, 'loser=' + (merged.loserUserId || '-'));
+    }
+  }
   let account = resolved.identity;
   const safeId = sanitizeIdSafe(account.userId);
   const [storedReg, storedUser] = await Promise.all([

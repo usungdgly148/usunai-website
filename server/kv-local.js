@@ -13,6 +13,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
+// 键派生只保留 identityStorageKeys 这一个实现：归并命中时要用「真实 userId」重算用户索引键，
+// 若在本地再复制一份迟早会漂移（历史上 unionKey 就因为两处算法不一致而永远命中不了）。
+// 依赖方向 miniapp-auth → miniapp-api → wechat-*，都不回头 import 本文件，无循环。
+import { identityStorageKeys } from './miniapp-auth.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.USUN_DATA_DIR
@@ -104,21 +108,93 @@ export async function kvPutMany(entries) {
   return true;
 }
 
-// Resolve or create one WeChat mini-program identity atomically. This prevents
-// two concurrent wx.login requests from creating duplicate website accounts.
+// 账号是否「空壳」：没有任何资产、会员与业务记录。
+// 只有空壳账号才允许被自动归并 —— 否则宁可不合并，也绝不能吞掉有算力/订单的账号。
+function isEmptyShellAccount(select, userId) {
+  const safeId = String(userId || '');
+  if (!safeId) return false;
+  for (const key of ['reg_' + safeId, 'user_' + safeId]) {
+    const row = select.get(safeKey(key));
+    if (!row) continue;
+    let rec = null;
+    try { rec = JSON.parse(row.value); } catch { return false; }
+    if (Number(rec.points || 0) > 0) return false;
+    if (Number(rec.balance || 0) > 0) return false;
+    if (rec.membership) return false;
+    if (rec.role && rec.role !== 'user') return false;
+    if (rec.status && rec.status !== 'active') return false;
+  }
+  // 除账号本体外，不得有以该 id 命名的业务键（订单 / 算力 / 资产 …）
+  const others = db
+    .prepare("SELECT COUNT(*) AS c FROM kv WHERE key LIKE ? ESCAPE '\\' AND key NOT IN (?, ?)")
+    .get('%' + likeEscape(safeId) + '%', safeKey('reg_' + safeId), safeKey('user_' + safeId)).c;
+  return others === 0;
+}
+
+// Resolve or create one WeChat identity atomically. This prevents two concurrent
+// wx.login requests from creating duplicate website accounts.
+//
+// 命中顺序：先 (appId, openid) → 再 unionid 归并 → 最后才新建。
+// 2026-09-12 补两处缺口（同日线上实测：同一微信号在小程序与网页各建了一个账号）：
+//   ① 老身份建号时微信还没返回 unionid（当时未绑定开放平台），此后**每次登录都走 direct
+//      直接返回**，永远不补 unionid、也不建归并键 → 另一端算出的键查不到人，只能新建账号。
+//      现在 direct 命中时做「归并键自愈」；键被别的身份占用则上报 unionConflict，不擅自改写。
+//   ② union 命中归并时漏了登记**本端** (appId, openid)，本端在身份表里等于不存在。现在补上。
 export async function kvResolveWechatIdentity({ identityKey, unionKey = '', userIndexKey, identity, reg, user }) {
   const select = db.prepare('SELECT value FROM kv WHERE key = ?');
   const put = db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)');
   return db.transaction(() => {
+    const incomingUnion = String(identity.unionid || '');
+
     const direct = select.get(safeKey(identityKey));
-    if (direct) return { ok: true, created: false, identity: JSON.parse(direct.value) };
+    if (direct) {
+      const existing = JSON.parse(direct.value);
+      const existingUnion = String(existing.unionid || '');
+      if (incomingUnion && existingUnion !== incomingUnion) {
+        const unionRow = select.get(safeKey(unionKey));
+        const ownerIdentityKey = unionRow ? JSON.parse(unionRow.value) : '';
+        if (ownerIdentityKey && ownerIdentityKey !== identityKey) {
+          return {
+            ok: true,
+            created: false,
+            identity: existing,
+            unionConflict: { unionKey, ownerIdentityKey, incomingUnion },
+          };
+        }
+        const healed = { ...existing, unionid: incomingUnion, updatedAt: identity.updatedAt || existing.updatedAt };
+        put.run(safeKey(identityKey), JSON.stringify(healed));
+        put.run(safeKey(unionKey), JSON.stringify(identityKey));
+        return { ok: true, created: false, identity: healed, unionHealed: true };
+      }
+      // 身份已有 unionid 但归并键丢失（历史写入中断 / 手工清理）→ 幂等补齐
+      if (incomingUnion && unionKey && !select.get(safeKey(unionKey))) {
+        put.run(safeKey(unionKey), JSON.stringify(identityKey));
+      }
+      return { ok: true, created: false, identity: existing };
+    }
 
     if (unionKey) {
       const unionRow = select.get(safeKey(unionKey));
       if (unionRow) {
         const linkedIdentityKey = JSON.parse(unionRow.value);
-        const linked = select.get(safeKey(linkedIdentityKey));
-        if (linked) return { ok: true, created: false, identity: JSON.parse(linked.value) };
+        const linkedRow = select.get(safeKey(linkedIdentityKey));
+        if (linkedRow) {
+          const linked = JSON.parse(linkedRow.value);
+          const realUserId = linked.userId;
+          const ownIndexKey = identityStorageKeys(identity.appId, '', '', realUserId).userIndexKey;
+          put.run(safeKey(identityKey), JSON.stringify({
+            ...identity,
+            userId: realUserId,
+            unionid: linked.unionid || incomingUnion || null,
+          }));
+          if (ownIndexKey) put.run(safeKey(ownIndexKey), JSON.stringify(identityKey));
+          if (incomingUnion && !linked.unionid) {
+            const healed = { ...linked, unionid: incomingUnion };
+            put.run(safeKey(linkedIdentityKey), JSON.stringify(healed));
+            return { ok: true, created: false, identity: healed, unionHealed: true };
+          }
+          return { ok: true, created: false, identity: linked };
+        }
       }
     }
 
@@ -128,6 +204,56 @@ export async function kvResolveWechatIdentity({ identityKey, unionKey = '', user
     put.run(safeKey('reg_' + reg.id), JSON.stringify(reg));
     put.run(safeKey('user_' + user.id), JSON.stringify(user));
     return { ok: true, created: true, identity };
+  })();
+}
+
+// 归并键冲突的收敛：keeper = 本次登录命中/新建的身份，loser = 归并键当前指向的身份。
+// 两者 unionKey 相同 ⇒ **同一个微信**，所以归并语义安全；唯一风险是资产，因此只允许
+// 把「空壳账号」并过去，有资产的账号一律不动（交人工处理）。
+// 返回 { ok, merged, reason }，reason: keeper_not_found | identity_not_found | loser_not_empty | same_account
+export async function kvMergeEmptyAccountByUnion({ unionKey, keeperIdentityKey, loserIdentityKey, updatedAt }) {
+  const select = db.prepare('SELECT value FROM kv WHERE key = ?');
+  const put = db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)');
+  const del = db.prepare('DELETE FROM kv WHERE key = ?');
+  return db.transaction(() => {
+    const keeperRow = select.get(safeKey(keeperIdentityKey));
+    if (!keeperRow) return { ok: false, reason: 'keeper_not_found' };
+    const loserRow = select.get(safeKey(loserIdentityKey));
+    if (!loserRow) return { ok: false, reason: 'identity_not_found' };
+    const keeper = JSON.parse(keeperRow.value);
+    const loser = JSON.parse(loserRow.value);
+
+    if (String(keeper.userId) === String(loser.userId)) {
+      put.run(safeKey(unionKey), JSON.stringify(keeperIdentityKey));
+      return { ok: true, merged: false, reason: 'same_account' };
+    }
+    if (!isEmptyShellAccount(select, loser.userId)) {
+      return { ok: false, reason: 'loser_not_empty', loserUserId: loser.userId, keeperUserId: keeper.userId };
+    }
+
+    // ① 归并键改指 keeper，并把 unionid 带上
+    put.run(safeKey(unionKey), JSON.stringify(keeperIdentityKey));
+    put.run(safeKey(keeperIdentityKey), JSON.stringify({
+      ...keeper,
+      unionid: keeper.unionid || loser.unionid || null,
+      updatedAt: updatedAt || keeper.updatedAt,
+    }));
+    // ② 注销 loser 的身份与用户索引（此后该 openid 走归并键命中 keeper）
+    del.run(safeKey(loserIdentityKey));
+    const loserIndexKey = identityStorageKeys(loser.appId, '', '', loser.userId).userIndexKey;
+    if (loserIndexKey) del.run(safeKey(loserIndexKey));
+    // ③ loser 账号标记 merged：登录路径不可达，但保留记录便于回溯
+    for (const key of ['reg_' + loser.userId, 'user_' + loser.userId]) {
+      const row = select.get(safeKey(key));
+      if (!row) continue;
+      put.run(safeKey(key), JSON.stringify({
+        ...JSON.parse(row.value),
+        status: 'merged',
+        mergedInto: keeper.userId,
+        updatedAt: updatedAt || new Date().toISOString(),
+      }));
+    }
+    return { ok: true, merged: true, loserUserId: loser.userId, keeperUserId: keeper.userId };
   })();
 }
 
