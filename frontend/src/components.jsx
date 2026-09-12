@@ -500,7 +500,14 @@ function loadWxLoginSdk() {
 
 // 真实模式：微信官方 SDK 内嵌二维码（iframe），前端轮询 check 接口拿一次性票据换 token
 // 模拟模式：显示「模拟扫码」按钮直接走登录流程
-export function WechatQrPanel({ onSuccess, tip = '使用微信扫一扫，安全快捷登录' }) {
+export function WechatQrPanel({
+  onSuccess,
+  tip = '使用微信扫一扫，安全快捷登录',
+  // 二维码下方那行提示（引导下一步操作）；绑定场景传「扫码后，请在手机上确认绑定」
+  hintText = '扫码后，请在手机上确认登录',
+  // 服务端确认成功后的文案；绑定场景传「绑定成功」
+  successText = '登录成功，正在跳转...',
+}) {
   const [mode, setMode] = useState(null); // 'real' | 'mock' | null（判定中）
   const [status, setStatus] = useState('loading'); // loading | ready | scanning | done | expired | error
   const [msg, setMsg] = useState('');
@@ -614,8 +621,11 @@ export function WechatQrPanel({ onSuccess, tip = '使用微信扫一扫，安全
           {status === 'scanning' ? '扫码中...' : '模拟扫码'}
         </button>
       )}
-      {mode === 'real' && status === 'scanning' && <p className="text-xs text-green-600 mt-2">已扫描，请在手机上确认登录</p>}
-      {status === 'done' && <p className="text-xs text-green-600 mt-2">登录成功，正在跳转...</p>}
+      {/* 这行的作用是「告诉用户下一步做什么」，不是「报告已经扫了」。
+          ⚠️ 别写回「已扫描，请在手机上确认登录」：status 只是服务端的 pending（二维码一出来就是这个
+          状态），还没扫就会显示「已扫描」，真机测试时确实造成了误解。判定阶段永远以服务端 check 为准。 */}
+      {mode === 'real' && (status === 'ready' || status === 'scanning') && <p className="text-xs text-green-600 mt-2">{hintText}</p>}
+      {status === 'done' && <p className="text-xs text-green-600 mt-2">{successText}</p>}
       {status === 'expired' && (
         <button onClick={() => window.location.reload()} className="mt-3 px-4 py-2 rounded-lg bg-slate-200 text-slate-700 text-sm">二维码已过期，刷新重试</button>
       )}

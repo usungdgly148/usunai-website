@@ -46,6 +46,26 @@ assert.ok(!source.includes('const { openid, nickname, headimgurl, unionid } = aw
 assert.ok(source.includes('consumeWechatTicket(body && body.ticket)'));
 assert.ok(source.includes('entry.ticket = issueWechatTicket(entry.user)'));
 assert.ok(source.includes('ticket: issueWechatTicket(demo)'));
+// 阶段2B：绑定/解绑必须走服务端（旧实现是纯前端假绑定 + Profile 入口写着「功能待开放」）
+assert.ok(source.includes("if (p === '/api/wechat/bind' && req.method === 'POST')"), '缺少 /api/wechat/bind 路由');
+assert.ok(source.includes("if (p === '/api/wechat/unbind' && req.method === 'POST')"), '缺少 /api/wechat/unbind 路由');
+assert.ok(source.includes('async function bindWebWechatToAccount'), '缺少绑定 helper');
+assert.ok(source.includes('async function unbindWebWechat'), '缺少解绑 helper');
+assert.ok(source.includes("requireUser(req, res, '请先登录后再绑定微信')"), '绑定必须要求登录态');
+assert.ok(source.includes('KV.kvBindWechatToUser('), '绑定必须落到 KV 单事务');
+assert.ok(source.includes('KV.kvUnbindWechatIdentity('), '解绑必须删服务端身份三件套');
+assert.ok(!source.includes('if (!openid) return false;'), '服务端不得再接受客户端上报的 openid 做绑定');
+
+const feStore = fs.readFileSync(path.join(root, 'frontend/src/store.jsx'), 'utf8');
+const feProfile = fs.readFileSync(path.join(root, 'frontend/src/pages/Profile.jsx'), 'utf8');
+const feComponents = fs.readFileSync(path.join(root, 'frontend/src/components.jsx'), 'utf8');
+assert.ok(feStore.includes("'/api/wechat/bind'"), 'store 必须调服务端绑定端点');
+assert.ok(feStore.includes("'/api/wechat/unbind'"), 'store 必须调服务端解绑端点');
+assert.ok(!feStore.includes('if (!openid) return false;'), 'store 不得再保留前端假绑定');
+assert.ok(!feProfile.includes('功能待开放'), 'Profile 绑定入口不得再写「功能待开放」');
+assert.ok(feProfile.includes('bindWechat({ ticket: w && w.ticket })'), 'Profile 绑定只许提交一次性票据');
+assert.ok(feComponents.includes("hintText = '扫码后，请在手机上确认登录'"), '扫码提示必须是「扫码后…」而非「已扫描…」');
+assert.ok(!/text-green-600 mt-2">已扫描/.test(feComponents), '不得再出现会误报「已被扫过」的提示');
 console.log('wechat: cross-app key derivation + source contract ok');
 
 /* ── B/C：需要 better-sqlite3 ───────────────────────────────── */
@@ -103,6 +123,107 @@ if (!hasSqlite) {
   assert.equal(await mergeCase('mini'), 'u-mini'); // 小程序先建号 → 网页扫码归并过来
   assert.equal(await mergeCase('web'), 'u-web'); // 网页先建号 → 小程序登录归并过来
   console.log('wechat: cross-app unionid merge ok (both directions)');
+
+  // ── B2. 绑定 / 解绑（阶段2B）：冲突必须**拒绝**，不能像旧前端那样把别人的绑定抢过来 ──
+  process.env.USUN_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'usun-wx-bind-'));
+  const bindUrl = new URL('../server/kv-local.js', import.meta.url);
+  bindUrl.searchParams.set('case', crypto.randomBytes(6).toString('hex'));
+  const BK = await import(bindUrl.href);
+
+  const mkAccount = async (uid) => {
+    const rec = { id: uid, email: uid + '@bind.test', name: '绑定测试', points: 100, balance: 7, role: 'user', status: 'active', provider: 'email' };
+    await BK.kvPutMany([['reg_' + uid, { ...rec, password: 'x' }], ['user_' + uid, rec]]);
+  };
+  const keysOf = (openid, uid, union = '') => identityStorageKeys(WEB_APPID, openid, union, uid);
+  const bindArgs = (openid, uid, union = '') => {
+    const keys = keysOf(openid, uid, union);
+    return {
+      keys,
+      args: {
+        identityKey: keys.identityKey,
+        unionKey: keys.unionKey,
+        userIndexKey: keys.userIndexKey,
+        identity: { id: keys.identityKey, appId: WEB_APPID, openid, unionid: union || null, userId: uid, bindingState: 'bound', source: 'web' },
+        userId: uid,
+        userPatch: { wechatOpenid: openid, wechat: '微信昵称', wechatAvatar: 'https://x/a.png', unionid: union || '' },
+        regPatch: { wechatOpenid: openid, wechat: '微信昵称' },
+      },
+    };
+  };
+
+  await mkAccount('u-bindA');
+  await mkAccount('u-bindB');
+  await mkAccount('u-bindC');
+
+  // 1) 正常绑定
+  const b1 = bindArgs('openid-bind-1', 'u-bindA');
+  const r1 = await BK.kvBindWechatToUser(b1.args);
+  assert.equal(r1.ok, true, '首次绑定必须成功');
+  assert.equal(r1.alreadyBound, false);
+  const userA = await BK.kvGet('user_u-bindA');
+  assert.equal(userA.wechatOpenid, 'openid-bind-1', '绑定后必须回写 wechatOpenid');
+  assert.equal(userA.points, 100, '绑定不得改动 points');
+  assert.equal(userA.balance, 7, '绑定不得改动 balance');
+  assert.equal(await BK.kvGet(b1.keys.userIndexKey), b1.keys.identityKey, '必须写入用户索引');
+
+  // 2) 同一微信再绑到同一账号 → 幂等
+  const r2 = await BK.kvBindWechatToUser(bindArgs('openid-bind-1', 'u-bindA').args);
+  assert.equal(r2.ok, true);
+  assert.equal(r2.alreadyBound, true, '同一微信绑到同一账号必须幂等');
+
+  // 3) 同一微信绑到别的账号 → 拒绝（旧前端会把那个账号的绑定直接抹掉）
+  const r3 = await BK.kvBindWechatToUser(bindArgs('openid-bind-1', 'u-bindB').args);
+  assert.equal(r3.ok, false);
+  assert.equal(r3.reason, 'wechat_taken');
+  assert.equal((await BK.kvGet('user_u-bindB')).wechatOpenid, undefined, '冲突时不得改动对方账号');
+
+  // 4) 同一账号再绑另一个微信 → 拒绝
+  const r4 = await BK.kvBindWechatToUser(bindArgs('openid-bind-2', 'u-bindA').args);
+  assert.equal(r4.ok, false);
+  assert.equal(r4.reason, 'account_already_bound');
+
+  // 5) unionid 相同但账号不同 → 拒绝（同一个人在小程序那端已属别的账号）
+  const u1 = bindArgs('openid-union-1', 'u-bindC', 'union-bind-x');
+  assert.equal((await BK.kvBindWechatToUser(u1.args)).ok, true);
+  const r5 = await BK.kvBindWechatToUser(bindArgs('openid-union-2', 'u-bindB', 'union-bind-x').args);
+  assert.equal(r5.ok, false, 'unionid 相同必须视为同一微信');
+  assert.equal(r5.reason, 'wechat_taken');
+
+  // 6) 账号不存在 → 拒绝
+  const r6 = await BK.kvBindWechatToUser(bindArgs('openid-bind-9', 'u-nobody').args);
+  assert.equal(r6.ok, false);
+  assert.equal(r6.reason, 'account_not_found');
+
+  // 7) 解绑：身份三件套删除、账号字段清空、points 不动
+  const un = await BK.kvUnbindWechatIdentity({
+    identityKey: b1.keys.identityKey,
+    unionKey: b1.keys.unionKey,
+    userIndexKey: b1.keys.userIndexKey,
+    userId: 'u-bindA',
+    userPatch: { wechatOpenid: '', wechat: '', wechatAvatar: '', unionid: '' },
+    regPatch: { wechatOpenid: '', wechat: '' },
+  });
+  assert.equal(un.ok, true);
+  assert.equal(await BK.kvGet(b1.keys.identityKey), null, '解绑后身份键必须删除');
+  assert.equal(await BK.kvGet(b1.keys.userIndexKey), null, '解绑后用户索引必须删除');
+  const afterUn = await BK.kvGet('user_u-bindA');
+  assert.equal(afterUn.wechatOpenid, '', '解绑后账号字段必须清空');
+  assert.equal(afterUn.points, 100, '解绑不得改动 points');
+
+  // 8) 解绑已不存在的身份 → identity_not_found
+  const un2 = await BK.kvUnbindWechatIdentity({
+    identityKey: b1.keys.identityKey, unionKey: '', userIndexKey: b1.keys.userIndexKey, userId: 'u-bindA',
+  });
+  assert.equal(un2.ok, false);
+  assert.equal(un2.reason, 'identity_not_found');
+
+  // 9) 身份不属于该账号时不许解绑
+  const un3 = await BK.kvUnbindWechatIdentity({
+    identityKey: u1.keys.identityKey, unionKey: u1.keys.unionKey, userIndexKey: u1.keys.userIndexKey, userId: 'u-bindB',
+  });
+  assert.equal(un3.ok, false);
+  assert.equal(un3.reason, 'identity_mismatch');
+  console.log('wechat: bind/unbind contract ok (idempotent / taken / already-bound / union-conflict / mismatch)');
 
   // ── C. 票据 HTTP 链路 ──
   const reservePort = () => new Promise((resolve, reject) => {

@@ -178,6 +178,99 @@ export async function kvBindWechatIdentity({ identityKey, currentUserId, targetU
   })();
 }
 
+// 把一次「已服务端校验」的微信身份挂到**当前登录账号**上（Profile「绑定微信」，阶段2B）。
+// 与上面 kvBindWechatIdentity 的语义**不同**，别混用：
+//   · kvBindWechatIdentity = 小程序临时账号 → 已有账号的**归并**（会把来源账号标记 merged）
+//   · kvBindWechatToUser   = 已有账号 + 新微信的**附加绑定**（不合并、不碰任何其它账号）
+// 冲突一律**拒绝**而不是静默抢占：旧前端实现会把该 openid 从别人账号上直接抹掉再挂给自己，
+// 等于「谁扫到就能夺走谁的微信号」——务必保持拒绝语义。
+// 返回 { ok, alreadyBound, identity, user, reg } 或 { ok:false, reason }
+//   reason: account_not_found | wechat_taken | account_already_bound
+export async function kvBindWechatToUser({ identityKey, unionKey = '', userIndexKey, identity, userId, userPatch = {}, regPatch = {} }) {
+  const select = db.prepare('SELECT value FROM kv WHERE key = ?');
+  const put = db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)');
+  return db.transaction(() => {
+    const target = String(userId || '');
+    if (!target) return { ok: false, reason: 'account_not_found' };
+    const userRow = select.get(safeKey('user_' + target));
+    const regRow = select.get(safeKey('reg_' + target));
+    if (!userRow && !regRow) return { ok: false, reason: 'account_not_found' };
+
+    // 1) 这个微信（appId + openid）是否已被占用
+    const existing = select.get(safeKey(identityKey));
+    if (existing) {
+      const parsed = JSON.parse(existing.value);
+      if (String(parsed.userId) !== target) return { ok: false, reason: 'wechat_taken' };
+      // 已经是本账号绑的 → 幂等成功（不重复写）
+      return {
+        ok: true,
+        alreadyBound: true,
+        identity: parsed,
+        user: userRow ? JSON.parse(userRow.value) : null,
+        reg: regRow ? JSON.parse(regRow.value) : null,
+      };
+    }
+
+    // 2) 同一 unionid 是否已被占用 —— 同一开放平台下「小程序那个他」就是「网页这个他」，
+    //    两边必须落到同一个 userId，否则两端会各挂一个账号。
+    if (unionKey) {
+      const unionRow = select.get(safeKey(unionKey));
+      if (unionRow) {
+        const linked = select.get(safeKey(JSON.parse(unionRow.value)));
+        const linkedUserId = linked ? String(JSON.parse(linked.value).userId || '') : '';
+        if (linkedUserId && linkedUserId !== target) return { ok: false, reason: 'wechat_taken' };
+      }
+    }
+
+    // 3) 本账号是否已经绑了**另一个**微信（要换绑必须先解绑）
+    const boundRow = select.get(safeKey(userIndexKey));
+    if (boundRow && JSON.parse(boundRow.value) !== identityKey) return { ok: false, reason: 'account_already_bound' };
+
+    const boundIdentity = { ...identity, userId: target, bindingState: 'bound' };
+    put.run(safeKey(identityKey), JSON.stringify(boundIdentity));
+    put.run(safeKey(userIndexKey), JSON.stringify(identityKey));
+    if (unionKey) put.run(safeKey(unionKey), JSON.stringify(identityKey));
+
+    const nextUser = userRow ? { ...JSON.parse(userRow.value), ...userPatch } : null;
+    const nextReg = regRow ? { ...JSON.parse(regRow.value), ...regPatch } : null;
+    if (nextUser) put.run(safeKey('user_' + target), JSON.stringify(nextUser));
+    if (nextReg) put.run(safeKey('reg_' + target), JSON.stringify(nextReg));
+    return { ok: true, alreadyBound: false, identity: boundIdentity, user: nextUser, reg: nextReg };
+  })();
+}
+
+// 解绑：删掉该账号在当前应用下的微信身份三件套，并把 wechat* 字段从 user_/reg_ 上清掉。
+// identity.userId 必须等于 userId（否则说明拿错了键，宁可不删）。
+// 返回 { ok, user, reg } 或 { ok:false, reason: identity_not_found | identity_mismatch }
+export async function kvUnbindWechatIdentity({ identityKey, unionKey = '', userIndexKey, userId, userPatch = {}, regPatch = {} }) {
+  const select = db.prepare('SELECT value FROM kv WHERE key = ?');
+  const put = db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)');
+  const del = db.prepare('DELETE FROM kv WHERE key = ?');
+  return db.transaction(() => {
+    const target = String(userId || '');
+    const identityRow = select.get(safeKey(identityKey));
+    if (!identityRow) return { ok: false, reason: 'identity_not_found' };
+    const identity = JSON.parse(identityRow.value);
+    if (String(identity.userId) !== target) return { ok: false, reason: 'identity_mismatch' };
+
+    del.run(safeKey(identityKey));
+    del.run(safeKey(userIndexKey));
+    // unionKey 只在确实指向这张身份时才删（避免误删别人的归并钥匙）
+    if (unionKey) {
+      const unionRow = select.get(safeKey(unionKey));
+      if (unionRow && JSON.parse(unionRow.value) === identityKey) del.run(safeKey(unionKey));
+    }
+
+    const userRow = select.get(safeKey('user_' + target));
+    const regRow = select.get(safeKey('reg_' + target));
+    const nextUser = userRow ? { ...JSON.parse(userRow.value), ...userPatch } : null;
+    const nextReg = regRow ? { ...JSON.parse(regRow.value), ...regPatch } : null;
+    if (nextUser) put.run(safeKey('user_' + target), JSON.stringify(nextUser));
+    if (nextReg) put.run(safeKey('reg_' + target), JSON.stringify(nextReg));
+    return { ok: true, user: nextUser, reg: nextReg };
+  })();
+}
+
 // 自愈：微信身份指向的账号已经不存在了。
 // 成因：历史版本的「注销账号 / 后台删除用户」只删了 user_/reg_ 记录，没清微信身份，
 // 留下「身份还在、账号没了」的孤儿身份。kvResolveWechatIdentity 命中已存在的 identity

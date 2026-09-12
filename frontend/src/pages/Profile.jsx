@@ -15,6 +15,9 @@ export default function Profile() {
   const [nickname, setNickname] = useState(user?.name || '');
   const [copied, setCopied] = useState(false);
   const [wechatOpen, setWechatOpen] = useState(false);
+  // 绑定失败的提示（如「该微信已绑定其他账号」）；panelKey 用于失败后重挂载面板换一张新码
+  const [wechatErr, setWechatErr] = useState('');
+  const [wechatPanelKey, setWechatPanelKey] = useState(0);
 
   // 绑定/更换手机号
   const [phoneOpen, setPhoneOpen] = useState(false);
@@ -195,10 +198,15 @@ export default function Profile() {
             <Row
               icon={MessageCircle}
               label="微信"
-              value={user.wechatOpenid ? user.wechat : '功能待开放'}
+              value={user.wechatOpenid ? user.wechat : '未绑定'}
               placeholder="未绑定"
-              actionText={user.wechatOpenid ? '解绑' : '功能待开放'}
-              action={() => user.wechatOpenid ? unbindWechat() : alert('微信登录功能待开放，敬请期待')}
+              actionText={user.wechatOpenid ? '解绑' : '绑定'}
+              action={async () => {
+                if (!user.wechatOpenid) { setWechatErr(''); setWechatPanelKey(k => k + 1); setWechatOpen(true); return; }
+                if (!window.confirm('确定解绑微信？解绑后将无法再用该微信扫码登录本账号。')) return;
+                const r = await unbindWechat();
+                if (!r || !r.ok) alert((r && r.msg) || '解绑失败');
+              }}
             />
             <Row icon={Lock} label="登录密码" value={hasPassword ? '已设置' : '未设置'} placeholder="未设置" actionText="修改" action={openPwd} />
           </div>
@@ -247,14 +255,32 @@ export default function Profile() {
       {/* 绑定微信弹窗 */}
       <Modal
         open={wechatOpen}
-        onClose={() => setWechatOpen(false)}
+        onClose={() => { setWechatOpen(false); setWechatErr(''); }}
         title="绑定微信"
-        footer={<SecondaryButton onClick={() => setWechatOpen(false)}>关闭</SecondaryButton>}
+        footer={<SecondaryButton onClick={() => { setWechatOpen(false); setWechatErr(''); }}>关闭</SecondaryButton>}
       >
-        <WechatQrPanel
-          tip="扫码将微信账号绑定到当前登录账号"
-          onSuccess={(w) => { bindWechat(w); setWechatOpen(false); }}
-        />
+        <div className="space-y-3">
+          <p className="text-xs text-slate-500">
+            用微信扫一扫，把该微信绑定到当前账号（{user.name || user.email || user.id}）。绑定后即可用微信扫码快速登录。
+          </p>
+          {wechatErr && <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{wechatErr}</div>}
+          <WechatQrPanel
+            key={wechatPanelKey}
+            hintText="扫码后，请在手机上确认绑定"
+            successText="绑定成功"
+            onSuccess={async (w) => {
+              const r = await bindWechat({ ticket: w && w.ticket });
+              if (!r || !r.ok) {
+                // 票据已被消费、面板也进了 done 态 → 换 key 重挂载，给一张新码让他重试
+                setWechatErr((r && r.msg) || '绑定失败，请重试');
+                setWechatPanelKey(k => k + 1);
+                return;
+              }
+              setWechatOpen(false);
+              setWechatErr('');
+            }}
+          />
+        </div>
       </Modal>
 
       {/* 绑定/修改手机号 */}

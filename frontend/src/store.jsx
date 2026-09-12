@@ -1321,37 +1321,65 @@ export function StoreProvider({ children }) {
     }
   };
 
-  // 绑定微信到当前登录账号（若该 openid 已被其它账号占用，先解绑那个账号）
-  const bindWechat = (wechatUser) => {
-    if (!user) return false;
-    const { openid, nickname, headimgurl, unionid } = wechatUser || {};
-    if (!openid) return false;
-    // 解除其它账号对同一 openid 的绑定
-    setRegisteredUsers(prev => prev.map(u => (u.wechatOpenid === openid && u.id !== user.id)
-      ? { ...u, wechatOpenid: '', wechat: '', wechatAvatar: '', provider: u.provider === 'wechat' ? '' : u.provider }
-      : u));
-    setAdminUsers(prev => prev.map(u => (u.wechatOpenid === openid && u.id !== user.id)
-      ? { ...u, wechatOpenid: '', wechat: '', wechatAvatar: '', provider: u.provider === 'wechat' ? '' : u.provider }
-      : u));
-    updateUserProfile({
-      provider: user.provider && user.provider !== 'wechat' ? user.provider : 'wechat',
-      wechat: nickname, wechatOpenid: openid, wechatAvatar: headimgurl,
-      avatar: user.avatar || headimgurl, unionid: unionid || user.unionid || '',
-    });
-    // 单条 key 同步
-    tryWriteSingleKey('user', { ...user, provider: user.provider && user.provider !== 'wechat' ? user.provider : 'wechat', wechat: nickname, wechatOpenid: openid, wechatAvatar: headimgurl, avatar: user.avatar || headimgurl, unionid: unionid || user.unionid || '' });
-    return true;
+  // 把服务端回来的账号资料合并进本地缓存。**不写服务端** —— 刚才那个请求已经写过权威数据了，
+  // 再走一次 updateUserProfile 只会多一次写、还可能和它打架。
+  // 只挑微信相关字段，避免覆盖 points/balance 等只存在本地的字段。
+  const applyWechatAccount = (u) => {
+    const src = u || {};
+    const patch = {
+      wechat: src.wechat || '',
+      wechatOpenid: src.wechatOpenid || '',
+      wechatAvatar: src.wechatAvatar || '',
+      unionid: src.unionid || '',
+      provider: src.provider || '',
+    };
+    setUser(prev => (prev ? { ...prev, ...patch } : prev));
+    const uid = (user && user.id) || '';
+    if (!uid) return;
+    setAdminUsers(prev => prev.map(x => (x.id === uid ? { ...x, ...patch } : x)));
+    setRegisteredUsers(prev => prev.map(x => (x.id === uid ? { ...x, ...patch } : x)));
   };
 
-  // 解绑微信（保留原账号与登录方式）
-  const unbindWechat = () => {
-    if (!user) return false;
-    updateUserProfile({
-      wechat: '', wechatOpenid: '', wechatAvatar: '',
-      provider: user.provider === 'wechat' ? '' : user.provider,
-    });
-    tryWriteSingleKey('user', { ...user, wechat: '', wechatOpenid: '', wechatAvatar: '', provider: user.provider === 'wechat' ? '' : user.provider });
-    return true;
+  // 绑定微信到当前登录账号（阶段2B，服务端化）：只把一次性票据交给后端。
+  // 旧实现是「纯前端假绑定」—— 改一下浏览器 local state、写一条 user_ 键就完事，
+  // 服务端身份表完全不知道：于是「已绑定微信」既不能用来登录，下次扫码登录还会把它覆盖掉。
+  // 冲突（该微信已属别的账号 / 本账号已绑了别的微信）由服务端 409 拒绝，这里把原因回给调用方显示。
+  const bindWechat = async (payload) => {
+    if (!user) return { ok: false, msg: '请先登录' };
+    const ticket = (payload && payload.ticket) || '';
+    if (!ticket) return { ok: false, msg: '扫码凭证缺失，请重新扫码' };
+    try {
+      const r = await apiFetch('/api/wechat/bind', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticket }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!j || !j.ok) return { ok: false, msg: (j && j.msg) || '绑定失败，请重试' };
+      applyWechatAccount(j.user);
+      return { ok: true, msg: j.alreadyBound ? '该微信已绑定在当前账号上' : '绑定成功' };
+    } catch {
+      return { ok: false, msg: '网络异常，请稍后重试' };
+    }
+  };
+
+  // 解绑微信（阶段2B，服务端化）：服务端会把身份三件套一起删掉。
+  // 只清本地字段等于没解绑 —— 下次用同一个微信扫码登录照样归并回这个账号。
+  const unbindWechat = async () => {
+    if (!user) return { ok: false, msg: '请先登录' };
+    try {
+      const r = await apiFetch('/api/wechat/unbind', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!j || !j.ok) return { ok: false, msg: (j && j.msg) || '解绑失败，请重试' };
+      applyWechatAccount(j.user);
+      return { ok: true, msg: '已解绑微信' };
+    } catch {
+      return { ok: false, msg: '网络异常，请稍后重试' };
+    }
   };
 
   // 修改密码 / 首次设置密码（2026-08-03 服务端化：scrypt 哈希，不再前端弱哈希）。返回 { ok, msg }

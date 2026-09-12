@@ -345,6 +345,101 @@ async function resolveWebWechatAccount(profile) {
   return { userId: account.userId, record: { ...(nextReg || {}), ...(nextUser || {}) }, isNewUser: false };
 }
 
+// ---- 绑定 / 解绑微信（阶段2B：Profile「账号安全 → 微信」）----
+// 与 resolveWebWechatAccount 的分工：那条是**登录**（查不到就建号）；这条是**绑定**
+// （必须已有登录态，绝不建号、也绝不把别人的绑定抢过来）。
+// 2026-09-12 之前 Profile 里的 bindWechat 是纯前端假绑定（只改浏览器 local state + 写一条 user_ 键），
+// 服务端身份表完全不知道这件事：于是「已绑定微信」既不能用来登录，下次扫码登录还会把它覆盖掉。
+async function bindWebWechatToAccount(userId, profile) {
+  const appId = WECHAT.appId || 'web-unconfigured';
+  const now = new Date().toISOString();
+  const safeId = sanitizeIdSafe(userId);
+  const keys = identityStorageKeys(appId, profile.openid, profile.unionid || '', safeId);
+  const [storedReg, storedUser] = await Promise.all([
+    KV.kvGet('reg_' + safeId),
+    KV.kvGet('user_' + safeId),
+  ]);
+  if (!storedReg && !storedUser) return { ok: false, reason: 'account_not_found' };
+
+  const identity = {
+    id: keys.identityKey,
+    appId,
+    openid: profile.openid,
+    unionid: profile.unionid || null,
+    userId: safeId,
+    bindingState: 'bound',
+    source: 'web',
+    createdAt: now,
+    updatedAt: now,
+  };
+  // 这里用**赋值**而不是「只补空字段」：账号上可能残留过期的 wechatOpenid（旧前端假绑定留下的），
+  // 而身份表里并没有对应身份 —— 必须被这次真正绑定的 openid 覆盖，否则会显示成绑着两个微信。
+  const patch = (rec) => (rec ? {
+    ...rec,
+    wechat: profile.nickname || rec.wechat || '',
+    wechatOpenid: profile.openid,
+    wechatAvatar: profile.headimgurl || rec.wechatAvatar || '',
+    unionid: profile.unionid || rec.unionid || '',
+    avatar: rec.avatar || profile.headimgurl || '',
+    provider: rec.provider || 'wechat',
+    updatedAt: now,
+  } : null);
+  const result = await KV.kvBindWechatToUser({
+    identityKey: keys.identityKey,
+    unionKey: keys.unionKey,
+    userIndexKey: keys.userIndexKey,
+    identity,
+    userId: safeId,
+    userPatch: patch(storedUser) || {},
+    regPatch: patch(storedReg) || {},
+  });
+  if (!result.ok) return result;
+  return {
+    ok: true,
+    alreadyBound: !!result.alreadyBound,
+    record: { ...(result.reg || {}), ...(result.user || {}) },
+  };
+}
+
+// 解绑微信：必须连服务端身份三件套一起删。只清账号上的 wechat* 字段等于没解绑 ——
+// 下次用同一个微信扫码登录，照样会归并回这个账号。
+async function unbindWebWechat(userId) {
+  const appId = WECHAT.appId || 'web-unconfigured';
+  const safeId = sanitizeIdSafe(userId);
+  const userIndexKey = identityStorageKeys(appId, '', '', safeId).userIndexKey;
+  const linked = userIndexKey ? await KV.kvGet(userIndexKey) : null;
+  const identityKey = typeof linked === 'string' ? linked : (linked && linked.id) || '';
+  if (!identityKey) return { ok: false, reason: 'identity_not_found' };
+  const identityRecord = await KV.kvGet(identityKey);
+  const unionKey = identityRecord && identityRecord.unionid
+    ? identityStorageKeys(appId, '', identityRecord.unionid, '').unionKey
+    : '';
+  const [storedReg, storedUser] = await Promise.all([
+    KV.kvGet('reg_' + safeId),
+    KV.kvGet('user_' + safeId),
+  ]);
+  const now = new Date().toISOString();
+  const patch = (rec) => (rec ? {
+    ...rec,
+    wechat: '',
+    wechatOpenid: '',
+    wechatAvatar: '',
+    unionid: '',
+    provider: rec.provider === 'wechat' ? '' : (rec.provider || ''),
+    updatedAt: now,
+  } : null);
+  const result = await KV.kvUnbindWechatIdentity({
+    identityKey,
+    unionKey,
+    userIndexKey,
+    userId: safeId,
+    userPatch: patch(storedUser) || {},
+    regPatch: patch(storedReg) || {},
+  });
+  if (!result.ok) return result;
+  return { ok: true, record: { ...(result.reg || {}), ...(result.user || {}) } };
+}
+
 // ---- 阿里云 Dypns（号码认证服务）真实短信 ----
 // 复用下方 buildAliyunSignature（HMAC-SHA1 RPC 签名）零依赖调用 dypnsapi.aliyuncs.com，
 // 无需安装 @alicloud/pop-core。四项环境变量配齐自动切「真实模式」，否则降级 mock（验证码 1234）。
@@ -3261,6 +3356,70 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: String(e.message || e) }));
         return;
       }
+    }
+    // 绑定微信到当前登录账号（阶段2B）。鉴权：必须是普通用户会话（admin 会话没有 user_ 记录）。
+    // body 只收一次性票据 —— 和登录同理，客户端上报的 openid 一律不可信。
+    const WECHAT_BIND_ERRORS = {
+      account_not_found: [404, '账号不存在'],
+      wechat_taken: [409, '该微信已绑定其他账号，请先用该微信登录，在原账号里解绑后再绑定'],
+      account_already_bound: [409, '当前账号已绑定其他微信，请先解绑再绑定新的'],
+    };
+    if (p === '/api/wechat/bind' && req.method === 'POST') {
+      const session = requireUser(req, res, '请先登录后再绑定微信');
+      if (!session) return;
+      const body = await readBody(req);
+      const profile = consumeWechatTicket(body && body.ticket);
+      if (!profile) {
+        res.statusCode = 401;
+        res.end(JSON.stringify({ ok: false, code: 'INVALID_TICKET', msg: '扫码凭证无效或已过期，请重新扫码' }));
+        return;
+      }
+      let result;
+      try {
+        result = await bindWebWechatToAccount(session.userId, profile);
+      } catch (e) {
+        console.error('[wechat/bind]', e && (e.stack || e.message || e));
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, msg: '绑定失败，请稍后重试' }));
+        return;
+      }
+      if (!result.ok) {
+        const [status, msg] = WECHAT_BIND_ERRORS[result.reason] || [400, '绑定失败'];
+        console.warn('[wechat:bind] rejected user=' + sanitizeIdSafe(session.userId).slice(0, 16) + ' reason=' + result.reason);
+        res.statusCode = status;
+        res.end(JSON.stringify({ ok: false, code: String(result.reason || '').toUpperCase(), msg }));
+        return;
+      }
+      console.log('[wechat:bind] user=' + sanitizeIdSafe(session.userId).slice(0, 16) + ' already=' + result.alreadyBound);
+      res.end(JSON.stringify({ ok: true, alreadyBound: !!result.alreadyBound, user: toSafeUser(result.record) || { id: session.userId } }));
+      return;
+    }
+    // 解绑微信（阶段2B）：服务端身份三件套一并删除
+    if (p === '/api/wechat/unbind' && req.method === 'POST') {
+      const session = requireUser(req, res, '请先登录');
+      if (!session) return;
+      let result;
+      try {
+        result = await unbindWebWechat(session.userId);
+      } catch (e) {
+        console.error('[wechat/unbind]', e && (e.stack || e.message || e));
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, msg: '解绑失败，请稍后重试' }));
+        return;
+      }
+      if (!result.ok) {
+        const mismatch = result.reason === 'identity_mismatch';
+        res.statusCode = mismatch ? 409 : 404;
+        res.end(JSON.stringify({
+          ok: false,
+          code: String(result.reason || '').toUpperCase(),
+          msg: mismatch ? '身份不匹配，已中止解绑' : '当前账号未绑定微信',
+        }));
+        return;
+      }
+      console.log('[wechat:unbind] user=' + sanitizeIdSafe(session.userId).slice(0, 16));
+      res.end(JSON.stringify({ ok: true, user: toSafeUser(result.record) || { id: session.userId } }));
+      return;
     }
     // ============ 手机号验证码登录（真实注册 / 登录）============
     // 1) 发送验证码：生成 6 位验证码并暂存（5 分钟有效）
