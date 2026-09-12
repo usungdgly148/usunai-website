@@ -3648,6 +3648,67 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // ============ 账号一次性清理（用户注销 / 后台删除用户）============
+    // 存在意义：一个账号的痕迹散落在 user_/reg_/email_/phone_/assets_/order_/compute_/hist_/wxmini_*
+    // 等十几处键上，前端分步删必然漏项，历史上先后踩过两个坑：
+    //   ① 只删 user_ 留下 reg_ → 用户用原邮箱原密码仍能登录、且该邮箱被永久占用无法重新注册；
+    //   ② 删了 user_/reg_ 却没清 wxmini_* → 微信身份孤儿化，该微信在小程序端永久登录失败。
+    // 这里改为「服务端单事务、一次清干净」，前端只调一次，从结构上消除漏项。
+    // 鉴权：普通用户只能清自己；要指定他人 userId 必须是管理员。需显式 confirm:true 防误触发。
+    if (p === '/api/account/purge' && req.method === 'POST') {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Cache-Control', 'no-store');
+      const session = getSession(req);
+      if (!session) {
+        res.statusCode = 401;
+        res.end(JSON.stringify({ ok: false, msg: '未登录' }));
+        return;
+      }
+      const body = await readBody(req);
+      if (!body || body.confirm !== true) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ ok: false, msg: '缺少确认标记 confirm' }));
+        return;
+      }
+      const requested = body.userId ? String(body.userId) : '';
+      const selfId = String(session.userId || '');
+      if (requested && requested !== selfId && !isAdminSession(session)) {
+        res.statusCode = 403;
+        res.end(JSON.stringify({ ok: false, msg: '无权删除他人账号' }));
+        return;
+      }
+      const targetId = requested || selfId;
+      if (!targetId) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ ok: false, msg: '缺少 userId' }));
+        return;
+      }
+      const result = await KV.kvPurgeAccount({ userId: targetId });
+      // 自己注销自己时顺手吊销当前会话：会话校验只看签名与过期，不查账号是否还存在，
+      // 不吊销的话「账号已删、token 还能用」——属于同一类残留。
+      if (targetId === selfId) {
+        const h = (req.headers && req.headers.authorization) || '';
+        const token = h.startsWith('Bearer ') ? h.slice(7).trim() : '';
+        const payload = token ? jwtVerify(token) : null;
+        if (payload) {
+          const digest = sessionDigest(token);
+          revokedSessions.set(digest, payload.exp);
+          await KV.kvPut('revoked_session_' + digest, { exp: payload.exp });
+        }
+      }
+      console.log(
+        '[account:purge] by=' + (selfId ? sanitizeIdSafe(selfId).slice(0, 16) : 'admin')
+        + ' target=' + sanitizeIdSafe(targetId).slice(0, 16)
+        + ' total=' + (result.total || 0) + ' ' + JSON.stringify(result.breakdown || {}),
+      );
+      res.end(JSON.stringify({
+        ok: !!result.ok,
+        total: result.total || 0,
+        breakdown: result.breakdown || {},
+      }));
+      return;
+    }
+
     // ============ 文件上传（本地 Blob 替代 EdgeOne Blob）============
     // upload-url：返回本站可 PUT 的上传端点；浏览器直传，不经过 Node 解析大 body
     // 2026-08-03 商用安全：上传需要登录会话（防匿名滥用存储）

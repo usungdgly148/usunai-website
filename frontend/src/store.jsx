@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { MOCK_AGENTS, MOCK_WORKFLOWS, MOCK_CATEGORIES, MOCK_CATEGORY_GROUPS, MOCK_ORDERS, MOCK_COMPUTES, MOCK_ADMIN_USERS, MOCK_COMPUTE_PACKAGES, MOCK_ADMIN_ACCOUNTS, MOCK_OPERATION_LOGS, MOCK_BANNERS, MOCK_RECOMMENDED, MOCK_ASSETS } from './mock.js';
-import { tryWriteSingleKey, tryDeleteSingleKey, writeAdminSingleKey, deleteAdminSingleKey } from './singleKeySync.js';
+import { tryWriteSingleKey, writeAdminSingleKey } from './singleKeySync.js';
 import { apiFetch, adminFetch, getToken, setToken, clearToken, getAdminToken, setAdminToken, clearAdminToken } from './authFetch.js';
 
 function safeLocalStorageSet(key, value) {
@@ -1369,16 +1369,31 @@ export function StoreProvider({ children }) {
     }
   };
 
-  // 注销账号：真正删除用户在注册表与后台表中的记录并清空会话，释放手机号/邮箱，允许后续重新注册
-  const cancelAccount = () => {
-    if (!user) return;
+  // 注销账号：交给服务端一次性清干净（user_/reg_/登录索引/资产/订单/算力/历史/微信身份）。
+  // 不再在前端分步删单条 key —— 一个账号的痕迹散落在十几处键上，分步删必然漏项：
+  // 历史上漏掉 reg_ 就造成「注销后仍能用原邮箱原密码登录、且该邮箱被永久占用无法重新注册」。
+  const cancelAccount = async () => {
+    if (!user) return { ok: false, msg: '未登录' };
     const id = user.id;
+    try {
+      const r = await apiFetch('/api/account/purge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j || !j.ok) throw new Error((j && j.msg) || ('HTTP ' + r.status));
+    } catch (error) {
+      const msg = (error && error.message) || '注销失败，请稍后重试';
+      setPersistError({ key: 'cancelAccount', msg: '注销失败：' + msg, ts: Date.now() });
+      return { ok: false, msg };
+    }
+    // 服务端确认已清干净，再清本地状态（顺序不能反：请求需要带着有效会话发出）
     setRegisteredUsers(prev => prev.filter(u => u.id !== id));
     setAdminUsers(prev => prev.filter(u => u.id !== id));
     setUser(null);
     setPoints(0);
-    // 单条 key 同步删除（fail-silent）：users/delete 同时清 user_<id> + reg_<id>
-    tryDeleteSingleKey('user', id);
+    return { ok: true };
   };
 
   // 忘记密码 — 验证身份（发送短信验证码）
@@ -1615,22 +1630,19 @@ export function StoreProvider({ children }) {
     }
   };
 
-  // 删除用户：级联删除该用户所有关联数据（算力记录、订单、对话历史、资产库），并释放注册记录
+  // 删除用户：交给服务端一次性清干净（user_/reg_/登录索引/资产/订单/算力/历史/微信身份）。
+  // 不再由前端分步删：既怕漏项（曾经漏掉微信身份，导致该微信在小程序端永久无法登录），
+  // 也怕 Promise.all 并行删除的竞态；服务端按 userId 归属遍历，也不依赖前端已加载的列表。
   const deleteUser = async (userId, adminName) => {
     if (!userId) return { ok: false, msg: '缺少用户 ID' };
-    const compIds = computeRecords.filter(r => r.userId === userId).map(r => r.id);
-    const ordIds = orders.filter(o => o.userId === userId).map(o => o.id);
-    const histIds = history.filter(h => h.userId === userId).map(h => h.id);
     try {
-      const assetResult = await deleteAssetAdmin(userId, null);
-      if (!assetResult.ok) throw new Error(assetResult.msg || '删除用户资产失败');
-      await Promise.all([
-        deleteAdminSingleKey('user', userId),
-        deleteAdminSingleKey('reg', userId),
-        ...compIds.map(id => deleteAdminSingleKey('compute', id)),
-        ...ordIds.map(id => deleteAdminSingleKey('order', id)),
-        ...histIds.map(id => deleteAdminSingleKey('history', id, { userId })),
-      ]);
+      const r = await adminFetch('/api/account/purge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, confirm: true }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j || !j.ok) throw new Error((j && j.msg) || ('HTTP ' + r.status));
     } catch (error) {
       const msg = error.message || '删除用户失败';
       setPersistError({ key: 'adminUsers', msg, ts: Date.now() });

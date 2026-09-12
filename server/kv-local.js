@@ -221,20 +221,10 @@ export async function kvResetOrphanWechatIdentity({
   })();
 }
 
-// 清理某个账号名下的全部微信身份（注销账号 / 后台删除用户时调用），
-// 避免留下「身份在、账号没了」的孤儿身份导致该微信永久无法登录。
-// 遍历 wxmini_* 键即可，无需重算摘要：wxmini_union_* / wxmini_user_* 的值
-// 就是它指向的 identityKey，凡是值落在待删集合里的一并删除。
+// ── 账号清理的内部工具（供 kvDeleteWechatIdentitiesByUser / kvPurgeAccount 复用）──
+// 找出属于该账号的微信身份记录键。遍历 wxmini_* 即可、无需重算摘要。
 // 注：用 GLOB 而非 LIKE —— LIKE 里的 _ 是单字符通配符，会误匹配。
-export async function kvDeleteWechatIdentitiesByUser(userId) {
-  const uid = String(userId == null ? '' : userId);
-  if (!uid) return { ok: false, removed: [] };
-  let rows;
-  try {
-    rows = db.prepare("SELECT key, value FROM kv WHERE key GLOB 'wxmini_*'").all();
-  } catch {
-    return { ok: false, removed: [] };
-  }
+function collectWechatIdentityKeys(rows, uid) {
   const identityKeys = new Set();
   for (const row of rows) {
     if (!row.key.startsWith('wxmini_identity_')) continue;
@@ -245,30 +235,125 @@ export async function kvDeleteWechatIdentitiesByUser(userId) {
       // 损坏记录跳过，不影响其它身份清理
     }
   }
+  return identityKeys;
+}
+
+// 由身份键集合反查：身份记录本身 + 指向它的索引键（wxmini_union_* / wxmini_user_* 的值即 identityKey）
+function wechatKeysToDelete(rows, identityKeys) {
+  const out = [];
+  for (const row of rows) {
+    if (row.key.startsWith('wxmini_identity_')) {
+      if (identityKeys.has(row.key)) out.push(row.key);
+      continue;
+    }
+    try {
+      const linked = JSON.parse(row.value);
+      if (identityKeys.has(String(linked))) out.push(row.key);
+    } catch {
+      // 索引值不是字符串（异常数据），不动
+    }
+  }
+  return out;
+}
+
+function readRecordSafe(key) {
+  try {
+    const row = db.prepare('SELECT value FROM kv WHERE key = ?').get(key);
+    return row ? JSON.parse(row.value) : null;
+  } catch {
+    return null;
+  }
+}
+
+// 清理某个账号名下的全部微信身份。保留作为 /api/single-key/* 删除路径的兜底
+// （前端已改走 /api/account/purge，但旧版前端缓存仍可能调用前者）。
+export async function kvDeleteWechatIdentitiesByUser(userId) {
+  const uid = String(userId == null ? '' : userId);
+  if (!uid) return { ok: false, removed: [] };
+  let rows;
+  try {
+    rows = db.prepare("SELECT key, value FROM kv WHERE key GLOB 'wxmini_*'").all();
+  } catch {
+    return { ok: false, removed: [] };
+  }
+  const identityKeys = collectWechatIdentityKeys(rows, uid);
   if (identityKeys.size === 0) return { ok: true, removed: [] };
   const removed = [];
   const del = db.prepare('DELETE FROM kv WHERE key = ?');
   db.transaction(() => {
-    for (const row of rows) {
-      if (row.key.startsWith('wxmini_identity_')) {
-        if (identityKeys.has(row.key)) {
-          del.run(row.key);
-          removed.push(row.key);
-        }
-        continue;
-      }
-      try {
-        const linked = JSON.parse(row.value);
-        if (identityKeys.has(String(linked))) {
-          del.run(row.key);
-          removed.push(row.key);
-        }
-      } catch {
-        // 索引值不是字符串（异常数据），不动
-      }
+    for (const key of wechatKeysToDelete(rows, identityKeys)) {
+      del.run(key);
+      removed.push(key);
     }
   })();
   return { ok: true, removed };
+}
+
+// 一次性清干净一个账号的全部痕迹（用户注销 / 后台删除用户）。
+// 存在意义：根治「前端分步删、漏一项」的结构性问题 —— 历史上先后踩过两个坑：
+//   ① 只删 user_ 留下 reg_ → 用户用原邮箱原密码仍能登录、且邮箱被永久占用无法重新注册；
+//   ② 删了 user_/reg_ 却没清 wxmini_* → 微信身份变成孤儿，该微信永久登录失败。
+// 单事务执行（要么全成要么全败）；email/phone 索引由记录里反查，调用方无需传。
+// 返回按类别的删除明细便于审计。
+export async function kvPurgeAccount({ userId, email = '', phone = '' }) {
+  const uid = String(userId == null ? '' : userId);
+  if (!uid) return { ok: false, reason: 'missing_user_id', total: 0, breakdown: {} };
+  const safe = safeKey(uid);
+  const del = db.prepare('DELETE FROM kv WHERE key = ?');
+  const fixed = [];
+  const identities = [];
+  const records = [];
+
+  return db.transaction(() => {
+    // 0) 记录马上要被删，先把 email/phone 读出来用于清索引
+    const regRec = readRecordSafe('reg_' + safe);
+    const userRec = readRecordSafe('user_' + safe);
+    const em = String(email || (regRec && regRec.email) || (userRec && userRec.email) || '')
+      .trim().toLowerCase().replace(/[^a-z0-9@.]/g, '_');
+    const ph = String(phone || (regRec && regRec.phone) || (userRec && userRec.phone) || '')
+      .replace(/[^0-9]/g, '');
+
+    // 1) 记录型数据：按记录内的 userId 归属（order_/compute_/hist_ 都带 userId 字段）
+    for (const prefix of ['order_', 'compute_', 'hist_']) {
+      for (const row of db.prepare('SELECT key, value FROM kv WHERE key GLOB ?').all(prefix + '*')) {
+        try {
+          const rec = JSON.parse(row.value);
+          if (rec && String(rec.userId) === uid) {
+            del.run(row.key);
+            records.push(row.key);
+          }
+        } catch {
+          // 损坏记录跳过
+        }
+      }
+    }
+
+    // 2) 微信身份三件套（identity + union 索引 + user 索引）
+    const wxRows = db.prepare("SELECT key, value FROM kv WHERE key GLOB 'wxmini_*'").all();
+    const identityKeys = collectWechatIdentityKeys(wxRows, uid);
+    for (const key of wechatKeysToDelete(wxRows, identityKeys)) {
+      del.run(key);
+      identities.push(key);
+    }
+
+    // 3) 账号本体、资产、登录索引
+    // 注意：这里统一过一道 safeKey —— email 索引键里带 @ 和 .，而落库时 safeKey 会把它们
+    // 替换成 _（如 email_a@b.c → email_a_b_c）。若直接把拼好的键交给 DELETE，会与真实行键对不上，
+    // 结果就是「账号删了、email 索引还留着」——正是本次要根治的那类漏项。
+    const fixedKeys = [safeKey('user_' + safe), safeKey('reg_' + safe), safeKey('assets_' + safe)];
+    if (em) fixedKeys.push(safeKey('email_' + em));
+    if (ph) fixedKeys.push(safeKey('phone_' + ph));
+    for (const key of fixedKeys) {
+      if (del.run(key).changes) fixed.push(key);
+    }
+
+    return {
+      ok: true,
+      total: fixed.length + identities.length + records.length,
+      breakdown: { fixed: fixed.length, identities: identities.length, records: records.length },
+      keys: { fixed, identities, records },
+    };
+  })();
 }
 
 // 智能体调用完成后的余额、算力流水在同一事务落库。

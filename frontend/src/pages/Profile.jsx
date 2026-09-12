@@ -55,11 +55,16 @@ export default function Profile() {
     }
   };
 
-  const handleCancel = () => {
-    if (window.confirm('确定要注销账号吗？账号及关联信息将被永久删除，且无法恢复。')) {
-      cancelAccount();
-      navigate('/');
+  const handleCancel = async () => {
+    if (!window.confirm('确定要注销账号吗？账号及关联信息将被永久删除，且无法恢复。')) return;
+    const res = await cancelAccount();
+    // 注销现在由服务端一次性清理，失败时必须让用户看见（旧实现是静默 fire-and-forget，
+    // 会出现「界面显示已注销、服务端其实没删」的错觉）
+    if (!res || !res.ok) {
+      window.alert('注销失败：' + ((res && res.msg) || '请稍后重试'));
+      return;
     }
+    navigate('/');
   };
 
   const handleAvatar = async (e) => {

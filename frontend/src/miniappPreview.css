@@ -2,7 +2,7 @@
  * 自动生成，请勿手改 —— 源文件是 miniapp/src/app.scss（真机那份）。
  * 生成器：frontend/scripts/gen-miniapp-preview-style.mjs
  * 作用：后台「小程序设计」画布直接复用真机样式，保证画布 = 真机的构造性一致。
- * 本次：623 条规则 / 14 条图标 / 1 组 keyframes（跳过 2 个 @media，画布不渲染那两个页面）
+ * 本次：624 条规则 / 14 条图标 / 1 组 keyframes（跳过 2 个 @media，画布不渲染那两个页面）
  * ========================================================================== */
 .miniapp-stage .mini-tab-icon { width: 22px; height: 22px; background-repeat: no-repeat; background-position: center; background-size: contain; }
 .miniapp-stage .mini-tab-icon-home { background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAACXBIWXMAACxLAAAsSwGlPZapAAAEQElEQVR42u1dTWgTQRgdUVEERQUvioqgHkQQFNQKojd/DooHBRFE8eBRBUXwknrQJtkUidZsUi0BPYib2W1pRRQLRShYtRUvFkFPHhT1oChYBWv9vtb+YNvsbjOzze6+Bx/ksDuz33uTb/ZldyZCAAAAAAAAAAAAAAAQElxusFZzgImAkc47Nam8/Sqdtwc4hj47NWAmAKRM+0jatPuGyR8J0/5lmPIEGNIEy7Jmpk2ZHEf8eCEKhNlgTCHqb1iLidh2V/JHRWjnc8CcAmQanbVE6mvP5A/PC6Z8a+Ts9WCwonov99Jo/uqX/DHxnc4/ACZ9YmBgYAbd2VwgAvsrIH84+rktbhPMekCiWJxLpN1SQPx/84K0EoXWeWC4XL2/3ryciOrxVuPt36m8PDcY9NmjCD3cB5ieAMlCaRuVig8eifyWytn7Rs7NyV00X3zxODl/NszSTjDuxVxNHG8M01o3wYS9Jp2XvR5vU2HafJmr0bLzsC53b9Fk7WWztxfQMa0+/EJ8TRsbJSLrkR+yEomOWRpEfXypyVoCczUZQXn5M5m3j/sva6XDNKf8gGmrwFzRse+TOXvrlPsq2BtJwHcwbaPm6rxXc0XHvkgWrBUVC36tZSmVmS6Pgv/h8hU50+bXXNGovaPSNGWz9+eQoMVYmrZ601pGI+uZ1xFIo7VWY/k75dm05eVLo0GujK250nZNcTFtKsyVxm9CdE2banOlC5E0bbrMVRUNluo1bUGYK30lKeSmLUhzpS2HMJq26TJX2kQIk2mbbnOlb3L2Z9ro2LuB51VN5ip2ps2vuUqbzn4R2lcg7d1VZdqq2VxF3rRRDTd8vIXw4EqxeWFUfkzkXDgnH/OdofQC6Kt1yIe5yrDBEZF8fGpnvPLAnCmshbLNA/F9FEdFxME5eivDsk1l+el2M1dGobRFxAScK+fsUoa6gxHAtJ/zbamIGThnzr0aBDgpYgrOHQJAAAgAASAABIAAEAACQAAIAAFCKwA/YaPnDCk3i19JcNvcB/cFAcb34egifgJyHAgwBplc86agyB8O7hMC/AO/IxS0ACreS4qMAOUS0RaarxsCQAAIEBEBZC9PmFOJsm8zQAD9iYT1uiEABIAAEAACQAAIAAEgAASAABAAAkAACAABIECsBbA7y/y0ezquAtCauTNllq92qhRAlumoo9LFymEUYHCROu0dUW7TJ6FwdWStywOOpkp2pA2bALza330xt0wo3Uch8CdWIY86094gVO4JQYo+BbFeQz4RQvluIs6OwQ0qQLD71gy50nYh9CzdvwiSXUd/Qgid29OY8ipInnT0ZwPZvoZusY7RXcQnkD5yp/Yx8EXqg5veDf15QpeivxoJW/TzZEvEn03dbJkvxDRvcmQ0Wqum+v7O2DBypT3pgnOw3nQ2q2iPg9viNrltJddIuXLOAgAAAAAAAAAAAAAAn/gLqFo/Lp8+vjkAAAAASUVORK5CYII="); }
@@ -68,9 +68,10 @@
 .miniapp-stage .msg-action-hover { opacity: .55; }
 .miniapp-stage .state-skeleton { padding: 20px 5px; }
 .miniapp-stage .state-skeleton .t-skeleton { width: 100%; }
-.miniapp-stage .chat-bubble { max-width: 86%; padding: 10px 11px; border-radius: 10px; line-height: 1.55; white-space: pre-wrap; }
-.miniapp-stage .assistant-bubble { background: var(--mini-surface); border: 0.5px solid var(--mini-line); }
-.miniapp-stage .chat-opening-bubble { max-width: 100%; box-sizing: border-box; white-space: normal; }
+.miniapp-stage .chat-opening-row { margin: 7px 0 2px; }
+.miniapp-stage .chat-opening-avatar { padding-top: 0; }
+.miniapp-stage .chat-opening-row .t-chat-markdown { font-size: 16px; }
+.miniapp-stage .t-chat-markdown-image image { display: block; width: 100%; margin: 6px 0; border-radius: 6px; }
 .miniapp-stage .mini-markdown { color: var(--mini-text-2); font-size: 13.5px; line-height: 1.72; white-space: normal; }
 .miniapp-stage .mini-markdown-block { display: block; margin-bottom: 7px; }
 .miniapp-stage .mini-markdown-block:last-child { margin-bottom: 0; }
