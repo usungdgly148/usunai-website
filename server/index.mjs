@@ -3195,8 +3195,14 @@ const server = http.createServer(async (req, res) => {
       }
       const state = crypto.randomBytes(16).toString('hex');
       wechatStates.set(state, { status: 'pending', user: null, expires: Date.now() + 5 * 60 * 1000 });
+      // ⚠️ 这个 url 仅供诊断/排查，**不要**把它交给前端自己用 qrcode 库画成二维码：
+      // 它是「给 PC 浏览器看的」授权页地址，手机扫到之后微信只会把它当普通链接打开，
+      // 页面上再出现一个二维码（套娃现象），流程永远走不到我们的 redirect_uri（零回调）。
+      // 前端必须改用微信官方 wxLogin.js（模式二内嵌二维码）—— 官方 SDK 会在 iframe 里带上
+      // login_type=jssdk，由微信自己渲染「可被扫一扫识别的登录码」，扫码即弹授权确认。
+      // 所以下面额外把 appid / redirectUri 一起返回给前端。
       const url = `https://open.weixin.qq.com/connect/qrconnect?appid=${encodeURIComponent(WECHAT.appId)}&redirect_uri=${encodeURIComponent(WECHAT.redirectUri)}&response_type=code&scope=snsapi_login&state=${state}#wechat_redirect`;
-      res.end(JSON.stringify({ mode: 'real', state, url }));
+      res.end(JSON.stringify({ mode: 'real', state, url, appid: WECHAT.appId, redirectUri: WECHAT.redirectUri }));
       return;
     }
     if (p === '/api/wechat/check') {

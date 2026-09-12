@@ -9,7 +9,6 @@ import {
   Grid3X3, Bell, CreditCard, Ticket, Receipt, Flag, Star, Users, Mic, Calendar, ArrowLeft, Archive, Zap, Package,
   Target, Handshake, Crown, UserCircle, Lightbulb, Flame, Copy, Hammer, Boxes, DoorOpen, Layers, Square, Droplets, Sofa, PenTool, HardHat, FileCheck, BadgeCheck, CalendarDays, QrCode, AlertTriangle
 } from 'lucide-react';
-import QRCode from 'qrcode';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -479,13 +478,36 @@ export function RechargeDialog({ packages, qr, info, expiryDate, hideExpiry, onC
   );
 }
 
-// 真实模式：后端返回 oauth 二维码，前端轮询 check 接口；模拟模式：显示「模拟扫码」按钮直接走登录流程
+// 微信官方内嵌二维码 SDK（模式二）。**必须用它**，不能自己用 qrcode 库去画 qrconnect 链接：
+// 那条链接是「给 PC 浏览器看的授权页」，手机扫到后微信只会把它当普通链接打开、页面上再出现一个
+// 二维码（套娃），流程永远走不到回调（实测 nginx 零 callback）。官方 SDK 会在 iframe 里带上
+// login_type=jssdk，由微信自己渲染「可被扫一扫识别的登录码」，扫码即弹授权确认框。
+const WXLOGIN_SDK_SRC = 'https://res.wx.qq.com/connect/zh_CN/htmledition/js/wxLogin.js';
+let wxLoginSdkPromise = null;
+function loadWxLoginSdk() {
+  if (typeof window !== 'undefined' && window.WxLogin) return Promise.resolve(window.WxLogin);
+  if (!wxLoginSdkPromise) {
+    wxLoginSdkPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = WXLOGIN_SDK_SRC;
+      script.onload = () => (window.WxLogin ? resolve(window.WxLogin) : reject(new Error('wxLogin.js 未挂载 WxLogin')));
+      script.onerror = () => { wxLoginSdkPromise = null; reject(new Error('微信登录 SDK 加载失败')); };
+      document.head.appendChild(script);
+    });
+  }
+  return wxLoginSdkPromise;
+}
+
+// 真实模式：微信官方 SDK 内嵌二维码（iframe），前端轮询 check 接口拿一次性票据换 token
+// 模拟模式：显示「模拟扫码」按钮直接走登录流程
 export function WechatQrPanel({ onSuccess, tip = '使用微信扫一扫，安全快捷登录' }) {
-  const [mode, setMode] = useState(null); // 'real' | 'mock'
-  const [qrDataUrl, setQrDataUrl] = useState('');
+  const [mode, setMode] = useState(null); // 'real' | 'mock' | null（判定中）
   const [status, setStatus] = useState('loading'); // loading | ready | scanning | done | expired | error
   const [msg, setMsg] = useState('');
   const pollRef = useRef(null);
+  const sdkOptsRef = useRef(null);
+  // 容器 id 每次挂载都不同：SDK 内部用 getElementById 找容器并塞进 iframe
+  const containerIdRef = useRef('wechat-qr-' + Math.random().toString(36).slice(2, 10));
 
   useEffect(() => {
     let alive = true;
@@ -497,8 +519,21 @@ export function WechatQrPanel({ onSuccess, tip = '使用微信扫一扫，安全
           setMode('real');
           const r = await (await fetch('/api/wechat/qrcode', { method: 'POST' })).json();
           if (!alive) return;
-          if (r.mode === 'real' && r.url) {
-            setQrDataUrl(await QRCode.toDataURL(r.url, { width: 200, margin: 1 }));
+          if (r.mode === 'real' && r.state && r.appid && r.redirectUri) {
+            const WxLogin = await loadWxLoginSdk();
+            if (!alive) return;
+            const opts = {
+              // true = 用户确认后由 SDK 的 iframe 自己跳 redirect_uri（回调在 iframe 内完成），
+              // 本页始终不跳转，继续轮询 /api/wechat/check 就能发现登录完成
+              self_redirect: true,
+              id: containerIdRef.current,
+              appid: r.appid,
+              scope: 'snsapi_login',
+              redirect_uri: encodeURIComponent(r.redirectUri),
+              state: r.state,
+            };
+            new WxLogin(opts);
+            sdkOptsRef.current = opts; // SDK 会把 onCleanup 挂到这个对象上
             setStatus('ready');
             startPoll(r.state);
           } else {
@@ -516,6 +551,9 @@ export function WechatQrPanel({ onSuccess, tip = '使用微信扫一扫，安全
     return () => {
       alive = false;
       if (pollRef.current) clearInterval(pollRef.current);
+      // SDK 自己挂的 postMessage 监听要摘掉，否则弹窗反复开关会越积越多
+      const opts = sdkOptsRef.current;
+      if (opts && typeof opts.onCleanup === 'function') opts.onCleanup();
     };
     // eslint-disable-next-line
   }, []);
@@ -551,19 +589,26 @@ export function WechatQrPanel({ onSuccess, tip = '使用微信扫一扫，安全
 
   return (
     <div className="flex flex-col items-center justify-center py-2">
-      <div className="w-48 h-48 rounded-xl border border-slate-200 bg-white flex items-center justify-center overflow-hidden">
-        {status === 'loading' && <span className="text-sm text-slate-400">加载中...</span>}
-        {qrDataUrl && <img src={qrDataUrl} alt="微信扫码登录" className="w-44 h-44" />}
-        {mode === 'mock' && !qrDataUrl && (
-          <div className="text-center px-4">
-            <div className="w-20 h-20 mx-auto mb-2 rounded-lg bg-green-500/10 flex items-center justify-center text-green-600">
-              <QrCode size={40} />
+      {mode !== 'mock' && (
+        <>
+          {/* 官方 SDK 会清空这个容器并塞进一个 300x400 的 iframe，所以「加载中」必须放在容器外面 */}
+          <div id={containerIdRef.current} className="flex justify-center" />
+          {status === 'loading' && <p className="text-sm text-slate-400 mt-2">正在加载微信二维码...</p>}
+        </>
+      )}
+      {mode === 'mock' && (
+        <>
+          <div className="w-48 h-48 rounded-xl border border-slate-200 bg-white flex items-center justify-center overflow-hidden">
+            <div className="text-center px-4">
+              <div className="w-20 h-20 mx-auto mb-2 rounded-lg bg-green-500/10 flex items-center justify-center text-green-600">
+                <QrCode size={40} />
+              </div>
+              <span className="text-xs text-slate-400">演示模式二维码</span>
             </div>
-            <span className="text-xs text-slate-400">演示模式二维码</span>
           </div>
-        )}
-      </div>
-      <p className="text-sm text-slate-500 mt-4 text-center">{tip}</p>
+          <p className="text-sm text-slate-500 mt-4 text-center">{tip}</p>
+        </>
+      )}
       {mode === 'mock' && (
         <button onClick={handleMockScan} disabled={status === 'scanning' || status === 'done'} className="mt-3 px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-50 transition">
           {status === 'scanning' ? '扫码中...' : '模拟扫码'}
