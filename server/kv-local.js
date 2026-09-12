@@ -178,6 +178,99 @@ export async function kvBindWechatIdentity({ identityKey, currentUserId, targetU
   })();
 }
 
+// 自愈：微信身份指向的账号已经不存在了。
+// 成因：历史版本的「注销账号 / 后台删除用户」只删了 user_/reg_ 记录，没清微信身份，
+// 留下「身份还在、账号没了」的孤儿身份。kvResolveWechatIdentity 命中已存在的 identity
+// 会直接返回（不做有效性校验），于是这类微信会永久卡在「查到 userId → 账号不存在」，
+// 用户在小程序端连重新注册都做不到。
+// 修复方式：单事务内把该身份重指向一个全新占位账号，等价于「以该微信重新注册」，用户无感。
+// 并发保护：若期间该身份已被其它请求重置或绑定（userId 变了），返回 identity_changed，
+// 由调用方重新走一次 resolve，绝不覆盖新状态。
+export async function kvResetOrphanWechatIdentity({
+  identityKey,
+  unionKey = '',
+  staleUserId,
+  staleUserIndexKey = '',
+  userIndexKey,
+  identity,
+  reg,
+  user,
+}) {
+  const select = db.prepare('SELECT value FROM kv WHERE key = ?');
+  const put = db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)');
+  const del = db.prepare('DELETE FROM kv WHERE key = ?');
+  return db.transaction(() => {
+    const row = select.get(safeKey(identityKey));
+    if (!row) return { ok: false, reason: 'identity_missing' };
+    let current;
+    try {
+      current = JSON.parse(row.value);
+    } catch {
+      return { ok: false, reason: 'identity_corrupt' };
+    }
+    if (!current || String(current.userId) !== String(staleUserId)) {
+      return { ok: false, reason: 'identity_changed' };
+    }
+    put.run(safeKey(identityKey), JSON.stringify(identity));
+    put.run(safeKey(userIndexKey), JSON.stringify(identityKey));
+    if (unionKey) put.run(safeKey(unionKey), JSON.stringify(identityKey));
+    if (staleUserIndexKey && staleUserIndexKey !== userIndexKey) del.run(safeKey(staleUserIndexKey));
+    put.run(safeKey('reg_' + reg.id), JSON.stringify(reg));
+    put.run(safeKey('user_' + user.id), JSON.stringify(user));
+    return { ok: true, identity };
+  })();
+}
+
+// 清理某个账号名下的全部微信身份（注销账号 / 后台删除用户时调用），
+// 避免留下「身份在、账号没了」的孤儿身份导致该微信永久无法登录。
+// 遍历 wxmini_* 键即可，无需重算摘要：wxmini_union_* / wxmini_user_* 的值
+// 就是它指向的 identityKey，凡是值落在待删集合里的一并删除。
+// 注：用 GLOB 而非 LIKE —— LIKE 里的 _ 是单字符通配符，会误匹配。
+export async function kvDeleteWechatIdentitiesByUser(userId) {
+  const uid = String(userId == null ? '' : userId);
+  if (!uid) return { ok: false, removed: [] };
+  let rows;
+  try {
+    rows = db.prepare("SELECT key, value FROM kv WHERE key GLOB 'wxmini_*'").all();
+  } catch {
+    return { ok: false, removed: [] };
+  }
+  const identityKeys = new Set();
+  for (const row of rows) {
+    if (!row.key.startsWith('wxmini_identity_')) continue;
+    try {
+      const identity = JSON.parse(row.value);
+      if (identity && String(identity.userId) === uid) identityKeys.add(row.key);
+    } catch {
+      // 损坏记录跳过，不影响其它身份清理
+    }
+  }
+  if (identityKeys.size === 0) return { ok: true, removed: [] };
+  const removed = [];
+  const del = db.prepare('DELETE FROM kv WHERE key = ?');
+  db.transaction(() => {
+    for (const row of rows) {
+      if (row.key.startsWith('wxmini_identity_')) {
+        if (identityKeys.has(row.key)) {
+          del.run(row.key);
+          removed.push(row.key);
+        }
+        continue;
+      }
+      try {
+        const linked = JSON.parse(row.value);
+        if (identityKeys.has(String(linked))) {
+          del.run(row.key);
+          removed.push(row.key);
+        }
+      } catch {
+        // 索引值不是字符串（异常数据），不动
+      }
+    }
+  })();
+  return { ok: true, removed };
+}
+
 // 智能体调用完成后的余额、算力流水在同一事务落库。
 // allowPartial 仅用于“上游已经成功返回，但实际费用超过当前余额”的收尾场景：
 // 扣完剩余余额并保留应计费用/差额，避免成功任务没有任何算力流水。

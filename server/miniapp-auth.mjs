@@ -103,6 +103,11 @@ async function login(req, res, requestId, deps) {
     bindingState: 'unbound',
     createdAt: now,
     updatedAt: now,
+    // session_key 这里就带上：下方「孤儿身份自愈」会整条覆盖身份记录，
+    // 若等自愈之后再补写就会丢密钥（它是虚拟支付用户态签名的依据）。
+    ...(wechatIdentity.sessionKey
+      ? { sessionKey: wechatIdentity.sessionKey, sessionKeyUpdatedAt: now }
+      : {}),
   };
   const reg = {
     id: placeholderId,
@@ -134,20 +139,51 @@ async function login(req, res, requestId, deps) {
     });
   }
   const safeId = deps.sanitizeId(activeIdentity.userId);
-  const [storedReg, storedUser] = await Promise.all([
+  let [storedReg, storedUser] = await Promise.all([
     deps.KV.kvGet('reg_' + safeId),
     deps.KV.kvGet('user_' + safeId),
   ]);
+  let effectiveIdentity = activeIdentity;
+  let isNewUser = !!resolved.created;
   if (!storedReg && !storedUser) {
-    sendJson(res, 500, errorEnvelope('IDENTITY_USER_MISSING', '微信身份对应的用户不存在', requestId), requestId);
-    return;
+    // 孤儿身份自愈：账号记录已经不存在了（历史「注销账号 / 后台删用户」只删账号、没清微信身份）。
+    // kvResolveWechatIdentity 命中旧身份会直接返回，所以这类微信会永久卡在登录失败上，
+    // 用户连重新注册都做不到。这里把身份重指向一个全新占位账号（等价于重新注册）。
+    // 自愈失败（并发改动等）才回落到 500，保持原语义不倒退。
+    const healed = typeof deps.KV.kvResetOrphanWechatIdentity === 'function'
+      ? await deps.KV.kvResetOrphanWechatIdentity({
+          identityKey: keys.identityKey,
+          unionKey: keys.unionKey,
+          staleUserId: activeIdentity.userId,
+          staleUserIndexKey: identityStorageKeys(
+            deps.config.appId, '', '', activeIdentity.userId,
+          ).userIndexKey,
+          userIndexKey: keys.userIndexKey,
+          identity,
+          reg,
+          user: { ...reg },
+        })
+      : { ok: false };
+    if (!healed.ok) {
+      console.error(
+        '[miniapp-auth] orphan identity self-heal failed:',
+        healed.reason || 'unknown',
+        'identityKey=' + keys.identityKey,
+      );
+      sendJson(res, 500, errorEnvelope('IDENTITY_USER_MISSING', '微信身份对应的用户不存在', requestId), requestId);
+      return;
+    }
+    effectiveIdentity = healed.identity;
+    storedReg = reg;
+    storedUser = { ...reg };
+    isNewUser = true;
   }
-  const token = deps.createMiniappSession(activeIdentity.userId, activeIdentity.id);
+  const token = deps.createMiniappSession(effectiveIdentity.userId, effectiveIdentity.id);
   sendJson(res, 200, successEnvelope({
     token,
     user: safeUser(storedReg, storedUser, deps.getPlanValidity),
-    isNewUser: !!resolved.created,
-    bindingRequired: activeIdentity.bindingState !== 'bound',
+    isNewUser,
+    bindingRequired: effectiveIdentity.bindingState !== 'bound',
   }, requestId), requestId);
 }
 

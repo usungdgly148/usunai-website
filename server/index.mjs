@@ -4318,6 +4318,32 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // 账号被删除后的级联清理（注销账号 / 后台删除用户）：
+    // 只有该 id 的 users 与 regs 记录「都已不存在」时才清掉它名下的微信身份，
+    // 避免误伤「只删了 users、账号还能用邮箱登录」的中间态。
+    // 不清理的后果：留下「身份在、账号没了」的孤儿身份，该微信在小程序端会永久登录失败
+    // （kvResolveWechatIdentity 一直命中这个失效身份，用户连重新注册都做不到）。
+    const purgeWechatIdentitiesIfAccountGone = async (id) => {
+      const safe = sanitizeIdSafe(id);
+      if (!safe) return 0;
+      try {
+        const [userRow, regRow] = await Promise.all([
+          KV.kvGet('user_' + safe),
+          KV.kvGet('reg_' + safe),
+        ]);
+        if (userRow || regRow) return 0;
+        const cleaned = await KV.kvDeleteWechatIdentitiesByUser(id);
+        const removed = (cleaned && cleaned.removed) || [];
+        if (removed.length) {
+          console.log(`[account:cascade] purged ${removed.length} wechat identity key(s) for ${safe}`);
+        }
+        return removed.length;
+      } catch (e) {
+        console.error('[account:cascade] wechat identity cleanup failed:', e && e.message);
+        return 0;
+      }
+    };
+
     // ============ 单条 key 写入/删除（拆表持久化）============
     const skMatch = p.match(/^\/api\/(admin\/)?single-key\/([a-z]+)\/(put|delete)$/);
     if (skMatch && req.method === 'POST') {
@@ -4384,7 +4410,16 @@ const server = http.createServer(async (req, res) => {
           }
         }
         const ok = await KV.kvDelete(prefix + sanitizeId(id));
-        res.end(JSON.stringify({ ok, key: prefix + sanitizeId(id) }));
+        // 注销 / 后台删用户：两条记录都不在了才级联清微信身份（见上方 helper 注释）。
+        let identitiesRemoved = 0;
+        if (ok && (type === 'users' || type === 'regs')) {
+          identitiesRemoved = await purgeWechatIdentitiesIfAccountGone(id);
+        }
+        res.end(JSON.stringify({
+          ok,
+          key: prefix + sanitizeId(id),
+          ...(identitiesRemoved ? { identitiesRemoved } : {}),
+        }));
         return;
       }
     }
