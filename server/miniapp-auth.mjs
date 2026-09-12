@@ -15,11 +15,17 @@ function digest(value) {
   return crypto.createHash('sha256').update(String(value || '')).digest('hex');
 }
 
+// 微信身份键。前缀 `wxmini_` 是历史名 —— 这套键现在同时服务小程序与网页扫码两端。
+// · identityKey / userIndexKey 必须带 appId：openid、站内 userId 都只在单个应用内唯一。
+// · unionKey 只能带 unionid：unionid 在同一开放平台内全局唯一，是两端归并的**唯一钥匙**。
+//   ⚠️ 历史实现把 appId 也混进了 unionKey 的摘要，于是同一个人在「网站应用」与「小程序」
+//   会算出两个不同的键，跨应用归并永远命中不了。改正时线上 unionKey 存量 0 条（两端尚未
+//   绑定开放平台，unionid 一直是空的），因此直接改无需数据迁移。
 export function identityStorageKeys(appId, openid, unionid = '', userId = '') {
   const identityKey = `wxmini_identity_${digest(`${appId}:${openid}`)}`;
   return {
     identityKey,
-    unionKey: unionid ? `wxmini_union_${digest(`${appId}:${unionid}`)}` : '',
+    unionKey: unionid ? `wxmini_union_${digest(unionid)}` : '',
     userIndexKey: userId ? `wxmini_user_${digest(`${appId}:${userId}`)}` : '',
   };
 }

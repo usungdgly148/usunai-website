@@ -1292,15 +1292,17 @@ export function StoreProvider({ children }) {
     tryWriteSingleKey('user', { ...updated });
   };
 
-  // 微信扫码登录（2026-08-03 服务端化：按 openid 查/建用户并签发 token，杜绝伪造）
-  const loginWithWechat = async (wechatUser) => {
-    const { openid, nickname, headimgurl, unionid } = wechatUser || {};
-    if (!openid) return false;
+  // 微信扫码登录：只把服务端签发的一次性票据交给后端换 token。
+  // 2026-09-12 起后端不再接受客户端上报的 openid（旧实现等于「知道 openid 就能登录」），
+  // 所以这里拿到的 openid/nickname/headimgurl 仅用于本地展示兜底，绝不作为凭证。
+  const loginWithWechat = async (wechatPayload) => {
+    const { ticket, openid, nickname, headimgurl } = wechatPayload || {};
+    if (!ticket) return false;
     try {
       const r = await apiFetch('/api/auth/wechat-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ openid, nickname: nickname || '', headimgurl: headimgurl || '', unionid: unionid || '' }),
+        body: JSON.stringify({ ticket }),
       });
       const j = await r.json();
       if (!j || !j.ok) return false;

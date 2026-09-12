@@ -25,7 +25,7 @@ import {
   virtualPayConfigured,
 } from './wechat-virtual-pay.mjs';
 import { handleMiniappApi, reconcilePendingVirtualOrders } from './miniapp-api.mjs';
-import { handleMiniappAuth } from './miniapp-auth.mjs';
+import { handleMiniappAuth, identityStorageKeys } from './miniapp-auth.mjs';
 import { handleMiniappRuntime } from './miniapp-runtime.mjs';
 import { handleMiniappLayout } from './miniapp-layout.mjs';
 import { attachMiniappRequestMetric, handleMiniappObservability } from './miniapp-observability.mjs';
@@ -225,6 +225,125 @@ const newDemoWechatUser = () => ({
   headimgurl: 'https://api.dicebear.com/7.x/miniavs/svg?seed=wechat' + Math.floor(Math.random() * 9999),
   unionid: '',
 });
+
+// ---- 扫码一次性票据 ----
+// 「扫码成功」不等于「登录成功」：/api/wechat/callback 在服务端校验完 code 后签发一张
+// 一次性票据，前端只能拿票据来换 token，openid 等身份信息不再由客户端上报。
+// 背景：旧的 /api/auth/wechat-login 把客户端传来的 openid 直接当凭证，任何人只要知道
+// 一个 openid 就能登录对应账号（mock 模式更直接）。票据只存在于服务端内存，无法伪造。
+const WECHAT_TICKET_TTL_MS = 5 * 60 * 1000;
+const wechatTickets = new Map(); // ticket -> { profile, expires }
+function issueWechatTicket(profile) {
+  const now = Date.now();
+  // 顺手清掉过期票据，避免长期运行时 Map 无限增长。
+  for (const [key, value] of wechatTickets) {
+    if (value.expires < now) wechatTickets.delete(key);
+  }
+  const ticket = crypto.randomBytes(24).toString('hex');
+  wechatTickets.set(ticket, { profile, expires: now + WECHAT_TICKET_TTL_MS });
+  return ticket;
+}
+function consumeWechatTicket(ticket) {
+  const key = String(ticket || '');
+  const entry = key ? wechatTickets.get(key) : null;
+  if (!entry) return null;
+  wechatTickets.delete(key); // 一次性：无论校验结果如何都作废，防止重放
+  return entry.expires < Date.now() ? null : entry.profile;
+}
+
+// 把一个「已在服务端校验过」的网页扫码身份解析成站内账号。
+// 关键：并入小程序同一套微信身份表（同一套键 + 同一个 kvResolveWechatIdentity），
+// 命中顺序天然是「先 (appId, openid) → 再 unionid 归并 → 最后才新建」，
+// 于是同一个微信在网页与小程序两端必然落到同一个 userId —— 这就是「两端打通」的实质。
+// 顺带修掉旧实现的两个毛病：① 遍历 user_ 按裸 openid 匹配 wechatOpenid（网站应用的
+// openid 与小程序不同，扫码只会新建一个全新账号，永远不会归并）；② 不校验账号是否还在。
+async function resolveWebWechatAccount(profile) {
+  const appId = WECHAT.appId || 'web-unconfigured';
+  const now = new Date().toISOString();
+  const placeholderId = 'u' + Date.now() + '_' + crypto.randomBytes(5).toString('hex');
+  const keys = identityStorageKeys(appId, profile.openid, profile.unionid || '', placeholderId);
+  const identity = {
+    id: keys.identityKey,
+    appId,
+    openid: profile.openid,
+    unionid: profile.unionid || null,
+    userId: placeholderId,
+    bindingState: 'unbound',
+    source: 'web',
+    createdAt: now,
+    updatedAt: now,
+  };
+  const base = {
+    id: placeholderId,
+    email: '',
+    name: String(profile.nickname || '微信用户').slice(0, 30),
+    avatar: profile.headimgurl || '',
+    points: 0,
+    balance: 0,
+    role: 'user',
+    status: 'active',
+    provider: 'wechat',
+    wechat: String(profile.nickname || ''),
+    wechatOpenid: profile.openid,
+    wechatAvatar: profile.headimgurl || '',
+    unionid: profile.unionid || '',
+    createdAt: now.slice(0, 10),
+  };
+  const resolved = await KV.kvResolveWechatIdentity({
+    identityKey: keys.identityKey,
+    unionKey: keys.unionKey,
+    userIndexKey: keys.userIndexKey,
+    identity,
+    reg: base,
+    user: { ...base },
+  });
+  let account = resolved.identity;
+  const safeId = sanitizeIdSafe(account.userId);
+  const [storedReg, storedUser] = await Promise.all([
+    KV.kvGet('reg_' + safeId),
+    KV.kvGet('user_' + safeId),
+  ]);
+  if (!storedReg && !storedUser) {
+    // 孤儿身份自愈：身份还在、账号没了（历史「注销 / 后台删用户」漏清 wxmini_*）。
+    // 不复用这段的话，网页扫码会为不存在的账号签发 token，重演 P64b 刚修掉的那个 bug。
+    const healed = typeof KV.kvResetOrphanWechatIdentity === 'function'
+      ? await KV.kvResetOrphanWechatIdentity({
+          identityKey: keys.identityKey,
+          unionKey: keys.unionKey,
+          staleUserId: account.userId,
+          staleUserIndexKey: identityStorageKeys(appId, '', '', account.userId).userIndexKey,
+          userIndexKey: keys.userIndexKey,
+          identity,
+          reg: base,
+          user: { ...base },
+        })
+      : { ok: false };
+    if (!healed.ok) {
+      console.error('[wechat-web] orphan identity self-heal failed:', healed.reason || 'unknown', 'identityKey=' + keys.identityKey);
+      throw new Error('微信身份对应的账号不存在');
+    }
+    account = healed.identity;
+    return { userId: account.userId, record: base, isNewUser: true };
+  }
+  // 归并命中已有账号（多为小程序先建的号）时不会写本次的 user/reg，
+  // 这里把微信资料幂等补回去 —— 让前台「账号安全」能正确显示「已绑定微信」，
+  // 也让后台能按 wechatOpenid 反查。只补空字段，绝不覆盖账号已有资料。
+  const patch = (rec) => (rec ? {
+    ...rec,
+    wechatOpenid: rec.wechatOpenid || profile.openid,
+    unionid: profile.unionid || rec.unionid || '',
+    wechat: rec.wechat || profile.nickname || '',
+    wechatAvatar: rec.wechatAvatar || profile.headimgurl || '',
+    provider: rec.provider || 'wechat',
+  } : null);
+  const nextReg = patch(storedReg);
+  const nextUser = patch(storedUser);
+  const writes = [];
+  if (nextReg) writes.push(['reg_' + safeId, nextReg]);
+  if (nextUser) writes.push(['user_' + safeId, nextUser]);
+  if (writes.length) await KV.kvPutMany(writes);
+  return { userId: account.userId, record: { ...(nextReg || {}), ...(nextUser || {}) }, isNewUser: false };
+}
 
 // ---- 阿里云 Dypns（号码认证服务）真实短信 ----
 // 复用下方 buildAliyunSignature（HMAC-SHA1 RPC 签名）零依赖调用 dypnsapi.aliyuncs.com，
@@ -3089,12 +3208,14 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ status: 'expired' }));
         return;
       }
-      res.end(JSON.stringify({ status: entry.status, user: entry.user }));
+      res.end(JSON.stringify({ status: entry.status, user: entry.user, ticket: entry.ticket || '' }));
       return;
     }
     if (p === '/api/wechat/mock-scan') {
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ mode: 'mock', user: newDemoWechatUser() }));
+      // 演示模式也走服务端票据：mock 与 real 是同一条链路，同样无法凭手工构造的 openid 登录。
+      const demo = newDemoWechatUser();
+      res.end(JSON.stringify({ mode: 'mock', user: demo, ticket: issueWechatTicket(demo) }));
       return;
     }
     if (p === '/api/wechat/callback') {
@@ -3116,12 +3237,14 @@ const server = http.createServer(async (req, res) => {
         const info = await httpsGetJson(infoUrl);
         if (info.errcode) throw new Error('微信获取用户信息失败: ' + info.errmsg);
         entry.status = 'done';
+        // user 仅供前端展示；真正用来换 token 的是下面这张服务端一次性票据。
         entry.user = {
           openid: info.openid,
           nickname: info.nickname,
           headimgurl: info.headimgurl,
           unionid: info.unionid || '',
         };
+        entry.ticket = issueWechatTicket(entry.user);
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.end('<html><body style="font-family:sans-serif;text-align:center;padding-top:80px"><h3>✅ 扫码成功</h3><p>请在原页面继续操作，可关闭此窗口。</p></body></html>');
         return;
@@ -3598,50 +3721,30 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ ok: true, msg: '密码重置成功，请登录' }));
       return;
     }
-    // 微信登录（2026-08-03 服务端化）：按 openid 查/建用户并签发 token，
-    // 替代前端 localStorage 建号（mock 与 real 微信扫码统一走这里，杜绝伪造）
+    // 微信扫码登录（2026-09-12 改为「服务端一次性票据」）：
+    // 只接受 /api/wechat/callback（或 mock-scan）签发的一次性 ticket，不再接受客户端上报的
+    // openid —— 旧实现把 openid 当凭证，等于任何人知道一个 openid 就能登录对应账号。
+    // 身份解析统一走 resolveWebWechatAccount（小程序同一套微信身份表），两端按 unionid 归并。
     if (p === '/api/auth/wechat-login' && req.method === 'POST') {
-      const { openid, nickname, headimgurl, unionid } = await readBody(req);
+      const body = await readBody(req);
       res.setHeader('Content-Type', 'application/json');
-      if (!openid || !/^[a-zA-Z0-9_\-]{8,64}$/.test(String(openid))) {
-        res.end(JSON.stringify({ ok: false, msg: '微信 openid 无效' }));
+      const profile = consumeWechatTicket(body && body.ticket);
+      if (!profile) {
+        res.statusCode = 401;
+        res.end(JSON.stringify({ ok: false, code: 'INVALID_TICKET', msg: '扫码凭证无效或已过期，请重新扫码' }));
         return;
       }
-      // 查已有绑定（user_<id>.wechatOpenid）；无则新建
-      const allUsers = await KV.kvList('user_', 5000);
-      let existing = null;
-      for (const k of allUsers) {
-        const rec = await KV.kvGet(k);
-        if (rec && rec.wechatOpenid === openid) { existing = rec; break; }
+      let account;
+      try {
+        account = await resolveWebWechatAccount(profile);
+      } catch (e) {
+        console.error('[auth/wechat-login]', e && (e.stack || e.message || e));
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, msg: '微信登录失败，请稍后重试' }));
+        return;
       }
-      const now = new Date().toISOString().split('T')[0];
-      let u;
-      if (existing) {
-        u = existing;
-      } else {
-        const id = 'u' + Date.now();
-        u = {
-          id,
-          email: '',
-          name: String(nickname || '微信用户').slice(0, 30),
-          avatar: headimgurl || '',
-          points: 0,
-          role: 'user',
-          status: 'active',
-          provider: 'wechat',
-          wechat: nickname || '',
-          wechatOpenid: openid,
-          wechatAvatar: headimgurl || '',
-          unionid: unionid || '',
-          createdAt: now,
-        };
-        await KV.kvPutMany([
-          ['user_' + sanitizeIdSafe(id), u],
-          ['reg_' + sanitizeIdSafe(id), u],
-        ]);
-      }
-      const token = createSession(u.id, 'user');
-      res.end(JSON.stringify({ ok: true, user: toSafeUser(u), token }));
+      const token = createSession(account.userId, 'user');
+      res.end(JSON.stringify({ ok: true, user: toSafeUser(account.record), token, isNewUser: account.isNewUser }));
       return;
     }
     // 会话校验：返回当前登录用户（前端启动时恢复登录态 / 校验 token 有效性）

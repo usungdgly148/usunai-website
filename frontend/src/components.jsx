@@ -524,10 +524,11 @@ export function WechatQrPanel({ onSuccess, tip = '使用微信扫一扫，安全
     pollRef.current = setInterval(async () => {
       try {
         const r = await (await fetch('/api/wechat/check?state=' + state)).json();
-        if (r.status === 'done' && r.user) {
+        // done 时后端会带上一次性票据；openid 等字段只用于本地展示兜底，不再作为登录凭证。
+        if (r.status === 'done' && r.ticket) {
           clearInterval(pollRef.current);
           setStatus('done');
-          onSuccess && onSuccess(r.user);
+          onSuccess && onSuccess({ ...(r.user || {}), ticket: r.ticket });
         } else if (r.status === 'expired') {
           clearInterval(pollRef.current);
           setStatus('expired');
@@ -542,7 +543,7 @@ export function WechatQrPanel({ onSuccess, tip = '使用微信扫一扫，安全
     setStatus('scanning');
     try {
       const r = await (await fetch('/api/wechat/mock-scan', { method: 'POST' })).json();
-      if (r.user) { setStatus('done'); onSuccess && onSuccess(r.user); }
+      if (r.ticket) { setStatus('done'); onSuccess && onSuccess({ ...(r.user || {}), ticket: r.ticket }); }
     } catch {
       setStatus('error'); setMsg('模拟扫码失败，请重试');
     }
