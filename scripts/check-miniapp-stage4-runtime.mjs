@@ -51,6 +51,27 @@ assert.match(workflow, /previewImage/);
 assert.match(workflow, /<Video/);
 assert.match(workflow, /saveRuntimeAsset/);
 
+/**
+ * 消息操作条的「复制」必须**真的写剪贴板**。
+ *
+ * 官方 `chat-actionbar` 不会自己复制：`handleCopy()` 只做
+ * 「按 copyMode 取文本 → triggerEvent('actions', { name:'copy', data })」这一步
+ * （见 node_modules/tdesign-miniprogram/miniprogram_dist/chat-actionbar/chat-actionbar.js）。
+ * 曾经这里只弹了一句 toast 就 return → 真机上「提示已复制、粘贴是空的」。
+ * 这条链路**只在真机可见**，所以必须有断言守住，别让后人再删掉那一行 API 调用。
+ */
+assert.match(appConfig, /'t-chat-actionbar'/, 't-chat-actionbar 必须保持注册（复制按钮就在它里面）');
+const actionStart = chat.indexOf('const handleMessageAction');
+assert.ok(actionStart > -1, 'chat 页必须有 handleMessageAction 处理 actionbar 动作');
+const actionEnd = chat.indexOf('\n  };', actionStart);
+assert.ok(actionEnd > actionStart, 'handleMessageAction 的函数体边界应能定位（缩进变了就更新这里）');
+const actionBody = chat.slice(actionStart, actionEnd);
+assert.match(actionBody, /name === 'copy'/, 'handleMessageAction 必须处理 copy 动作');
+assert.match(actionBody, /Taro\.setClipboardData\(\{\s*data:\s*text\s*\}\)/, 'copy 分支必须真的调 Taro.setClipboardData（只弹 toast = 复制不了）');
+assert.match(actionBody, /detail\?\.data/, 'copy 应优先取组件回传的 detail.data');
+assert.doesNotMatch(actionBody, /name === 'copy'\)\s*\{\s*toast\(/, "copy 分支不得只剩下 toast（'已复制' 的假提示）");
+assert.match(chat, /copyMode='markdown'/, "copyMode 必须显式写死为 'markdown'（复制原文，与网页端 copyToClipboard(m.content) 同口径）");
+
 const clientSources = [api, chat, workflow, read('miniapp/src/services/runtime.ts')].join('\n');
 assert.doesNotMatch(clientSources, /WECHAT_MINIAPP_APP_SECRET|api[_-]?key|private[_-]?key/i);
 assert.doesNotMatch(clientSources, /\/api\/admin\//);

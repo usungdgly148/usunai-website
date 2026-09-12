@@ -310,10 +310,32 @@ export default function ChatPage() {
     void runTurn(userMessage, messages.slice(0, userIdx));
   };
 
-  /** 官方 chat-actionbar 的动作回调：copy 由组件内部完成复制，这里只做反馈/重生成 */
-  const handleMessageAction = (event: { detail?: { name?: string } }, message: ChatMessage) => {
+  /**
+   * 官方 chat-actionbar 的动作回调。
+   *
+   * ⚠️ **官方组件不会自己写剪贴板**，别被「操作项里有个 copy」误导：
+   * `chat-actionbar` 的 `handleCopy()` 只做「按 copyMode 取文本 → `triggerEvent('actions',
+   * { name:'copy', data })`」这一步（源码见
+   * `node_modules/tdesign-miniprogram/miniprogram_dist/chat-actionbar/chat-actionbar.js`）。
+   * 真正落剪贴板必须由页面调 `Taro.setClipboardData` —— 这里曾经只弹了一句
+   * 「已复制到剪贴板」就 return，于是**提示说复制成功、实际粘出来是空的**。
+   *
+   * 复制内容 = 原始文本：`copyMode` 传 'markdown'（组件默认值），组件原样回传 `content`，
+   * 与网页端 `copyToClipboard(m.content)` 同一口径 —— 不做 markdown 语法净化，
+   * 避免静默删字符（官方另一档 `filterSpecialChars` 会吃掉半角括号/方括号等）。
+   *
+   * 成功不再补自定义 toast：微信 `setClipboardData` 自带系统提示「内容已复制」，
+   * 再弹一个会叠两条（与 `components/task-detail.tsx` 的 `onCopy` 同口径）。
+   */
+  const handleMessageAction = (event: { detail?: { name?: string; data?: string } }, message: ChatMessage) => {
     const name = String(event?.detail?.name || '');
-    if (name === 'copy') { toast('已复制到剪贴板', 'success'); return; }
+    if (name === 'copy') {
+      const payload = event?.detail?.data;
+      const text = (typeof payload === 'string' && payload) || message.text || '';
+      if (!text) { toast('没有可复制的内容', 'info'); return; }
+      Taro.setClipboardData({ data: text }).catch(() => toast('复制失败，请重试', 'error'));
+      return;
+    }
     if (name === 'replay') { regenerate(message.id); return; }
     if (name === 'good') { toast('感谢反馈～', 'success'); return; }
     if (name === 'bad') { toast('收到，会继续改进', 'info'); }
@@ -535,7 +557,10 @@ export default function ChatPage() {
                     注：Taro 出于性能考虑不会给 View 生成 slot 属性（其源码注释原文是
                     「不给 View 直接加 slot 属性的原因是性能损耗」），所以官方 chat-sender
                     的 input-prefix / footer-prefix、chat-actionbar 的 prefix 插槽都注不进去，
-                    需要额外元素时一律并排拼条 / 绝对定位自绘。 */}
+                    需要额外元素时一律并排拼条 / 绝对定位自绘。
+                    `copyMode='markdown'` 是**显式写死**的（当前也等于组件默认值）：组件据此把
+                    content 原样放进 actions 事件；不写死的话，官方哪天改默认值就会静默变成
+                    「净化版」文本（`filterSpecialChars` 会删掉半角括号/方括号/反引号等）。 */}
                 {showActions && <View className='msg-toolbar'>
                   <View className='msg-asset' hoverClass='msg-action-hover' aria-label='加入资产库' onClick={() => addAsset(message)}>
                     <TdIcon name='bookmark-add' className='msg-asset-icon' />
@@ -543,9 +568,10 @@ export default function ChatPage() {
                   <t-chat-actionbar
                     actionBar={MESSAGE_ACTIONS}
                     content={message.text}
+                    copyMode='markdown'
                     chatId={message.id}
                     placement='start'
-                    onActions={(event: { detail?: { name?: string } }) => handleMessageAction(event, message)}
+                    onActions={(event: { detail?: { name?: string; data?: string } }) => handleMessageAction(event, message)}
                   />
                 </View>}
               </View>
