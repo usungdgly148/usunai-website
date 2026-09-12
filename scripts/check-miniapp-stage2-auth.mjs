@@ -11,6 +11,9 @@ const store = new Map([
 
 const KV = {
   async kvGet(key) { return store.get(key) ?? null; },
+  // 登录时会用 kvPut 把最新的 session_key 写回身份记录（虚拟支付用户态签名要用），
+  // 桩里缺这个方法会让登录直接 500，测试形同失效。
+  async kvPut(key, value) { store.set(key, value); return true; },
   async kvResolveWechatIdentity({ identityKey, unionKey, userIndexKey, identity, reg, user }) {
     if (store.has(identityKey)) return { ok: true, created: false, identity: store.get(identityKey) };
     store.set(identityKey, identity);
