@@ -2,7 +2,7 @@
  * 自动生成，请勿手改 —— 源文件是 miniapp/src/app.scss（真机那份）。
  * 生成器：frontend/scripts/gen-miniapp-preview-style.mjs
  * 作用：后台「小程序设计」画布直接复用真机样式，保证画布 = 真机的构造性一致。
- * 本次：624 条规则 / 14 条图标 / 1 组 keyframes（跳过 2 个 @media，画布不渲染那两个页面）
+ * 本次：639 条规则 / 14 条图标 / 1 组 keyframes（跳过 2 个 @media，画布不渲染那两个页面）
  * ========================================================================== */
 .miniapp-stage .mini-tab-icon { width: 22px; height: 22px; background-repeat: no-repeat; background-position: center; background-size: contain; }
 .miniapp-stage .mini-tab-icon-home { background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAACXBIWXMAACxLAAAsSwGlPZapAAAEQElEQVR42u1dTWgTQRgdUVEERQUvioqgHkQQFNQKojd/DooHBRFE8eBRBUXwknrQJtkUidZsUi0BPYib2W1pRRQLRShYtRUvFkFPHhT1oChYBWv9vtb+YNvsbjOzze6+Bx/ksDuz33uTb/ZldyZCAAAAAAAAAAAAAAAQElxusFZzgImAkc47Nam8/Sqdtwc4hj47NWAmAKRM+0jatPuGyR8J0/5lmPIEGNIEy7Jmpk2ZHEf8eCEKhNlgTCHqb1iLidh2V/JHRWjnc8CcAmQanbVE6mvP5A/PC6Z8a+Ts9WCwonov99Jo/uqX/DHxnc4/ACZ9YmBgYAbd2VwgAvsrIH84+rktbhPMekCiWJxLpN1SQPx/84K0EoXWeWC4XL2/3ryciOrxVuPt36m8PDcY9NmjCD3cB5ieAMlCaRuVig8eifyWytn7Rs7NyV00X3zxODl/NszSTjDuxVxNHG8M01o3wYS9Jp2XvR5vU2HafJmr0bLzsC53b9Fk7WWztxfQMa0+/EJ8TRsbJSLrkR+yEomOWRpEfXypyVoCczUZQXn5M5m3j/sva6XDNKf8gGmrwFzRse+TOXvrlPsq2BtJwHcwbaPm6rxXc0XHvkgWrBUVC36tZSmVmS6Pgv/h8hU50+bXXNGovaPSNGWz9+eQoMVYmrZ601pGI+uZ1xFIo7VWY/k75dm05eVLo0GujK250nZNcTFtKsyVxm9CdE2banOlC5E0bbrMVRUNluo1bUGYK30lKeSmLUhzpS2HMJq26TJX2kQIk2mbbnOlb3L2Z9ro2LuB51VN5ip2ps2vuUqbzn4R2lcg7d1VZdqq2VxF3rRRDTd8vIXw4EqxeWFUfkzkXDgnH/OdofQC6Kt1yIe5yrDBEZF8fGpnvPLAnCmshbLNA/F9FEdFxME5eivDsk1l+el2M1dGobRFxAScK+fsUoa6gxHAtJ/zbamIGThnzr0aBDgpYgrOHQJAAAgAASAABIAAEAACQAAIAAFCKwA/YaPnDCk3i19JcNvcB/cFAcb34egifgJyHAgwBplc86agyB8O7hMC/AO/IxS0ACreS4qMAOUS0RaarxsCQAAIEBEBZC9PmFOJsm8zQAD9iYT1uiEABIAAEAACQAAIAAEgAASAABAAAkAACAABIECsBbA7y/y0ezquAtCauTNllq92qhRAlumoo9LFymEUYHCROu0dUW7TJ6FwdWStywOOpkp2pA2bALza330xt0wo3Uch8CdWIY86094gVO4JQYo+BbFeQz4RQvluIs6OwQ0qQLD71gy50nYh9CzdvwiSXUd/Qgid29OY8ipInnT0ZwPZvoZusY7RXcQnkD5yp/Yx8EXqg5veDf15QpeivxoJW/TzZEvEn03dbJkvxDRvcmQ0Wqum+v7O2DBypT3pgnOw3nQ2q2iPg9viNrltJddIuXLOAgAAAAAAAAAAAAAAn/gLqFo/Lp8+vjkAAAAASUVORK5CYII="); }
@@ -590,32 +590,47 @@
 .miniapp-stage .mini-edit-sheet-ok { background: var(--mini-primary); color: #fff; }
 .miniapp-stage .mini-edit-sheet-cancel::after, .miniapp-stage .mini-edit-sheet-ok::after { border: 0; }
 .miniapp-stage .mini-recharge-page { padding-bottom: 30px; }
-.miniapp-stage .mini-recharge-page .mini-recharge-panel { margin-bottom: 9px; border: 0.5px solid var(--mini-line); border-radius: 13px; background: var(--mini-surface); box-shadow: 0 6px 14px rgba(45, 80, 135, .06); }
-.miniapp-stage .mini-recharge-page .mini-recharge-panel:last-child { margin-bottom: 0; }
-.miniapp-stage .mini-recharge-label { display: block; margin: 3px 1px 7px; color: var(--mini-ink); font-size: 13px; font-weight: 700; }
+.miniapp-stage .mini-recharge-balance { display: flex; align-items: center; gap: 8px; margin-bottom: 17px; padding: 12px 13px 13px; border-radius: 13px; background: linear-gradient(135deg, var(--mini-primary-pale), var(--mini-primary-border)); }
+.miniapp-stage .mini-recharge-balance .mini-points-kicker { color: var(--mini-text-2); font-size: 12px; font-weight: 600; }
+.miniapp-stage .mini-recharge-balance .mini-points-number { font-size: 28px; }
+.miniapp-stage .mini-recharge-section-title { display: block; margin: 0 1px 9px; color: var(--mini-ink); font-size: 16px; font-weight: 750; letter-spacing: -0.2px; }
 .miniapp-stage .mini-recharge-empty { padding: 23px 10px; border: 0.5px dashed var(--mini-line-strong); border-radius: 10px; color: var(--mini-subtle-2); font-size: 12px; text-align: center; }
-.miniapp-stage .mini-recharge-list { display: flex; flex-direction: column; gap: 8px; }
-.miniapp-stage .mini-recharge-card { padding: 12px 13px; border: 0.5px solid var(--mini-line); border-radius: 11px; background: var(--mini-soft); }
-.miniapp-stage .mini-recharge-card-main { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.miniapp-stage .mini-recharge-card-left { min-width: 0; flex: 1; }
-.miniapp-stage .mini-recharge-card-name { display: block; overflow: hidden; color: var(--mini-ink); font-size: 14.5px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-.miniapp-stage .mini-recharge-card-points { display: block; margin-top: 4px; color: var(--mini-subtle); font-size: 13.5px; }
-.miniapp-stage .mini-recharge-card-right { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-.miniapp-stage .mini-recharge-card-price { color: var(--mini-primary); font-size: 20px; font-weight: 800; line-height: 1.1; }
-.miniapp-stage .mini-recharge-radio { display: flex; align-items: center; justify-content: center; width: 19px; height: 19px; border: 1.5px solid var(--mini-line-strong); border-radius: 50%; transition: border-color .2s; }
-.miniapp-stage .mini-recharge-radio-dot { width: 10px; height: 10px; border-radius: 50%; background: transparent; transition: background .2s; }
-.miniapp-stage .mini-recharge-card--selected { border-color: var(--mini-primary); }
-.miniapp-stage .mini-recharge-card--selected .mini-recharge-radio { border-color: var(--mini-primary); }
-.miniapp-stage .mini-recharge-card--selected .mini-recharge-radio-dot { background: var(--mini-primary); }
-.miniapp-stage .mini-recharge-pay { margin: 0; border-radius: 499.5px; background: linear-gradient(135deg, #255be5, #7663ed); color: #fff; font-weight: 650; box-shadow: 0 4px 9px rgba(48, 92, 224, .25); }
+.miniapp-stage .mini-recharge-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 13px; }
+.miniapp-stage .mini-recharge-card { padding: 13px; border: 1px solid var(--mini-line); border-radius: 11px; background: var(--mini-surface); box-shadow: 0 4px 10px rgba(45, 80, 135, .05); }
+.miniapp-stage .mini-recharge-card--selected { border-color: var(--mini-primary); box-shadow: 0 5px 12px rgba(40, 100, 234, .14); }
+.miniapp-stage .mini-recharge-card-head { display: flex; align-items: center; gap: 6px; }
+.miniapp-stage .mini-recharge-badge { display: flex; width: 26px; height: 26px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 50%; background: var(--mini-soft); }
+.miniapp-stage .mini-recharge-badge-emoji { font-size: 16px; line-height: 1.2; }
+.miniapp-stage .mini-recharge-badge-icon { width: 18px; height: 18px; }
+.miniapp-stage .mini-recharge-card-name { display: block; min-width: 0; flex: 1; overflow: hidden; color: var(--mini-ink); font-size: 16px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.miniapp-stage .mini-recharge-check { position: relative; width: 16px; height: 16px; flex-shrink: 0; border: 1px solid var(--mini-line-strong); border-radius: 50%; background: var(--mini-surface); }
+.miniapp-stage .mini-recharge-check::after { content: ''; position: absolute; left: 50%; top: 50%; width: 7px; height: 3.5px; margin: -3px 0 0 -4px; border-left: 1px solid var(--mini-subtle-2); border-bottom: 1px solid var(--mini-subtle-2); transform: rotate(-45deg); }
+.miniapp-stage .mini-recharge-card--selected .mini-recharge-check { border-color: var(--mini-primary); background: var(--mini-primary); }
+.miniapp-stage .mini-recharge-card--selected .mini-recharge-check::after { border-color: #fff; }
+.miniapp-stage .mini-recharge-card-points { display: block; margin-top: 8px; color: var(--mini-subtle); font-size: 16px; font-weight: 500; line-height: 1.2; }
+.miniapp-stage .mini-recharge-card-price { display: block; margin-top: 4px; color: var(--mini-primary); font-size: 18px; font-weight: 800; line-height: 1.2; }
+.miniapp-stage .mini-recharge-card-validity { display: block; margin-top: 6px; color: var(--mini-subtle-2); font-size: 11px; line-height: 1.35; }
+.miniapp-stage .mini-recharge-card--used { border-style: dashed; background: var(--mini-soft); box-shadow: none; }
+.miniapp-stage .mini-recharge-card--used .mini-recharge-card-name, .miniapp-stage .mini-recharge-card--used .mini-recharge-card-points, .miniapp-stage .mini-recharge-card--used .mini-recharge-card-price { color: var(--mini-subtle-2); }
+.miniapp-stage .mini-recharge-card--used .mini-recharge-check { border-style: dashed; }
+.miniapp-stage .mini-recharge-card--used .mini-recharge-check::after { display: none; }
+.miniapp-stage .mini-recharge-card-validity--used { color: var(--mini-warn); font-weight: 600; }
+.miniapp-stage .mini-recharge-pay { margin: 0; border-radius: 499.5px; background: var(--mini-primary); color: #fff; font-weight: 700; box-shadow: 0 4px 9px rgba(48, 92, 224, .25); }
 .miniapp-stage .mini-recharge-pay::after { border: 0; }
 .miniapp-stage .mini-recharge-pay[disabled] { background: var(--mini-soft); color: var(--mini-subtle-2); box-shadow: none; }
-.miniapp-stage .mini-recharge-footer { margin-top: 12px; }
-.miniapp-stage .mini-recharge-pay--full { display: block; width: 100%; padding: 0 13px; height: 44px; line-height: 44px; font-size: 15px; }
-.miniapp-stage .mini-recharge-card-foot { display: flex; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 0.5px solid var(--mini-line-faint); }
-.miniapp-stage .mini-recharge-card-validity { color: var(--mini-subtle-2); font-size: 10.5px; }
-.miniapp-stage .mini-recharge-panel { padding: 12px 13px; border-radius: 11px; background: var(--mini-soft); }
-.miniapp-stage .mini-recharge-info { display: block; color: var(--mini-text-2); font-size: 11.5px; line-height: 1.7; white-space: pre-line; }
+.miniapp-stage .mini-recharge-pay--full { display: block; width: 100%; padding: 0 13px; height: 44px; line-height: 44px; font-size: 16px; }
+.miniapp-stage .mini-recharge-vip { margin-top: 13px; padding: 13px; border-radius: 13px; background: linear-gradient(135deg, var(--mini-primary-pale), var(--mini-primary-border)); }
+.miniapp-stage .mini-recharge-vip-head { display: flex; align-items: center; gap: 7px; }
+.miniapp-stage .mini-recharge-vip-badge { display: flex; width: 26px; height: 26px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 8px; background: linear-gradient(135deg, #4a86f7, #2c5fe0); }
+.miniapp-stage .mini-recharge-vip-crown { width: 16px; height: 16px; }
+.miniapp-stage .mini-recharge-vip-title { display: block; min-width: 0; flex: 1; color: var(--mini-ink); font-size: 16px; font-weight: 750; }
+.miniapp-stage .mini-recharge-vip-arrow { width: 7px; height: 7px; flex-shrink: 0; margin-right: 3px; border-top: 1px solid var(--mini-primary); border-right: 1px solid var(--mini-primary); transform: rotate(45deg); }
+.miniapp-stage .mini-recharge-vip-list { margin-top: 10px; }
+.miniapp-stage .mini-recharge-vip-item { display: flex; align-items: flex-start; gap: 6px; margin-top: 10px; }
+.miniapp-stage .mini-recharge-vip-item:first-child { margin-top: 0; }
+.miniapp-stage .mini-recharge-vip-tick { position: relative; width: 15px; height: 15px; flex-shrink: 0; margin-top: 1.5px; border: 1px solid var(--mini-primary-strong); border-radius: 50%; }
+.miniapp-stage .mini-recharge-vip-tick::after { content: ''; position: absolute; left: 50%; top: 50%; width: 5.5px; height: 3px; margin: -2.5px 0 0 -3px; border-left: 1px solid var(--mini-primary-strong); border-bottom: 1px solid var(--mini-primary-strong); transform: rotate(-45deg); }
+.miniapp-stage .mini-recharge-vip-text { min-width: 0; flex: 1; color: var(--mini-text-2); font-size: 13px; line-height: 1.55; }
 .miniapp-stage .mini-service-page { padding-bottom: 30px; }
 .miniapp-stage .mini-hot-page { padding-bottom: 30px; }
 .miniapp-stage .mini-hot-empty { padding: 70px 16px; color: var(--mini-subtle); font-size: 13px; text-align: center; }
