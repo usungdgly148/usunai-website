@@ -69,10 +69,15 @@ function isTrialPackage(pkg?: ComputePackage | null) {
 }
 
 /**
- * 服务端「试用套餐已购过」的错误码，跨端契约（定义在 server/plan-access.mjs）。
+ * 服务端「试用套餐已购过」的错误码与文案，跨端契约（定义在 server/plan-access.mjs）。
  * 服务端把这个码回过来时前端必须弹窗，不能退化成 toast —— 用户会以为是网络问题而反复重试。
+ *
+ * ⚠️ 文案必须与服务端的 `TRIAL_ALREADY_PURCHASED_MESSAGE` **逐字一致**：
+ *    本页有两条路径会弹这个窗（本地预拦 / 服务端 409 兜底），文案只留这一份常量共用，
+ *    否则两条路径措辞漂移、用户看到两套说法。`scripts/check-plan-access.mjs` 会断言一致性。
  */
 const TRIAL_ALREADY_PURCHASED_CODE = 'TRIAL_ALREADY_PURCHASED';
+const TRIAL_ALREADY_PURCHASED_MESSAGE = '「免费试用」套餐每位用户仅限购买一次，请选择其它套餐。';
 
 /** 版本号比较：v1 > v2 返回 1，相等返回 0，小于返回 -1。 */
 function compareVersion(v1: string, v2: string) {
@@ -238,7 +243,7 @@ export default function RechargePage() {
   const showTrialUsed = () => {
     void Taro.showModal({
       title: '每个账号仅限购买一次',
-      content: '「免费试用」套餐每位用户只能购买一次，请选择其它套餐。',
+      content: TRIAL_ALREADY_PURCHASED_MESSAGE,
       showCancel: false,
       confirmText: '知道了',
     });
@@ -301,7 +306,7 @@ export default function RechargePage() {
         void state.reload();
         Taro.showModal({
           title: '每个账号仅限购买一次',
-          content: error.message || '「免费试用」套餐每位用户只能购买一次，请选择其它套餐。',
+          content: error.message || TRIAL_ALREADY_PURCHASED_MESSAGE,
           showCancel: false,
           confirmText: '换一个套餐',
         });

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   TRIAL_ALREADY_PURCHASED_CODE,
+  TRIAL_ALREADY_PURCHASED_MESSAGE,
   VIP_REQUIRED_CODE,
   buildPlanPatch,
   hasUsedTrial,
@@ -121,6 +122,14 @@ assert.equal(vipMsg, '「AI 短视频脚本」为 VIP 专享，需升级为更�
 assert.doesNotMatch(vipMsg, /免费试用/, '服务端 VIP 文案不得写死套餐名');
 assert.doesNotMatch(read('miniapp/src/utils/vip-gate.ts'), /免费试用/, '小程序升级弹窗文案同样不得写死套餐名（须与服务端同一口径）');
 assert.equal(vipRequiredMessage(''), '该内容为 VIP 专享，需升级为更高权益套餐后使用。', '缺内容名时要有兜底措辞');
+
+// 试用限购文案：充值页有两条路径弹这个窗（本地预拦 / 服务端 409 兜底），
+// 必须共用同一个常量、且与服务端逐字一致 —— 否则用户会被同一件事用两套说法告知。
+const rechargePage = read('miniapp/src/pages/recharge/index.tsx');
+const miniappTrialMsg = (rechargePage.match(/const TRIAL_ALREADY_PURCHASED_MESSAGE = '([^']*)';/) || [])[1];
+assert.ok(miniappTrialMsg, '充值页必须定义 TRIAL_ALREADY_PURCHASED_MESSAGE 常量');
+assert.equal(miniappTrialMsg, TRIAL_ALREADY_PURCHASED_MESSAGE, '小程序与服务端的试用限购文案必须逐字一致');
+assert.doesNotMatch(rechargePage, /只能购买一次/, '两条路径都要引常量，不许再就地写死措辞');
 
 console.log('Plan access check passed: trial purchase limited to once per user, VIP-only content gated on all four entry points.');
 console.log(`codes: ${TRIAL_ALREADY_PURCHASED_CODE} / ${VIP_REQUIRED_CODE}`);
