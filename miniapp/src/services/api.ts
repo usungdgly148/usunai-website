@@ -370,6 +370,29 @@ function decodeUtf8(bytes: ArrayBuffer, decoder?: TextDecoder) {
   try { return decodeURIComponent(escape(binary)); } catch { return binary; }
 }
 
+/**
+ * 从非 2xx 响应体里挖出服务端给的原因与错误码。
+ *
+ * 对话/工作流这条链路是按 SSE 分块读的，服务端拒绝时回的却是普通 JSON
+ * （`{ ok:false, error:{ code, message } }`，见 server/miniapp-runtime.mjs）——
+ * 它不会进 onEvent，不挖出来用户就只能看到一句「HTTP 403」，
+ * 完全不知道是「VIP 专享」还是「内容已下架」。
+ */
+function parseErrorBody(text: string): { code: string; message: string } {
+  const raw = String(text || '').trim();
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start < 0 || end <= start) return { code: '', message: '' };
+  try {
+    const body = JSON.parse(raw.slice(start, end + 1)) as { error?: { code?: string; message?: string } | string };
+    const error = body && body.error;
+    if (typeof error === 'string') return { code: '', message: error };
+    return { code: String(error?.code || ''), message: String(error?.message || '') };
+  } catch {
+    return { code: '', message: '' };
+  }
+}
+
 export async function streamAgentChat(
   agentId: string,
   payload: Record<string, unknown>,
@@ -407,7 +430,13 @@ export async function streamAgentChat(
       success(response) {
         if (settled) return;
         if (response.statusCode >= 200 && response.statusCode < 300) { emitBlocks(); if (!settled) { settled = true; resolve(); } }
-        else { settled = true; reject(new ApiError('CHAT_FAILED', `对话请求失败（HTTP ${response.statusCode}）`, response.statusCode)); }
+        else {
+          settled = true;
+          // 保留服务端给的原因与错误码（如 VIP_REQUIRED / AGENT_NOT_FOUND）：
+          // 只回「HTTP 403」的话，用户看不到「为什么不能聊」，我们也没法按码做引导。
+          const { code, message } = parseErrorBody(buffer);
+          reject(new ApiError(code || 'CHAT_FAILED', message || `对话请求失败（HTTP ${response.statusCode}）`, response.statusCode));
+        }
       },
       fail(error) { if (!settled) { settled = true; reject(new ApiError('CHAT_FAILED', error.errMsg || '对话请求失败')); } },
     });

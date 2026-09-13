@@ -42,6 +42,9 @@ for (const page of ['chat', 'workflow']) {
 }
 assert.match(api, /enableChunked: true/);
 assert.match(api, /onChunkReceived/);
+// 非 2xx 时运行接口回的是 JSON（如 VIP_REQUIRED），SSE 读取链路不会把它交给 onEvent ——
+// 必须显式从响应缓冲里挖出 code/message，否则用户只看到「HTTP 403」，我们也无法按码引导。
+assert.match(api, /parseErrorBody\(buffer\)/, '非 2xx 响应必须保留服务端给的原因与错误码');
 assert.match(chat, /streamAgentChat/);
 assert.match(chat, /attachments:/);
 assert.match(workflow, /Idempotency|submitWorkflowTask/);
