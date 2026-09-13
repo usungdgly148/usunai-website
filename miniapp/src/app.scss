@@ -1043,40 +1043,90 @@ button::after { border: 0; }
 .mini-edit-sheet-ok { background: var(--mini-primary); color: #fff; }
 .mini-edit-sheet-cancel::after, .mini-edit-sheet-ok::after { border: 0; }
 
-/* 算力充值二级页（pages/recharge/index）：套餐列表 + 微信在线支付 */
+/* 算力充值二级页（pages/recharge/index）：余额卡 + 两列套餐网格 + 通栏支付 + 会员权益卡 */
 .mini-recharge-page { padding-bottom: 60px; }
-.mini-recharge-page .mini-recharge-panel {
-  margin-bottom: 18px;
-  border: 1px solid var(--mini-line);
+
+/* 顶部算力余额卡：与「我的」页 .mini-points-panel 同源，这里独立成卡（去掉上边框、四角圆角） */
+.mini-recharge-balance {
+  display: flex; align-items: center; gap: 16px;
+  margin-bottom: 34px; padding: 24px 26px 26px;
   border-radius: 26px;
-  background: var(--mini-surface);
-  box-shadow: 0 12px 28px rgba(45, 80, 135, .06);
+  background: linear-gradient(135deg, var(--mini-primary-pale), var(--mini-primary-border));
 }
-.mini-recharge-page .mini-recharge-panel:last-child { margin-bottom: 0; }
-.mini-recharge-label { display: block; margin: 6px 2px 14px; color: var(--mini-ink); font-size: 26px; font-weight: 700; }
+.mini-recharge-balance .mini-points-kicker { color: var(--mini-text-2); font-size: 24px; font-weight: 600; }
+.mini-recharge-balance .mini-points-number { font-size: 56px; }
+
+.mini-recharge-section-title { display: block; margin: 0 2px 18px; color: var(--mini-ink); font-size: 32px; font-weight: 750; letter-spacing: -.4px; }
 .mini-recharge-empty { padding: 46px 20px; border: 1px dashed var(--mini-line-strong); border-radius: 20px; color: var(--mini-subtle-2); font-size: 24px; text-align: center; }
-.mini-recharge-list { display: flex; flex-direction: column; gap: 16px; }
-.mini-recharge-card { padding: 24px 26px; border: 1px solid var(--mini-line); border-radius: 22px; background: var(--mini-soft); }
-.mini-recharge-card-main { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.mini-recharge-card-left { min-width: 0; flex: 1; }
-.mini-recharge-card-name { display: block; overflow: hidden; color: var(--mini-ink); font-size: 29px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-.mini-recharge-card-points { display: block; margin-top: 8px; color: var(--mini-subtle); font-size: 27px; }
-.mini-recharge-card-right { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 16px; }
-.mini-recharge-card-price { color: var(--mini-primary); font-size: 40px; font-weight: 800; line-height: 1.1; }
-.mini-recharge-radio { display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; border: 3px solid var(--mini-line-strong); border-radius: 50%; transition: border-color .2s; }
-.mini-recharge-radio-dot { width: 20px; height: 20px; border-radius: 50%; background: transparent; transition: background .2s; }
-.mini-recharge-card--selected { border-color: var(--mini-primary); }
-.mini-recharge-card--selected .mini-recharge-radio { border-color: var(--mini-primary); }
-.mini-recharge-card--selected .mini-recharge-radio-dot { background: var(--mini-primary); }
-.mini-recharge-pay { margin: 0; border-radius: 999px; background: linear-gradient(135deg, #255be5, #7663ed); color: #fff; font-weight: 650; box-shadow: 0 8px 18px rgba(48, 92, 224, .25); }
+
+/* 两列套餐网格：同一行由网格自动等高 */
+.mini-recharge-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin-bottom: 26px; }
+.mini-recharge-card {
+  padding: 26px;
+  border: 2px solid var(--mini-line);
+  border-radius: 22px;
+  background: var(--mini-surface);
+  box-shadow: 0 8px 20px rgba(45, 80, 135, .05);
+}
+/* 选中态：主色描边 + 右上角实心勾（未选为浅灰空圈灰勾） */
+.mini-recharge-card--selected { border-color: var(--mini-primary); box-shadow: 0 10px 24px rgba(40, 100, 234, .14); }
+.mini-recharge-card-head { display: flex; align-items: center; gap: 12px; }
+.mini-recharge-badge {
+  display: flex; width: 52px; height: 52px; flex-shrink: 0; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--mini-soft);
+}
+.mini-recharge-badge-emoji { font-size: 32px; line-height: 1.2; }
+.mini-recharge-badge-icon { width: 36px; height: 36px; }
+.mini-recharge-card-name {
+  display: block; min-width: 0; flex: 1; overflow: hidden;
+  color: var(--mini-ink); font-size: 32px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap;
+}
+.mini-recharge-check { position: relative; width: 32px; height: 32px; flex-shrink: 0; border: 2px solid var(--mini-line-strong); border-radius: 50%; background: var(--mini-surface); }
+/* 对勾用两条边框旋 -45° 画（不依赖字体，微信端各机型一致） */
+.mini-recharge-check::after {
+  content: ''; position: absolute; left: 50%; top: 50%;
+  width: 14px; height: 7px; margin: -6px 0 0 -8px;
+  border-left: 2px solid var(--mini-subtle-2); border-bottom: 2px solid var(--mini-subtle-2);
+  transform: rotate(-45deg);
+}
+.mini-recharge-card--selected .mini-recharge-check { border-color: var(--mini-primary); background: var(--mini-primary); }
+.mini-recharge-card--selected .mini-recharge-check::after { border-color: #fff; }
+.mini-recharge-card-points { display: block; margin-top: 16px; color: var(--mini-subtle); font-size: 32px; font-weight: 500; line-height: 1.2; }
+.mini-recharge-card-price { display: block; margin-top: 8px; color: var(--mini-primary); font-size: 36px; font-weight: 800; line-height: 1.2; }
+.mini-recharge-card-validity { display: block; margin-top: 12px; color: var(--mini-subtle-2); font-size: 22px; line-height: 1.35; }
+
+.mini-recharge-pay { margin: 0; border-radius: 999px; background: var(--mini-primary); color: #fff; font-weight: 700; box-shadow: 0 8px 18px rgba(48, 92, 224, .25); }
 .mini-recharge-pay::after { border: 0; }
 .mini-recharge-pay[disabled] { background: var(--mini-soft); color: var(--mini-subtle-2); box-shadow: none; }
-.mini-recharge-footer { margin-top: 24px; }
-.mini-recharge-pay--full { display: block; width: 100%; padding: 0 26px; height: 88px; line-height: 88px; font-size: 30px; }
-.mini-recharge-card-foot { display: flex; align-items: center; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--mini-line-faint); }
-.mini-recharge-card-validity { color: var(--mini-subtle-2); font-size: 21px; }
-.mini-recharge-panel { padding: 24px 26px; border-radius: 22px; background: var(--mini-soft); }
-.mini-recharge-info { display: block; color: var(--mini-text-2); font-size: 23px; line-height: 1.7; white-space: pre-line; }
+.mini-recharge-pay--full { display: block; width: 100%; padding: 0 26px; height: 88px; line-height: 88px; font-size: 32px; }
+
+/* VIP 会员权益：条目来自后台「充值提示信息」逐行拆分；点整卡去客服页 */
+.mini-recharge-vip {
+  margin-top: 26px; padding: 26px;
+  border-radius: 26px;
+  background: linear-gradient(135deg, var(--mini-primary-pale), var(--mini-primary-border));
+}
+.mini-recharge-vip-head { display: flex; align-items: center; gap: 14px; }
+.mini-recharge-vip-badge {
+  display: flex; width: 52px; height: 52px; flex-shrink: 0; align-items: center; justify-content: center;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #4a86f7, #2c5fe0);
+}
+.mini-recharge-vip-crown { width: 32px; height: 32px; }
+.mini-recharge-vip-title { display: block; min-width: 0; flex: 1; color: var(--mini-ink); font-size: 32px; font-weight: 750; }
+.mini-recharge-vip-arrow { width: 14px; height: 14px; flex-shrink: 0; margin-right: 6px; border-top: 2px solid var(--mini-primary); border-right: 2px solid var(--mini-primary); transform: rotate(45deg); }
+.mini-recharge-vip-list { margin-top: 20px; }
+.mini-recharge-vip-item { display: flex; align-items: flex-start; gap: 12px; margin-top: 20px; }
+.mini-recharge-vip-item:first-child { margin-top: 0; }
+.mini-recharge-vip-tick { position: relative; width: 30px; height: 30px; flex-shrink: 0; margin-top: 3px; border: 2px solid var(--mini-primary-strong); border-radius: 50%; }
+.mini-recharge-vip-tick::after {
+  content: ''; position: absolute; left: 50%; top: 50%;
+  width: 11px; height: 6px; margin: -5px 0 0 -6px;
+  border-left: 2px solid var(--mini-primary-strong); border-bottom: 2px solid var(--mini-primary-strong);
+  transform: rotate(-45deg);
+}
+.mini-recharge-vip-text { min-width: 0; flex: 1; color: var(--mini-text-2); font-size: 26px; line-height: 1.55; }
 
 /* 联系客服二级页（pages/service/index）：客服微信二维码 + 「长按扫码，咨询客服」提示 */
 .mini-service-page { padding-bottom: 60px; }

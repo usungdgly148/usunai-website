@@ -76,4 +76,35 @@ const clientSources = [api, chat, workflow, read('miniapp/src/services/runtime.t
 assert.doesNotMatch(clientSources, /WECHAT_MINIAPP_APP_SECRET|api[_-]?key|private[_-]?key/i);
 assert.doesNotMatch(clientSources, /\/api\/admin\//);
 
+/**
+ * 算力充值页（pages/recharge/index）按参考图重排后的结构契约。
+ * 这页同时压着「虚拟支付」这条最贵的链路，排版重构最容易顺手把它碰掉，
+ * 所以除了类名，支付调用/签名失效重试也一并钉住。
+ */
+const recharge = read('miniapp/src/pages/recharge/index.tsx');
+const appScss = read('miniapp/src/app.scss');
+
+// 套餐名自带的 emoji（🥈 银卡 / 🥇 金卡 / 👑 至尊卡）当徽标用
+assert.match(recharge, /const BADGE_EMOJI = \/\^\(\?:\[\\uD83C-\\uD83E\]\[\\uDC00-\\uDFFF\]/, '套餐名 emoji 必须用代理对区间剥离');
+assert.doesNotMatch(recharge, /\\u\{1F/, '禁止用 \\u{...} 字面量匹配 emoji（需要 u 标志，端上转译不保证支持）');
+assert.match(recharge, /label: label \|\| raw/, '名称整体就是 emoji 时必须回退原名，不能渲染空标题');
+
+// 版式骨架：余额卡 → 两列网格 → 通栏支付 → 权益卡
+assert.match(recharge, /className='mini-recharge-balance'/, '必须有顶部算力余额卡');
+assert.match(recharge, /className='mini-recharge-grid'/, '套餐必须是网格布局');
+assert.match(recharge, /mini-recharge-card--selected/, '套餐卡选中态类名必须保留');
+assert.match(recharge, /className='mini-recharge-vip'/, '必须有 VIP 会员权益卡');
+assert.match(recharge, /splitInfoLines\(data\?\.rechargeInfo/, '权益条目必须来自后台 rechargeInfo 逐行拆分');
+
+// 支付链路不得被排版重构碰掉
+assert.match(recharge, /await requestVirtualPayment\(order\.virtualPay\)/, '虚拟支付调用必须保留');
+assert.match(recharge, /isVirtualPaySignatureError\(error\)/, '签名失效分支必须保留');
+assert.match(recharge, /await refreshMiniappSession\(\)/, '签名失效后重新登录重试必须保留');
+
+// 样式：两列等宽网格；对勾/箭头用边框旋转绘制（不依赖图标字体，各机型一致）
+assert.match(appScss, /\.mini-recharge-grid \{ display: grid; grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/, '套餐网格必须是两列等宽');
+assert.match(appScss, /\.mini-recharge-check::after \{[\s\S]{0,400}?transform: rotate\(-45deg\)/, '选中勾必须用两条边框旋 -45° 画');
+assert.match(appScss, /\.mini-recharge-vip-arrow \{[\s\S]{0,400}?rotate\(45deg\)/, '权益卡箭头必须用边框旋 45° 画');
+assert.doesNotMatch(appScss, /\.mini-recharge-radio/, '旧版单列卡片的选择圆点样式应当已删除');
+
 console.log('miniapp stage 4 runtime contracts: ok');

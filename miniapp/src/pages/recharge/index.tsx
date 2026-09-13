@@ -4,12 +4,14 @@ import { useEffect, useState } from 'react';
 import { PageState } from '../../components/page-state';
 import { useLoad } from '../../hooks/use-load';
 import { useThemePage } from '../../hooks/use-theme-page';
-import { createRechargeOrder, getPublicContent, getRechargeStatus, refreshMiniappSession } from '../../services/api';
-import type { ComputePackage, VirtualPaymentParams } from '../../types';
+import { createRechargeOrder, getMe, getPublicContent, getRechargeStatus, isLoggedOut, refreshMiniappSession } from '../../services/api';
+import type { ComputePackage, UserProfile, VirtualPaymentParams } from '../../types';
 
 interface RechargeData {
   computePackages: ComputePackage[];
   rechargeInfo: string;
+  /** 当前登录用户（用于顶部算力余额卡）；未登录或接口异常时为 null，只隐藏余额卡 */
+  profile: UserProfile | null;
 }
 
 /** 套餐有效期文案（与网页 RechargeDialog 同规则） */
@@ -23,6 +25,35 @@ function validityText(pkg: ComputePackage) {
   if (days > 0) return `购买后 ${days} 天到期`;
   if (pkg.validFrom) return `长期有效（${String(pkg.validFrom)} 起）`;
   return '长期有效';
+}
+
+/** 千分位：与「我的」页 formatPoints 同规则（toLocaleString 在小程序端表现不一致，勿用）。 */
+function formatPoints(value: number) {
+  return String(Math.max(0, Math.trunc(Number(value) || 0))).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+/**
+ * 套餐名自带徽标 emoji（后台命名为「🥈 银卡 / 🥇 金卡 / 👑 至尊卡」）。
+ * 拆成「emoji 徽标 + 纯文本名」：emoji 上移到卡片左上角圆形徽标里，标题只留文字。
+ * 用代理对区间匹配而非 \u{...}（后者需要 u 标志，小程序端转译不保证支持）。
+ */
+const BADGE_EMOJI = /^(?:[\uD83C-\uD83E][\uDC00-\uDFFF]|[\u2600-\u27BF]|[\u2B00-\u2BFF]|\uFE0F|\u200D)+\s*/;
+
+function splitPackageName(name: string) {
+  const raw = String(name || '').trim();
+  const matched = raw.match(BADGE_EMOJI);
+  if (!matched) return { badge: '', label: raw };
+  const label = raw.slice(matched[0].length).trim();
+  // 名称整体就是 emoji（没有文字）时保留原名，别渲染成空标题
+  return { badge: matched[0].trim(), label: label || raw };
+}
+
+/** 后台「充值提示信息」是带序号的多行文本 → 逐行去掉序号，作为权益清单条目。 */
+function splitInfoLines(text: string) {
+  return String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^\d+\s*[.、)）]\s*/, ''))
+    .filter(Boolean);
 }
 
 /** 版本号比较：v1 > v2 返回 1，相等返回 0，小于返回 -1。 */
@@ -160,17 +191,28 @@ export default function RechargePage() {
   }, []);
 
   const state = useLoad(async (): Promise<RechargeData> => {
-    const content = await getPublicContent();
+    const [content, profile] = await Promise.all([
+      getPublicContent(),
+      // 余额卡是加分项：未登录或接口异常时只隐藏它，不能让整页充值流程跟着报错
+      isLoggedOut() ? Promise.resolve(null) : getMe().catch(() => null),
+    ]);
     return {
       computePackages: Array.isArray(content?.computePackages)
         ? content.computePackages.filter((pkg) => pkg.published !== false)
         : [],
       rechargeInfo: typeof content?.rechargeInfo === 'string' ? content.rechargeInfo : '',
+      profile: profile || null,
     };
   }, []);
 
   const data = state.data;
   const packages = data?.computePackages || [];
+  const infoLines = splitInfoLines(data?.rechargeInfo || '');
+
+  /** 权益卡右侧箭头指向「联系客服」——权益里的「使用咨询和专属技术支持」正落在这个页面。 */
+  const openService = () => {
+    void Taro.navigateTo({ url: '/pages/service/index' });
+  };
 
   /** 支付后轮询订单状态确认到账（发货推送异步，服务端每次轮询都会查单兜底，最多 ~10s）。 */
   const waitPaid = async (orderId: string) => {
@@ -229,64 +271,81 @@ export default function RechargePage() {
   };
 
   return <View className='page mini-recharge-page' style={pageStyle}>
-    <View className='mini-page-topbar'>
-      <Text className='mini-page-heading'>算力充值</Text>
-      <Text className='mini-page-caption'>选择算力套餐，微信支付，即时到账</Text>
-    </View>
-
     <PageState loading={state.loading} error={state.error} onRetry={state.reload} />
 
     {!state.loading && !state.error && data && (
       <>
-        <View className='mini-recharge-panel'>
-          <Text className='mini-recharge-label'>算力套餐</Text>
-          {packages.length === 0 ? (
-            <View className='mini-recharge-empty'>后台暂未设置算力套餐</View>
-          ) : (
-            <View className='mini-recharge-list'>
-              {packages.map((pkg) => {
-                const selected = selectedId === pkg.id;
-                return (
-                  <View
-                    key={pkg.id}
-                    className={`mini-recharge-card${selected ? ' mini-recharge-card--selected' : ''}`}
-                    onClick={() => setSelectedId(pkg.id)}
-                  >
-                    <View className='mini-recharge-card-main'>
-                      <View className='mini-recharge-card-left'>
-                        <Text className='mini-recharge-card-name'>{pkg.name}</Text>
-                        <Text className='mini-recharge-card-points'>{Number(pkg.points || 0).toLocaleString()} 点</Text>
-                      </View>
-                      <View className='mini-recharge-card-right'>
-                        <Text className='mini-recharge-card-price'>¥{pkg.price}</Text>
-                        <View className='mini-recharge-radio'>
-                          <View className='mini-recharge-radio-dot' />
-                        </View>
-                      </View>
-                    </View>
-                    <View className='mini-recharge-card-foot'>
-                      <Text className='mini-recharge-card-validity'>{validityText(pkg)}</Text>
-                    </View>
-                  </View>
-                );
-              })}
+        {/* ① 算力余额卡：与「我的」页共用 .mini-points-* 视觉，进页先看到「我还有多少算力」 */}
+        {data.profile ? (
+          <View className='mini-recharge-balance'>
+            <View className='mini-points-icon-wrap'><View className='mini-points-icon ui-icon-power' /></View>
+            <View className='mini-points-main'>
+              <Text className='mini-points-kicker'>算力点数</Text>
+              <View className='mini-points-value'>
+                <Text className='mini-points-number'>{formatPoints(data.profile.points)}</Text>
+                <Text className='mini-points-unit'>点</Text>
+              </View>
             </View>
-          )}
-        </View>
+          </View>
+        ) : null}
 
-        <View className='mini-recharge-footer'>
-          <Button
-            className='mini-recharge-pay mini-recharge-pay--full'
-            disabled={!selectedId || payingId !== null}
-            loading={payingId !== null}
-            onClick={handlePay}
-          >{payingId ? '支付中' : '立即支付'}</Button>
-        </View>
+        {/* ② 选择套餐：两列网格；套餐名自带的 emoji 直接当左上角徽标 */}
+        <Text className='mini-recharge-section-title'>选择套餐</Text>
+        {packages.length === 0 ? (
+          <View className='mini-recharge-empty'>后台暂未设置算力套餐</View>
+        ) : (
+          <View className='mini-recharge-grid'>
+            {packages.map((pkg) => {
+              const selected = selectedId === pkg.id;
+              const { badge, label } = splitPackageName(pkg.name);
+              return (
+                <View
+                  key={pkg.id}
+                  className={`mini-recharge-card${selected ? ' mini-recharge-card--selected' : ''}`}
+                  onClick={() => setSelectedId(pkg.id)}
+                >
+                  <View className='mini-recharge-card-head'>
+                    <View className='mini-recharge-badge'>
+                      {badge
+                        ? <Text className='mini-recharge-badge-emoji'>{badge}</Text>
+                        : <View className='mini-recharge-badge-icon ui-icon-power' />}
+                    </View>
+                    <Text className='mini-recharge-card-name'>{label}</Text>
+                    <View className='mini-recharge-check' />
+                  </View>
+                  <Text className='mini-recharge-card-points'>{formatPoints(pkg.points)} 点</Text>
+                  <Text className='mini-recharge-card-price'>¥{pkg.price}</Text>
+                  <Text className='mini-recharge-card-validity'>{validityText(pkg)}</Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
 
-        {data.rechargeInfo && data.rechargeInfo.trim() ? (
-          <View className='mini-recharge-panel'>
-            <Text className='mini-recharge-label'>提示信息</Text>
-            <Text className='mini-recharge-info'>{data.rechargeInfo}</Text>
+        {/* ③ 通栏支付按钮 */}
+        <Button
+          className='mini-recharge-pay mini-recharge-pay--full'
+          disabled={!selectedId || payingId !== null}
+          loading={payingId !== null}
+          onClick={handlePay}
+        >{payingId ? '支付中' : '立即支付'}</Button>
+
+        {/* ④ VIP 会员权益：内容 = 后台「充值提示信息」逐行拆成条目 */}
+        {infoLines.length ? (
+          <View className='mini-recharge-vip' onClick={openService}>
+            <View className='mini-recharge-vip-head'>
+              <View className='mini-recharge-vip-badge'><View className='mini-recharge-vip-crown ui-icon-vip' /></View>
+              <Text className='mini-recharge-vip-title'>VIP 会员权益</Text>
+              <View className='mini-recharge-vip-arrow' />
+            </View>
+            <View className='mini-recharge-vip-list'>
+              {infoLines.map((line, index) => (
+                <View key={`${index}-${line}`} className='mini-recharge-vip-item'>
+                  <View className='mini-recharge-vip-tick' />
+                  <Text className='mini-recharge-vip-text'>{line}</Text>
+                </View>
+              ))}
+            </View>
           </View>
         ) : null}
       </>
