@@ -24,7 +24,8 @@ export async function promptUpgrade(name?: string): Promise<boolean> {
   const label = String(name || '').trim();
   const res = await Taro.showModal({
     title: 'VIP 专享内容',
-    content: `${label ? `「${label}」` : '该内容'}为 VIP 专享，当前「免费试用」套餐无法使用。\n升级为更高权益套餐后即可使用。`,
+    // ⚠️ 文案不写死套餐名：门禁同时拦「试用中 / 已过期 / 无套餐」，后两类手上并没有试用套餐。
+    content: `${label ? `「${label}」` : '该内容'}为 VIP 专享，需升级为更高权益套餐后使用。`,
     confirmText: '去升级',
     cancelText: '暂不升级',
     confirmColor: '#305CE0',

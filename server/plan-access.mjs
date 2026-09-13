@@ -26,10 +26,15 @@ export const TRIAL_ALREADY_PURCHASED_MESSAGE = '「免费试用」套餐每位�
 /** 命中 VIP 专享门禁时的错误码。 */
 export const VIP_REQUIRED_CODE = 'VIP_REQUIRED';
 
-/** VIP 专享门禁的提示文案（带内容名，小程序/网页共用，避免两端各写一版）。 */
+/**
+ * VIP 专享门禁的提示文案（带内容名，小程序/网页共用，避免两端各写一版）。
+ *
+ * ⚠️ 不写死「免费试用」这个套餐名：门禁同时拦「试用中 / 已过期 / 无套餐」三类用户，
+ * 后两类手上根本没有试用套餐，看到「当前『免费试用』套餐无法使用」会以为系统认错人了。
+ */
 export function vipRequiredMessage(name) {
   const label = String(name || '').trim();
-  return `${label ? `「${label}」` : '该内容'}为 VIP 专享，当前「免费试用」套餐无法使用，请升级为更高权益套餐后再试。`;
+  return `${label ? `「${label}」` : '该内容'}为 VIP 专享，需升级为更高权益套餐后使用。`;
 }
 
 /** 是否试用套餐：后台「试用套餐」开关优先，未勾选时按名称含「试用」兜底。 */

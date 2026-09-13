@@ -113,6 +113,15 @@ assert.match(serverIndex, /if \(packageTrial\) userPatch\.trialPurchased = true;
 const kvLocal = read('server/kv-local.js');
 assert.match(kvLocal, /if \(userPatch\.trialPurchased === true\) allowedPatch\.trialPurchased = true;/, 'trialPurchased 必须进 userPatch 白名单');
 
+// ============ 6. 提示文案：不许写死套餐名 ============
+// 门禁同时拦「试用中 / 已过期 / 无套餐」三类用户，后两类手上并没有试用套餐，
+// 文案里若写「当前『免费试用』套餐无法使用」会让他们以为系统认错人了。
+const vipMsg = vipRequiredMessage('AI 短视频脚本');
+assert.equal(vipMsg, '「AI 短视频脚本」为 VIP 专享，需升级为更高权益套餐后使用。', 'VIP 提示文案要带内容名并给出升级指引');
+assert.doesNotMatch(vipMsg, /免费试用/, '服务端 VIP 文案不得写死套餐名');
+assert.doesNotMatch(read('miniapp/src/utils/vip-gate.ts'), /免费试用/, '小程序升级弹窗文案同样不得写死套餐名（须与服务端同一口径）');
+assert.equal(vipRequiredMessage(''), '该内容为 VIP 专享，需升级为更高权益套餐后使用。', '缺内容名时要有兜底措辞');
+
 console.log('Plan access check passed: trial purchase limited to once per user, VIP-only content gated on all four entry points.');
 console.log(`codes: ${TRIAL_ALREADY_PURCHASED_CODE} / ${VIP_REQUIRED_CODE}`);
 console.log(`message: ${vipRequiredMessage('AI 短视频脚本')}`);
