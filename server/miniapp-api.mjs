@@ -415,6 +415,48 @@ async function deliverRechargeOrder({ KV, sanitizeId, order, payment, transactio
   return { ok: true };
 }
 
+// ============ 未支付订单的自动关单 ============
+// 用户点了「立即支付」但没走完（取消支付、或没拉起支付面板就退出），会留下一笔永远 pending 的订单。
+// 微信侧压根没建这笔单，所以 query_order 会明确回「数据不存在」—— 查一万次也是这个结果。
+// 老行为只打日志，于是这类死单被对账循环每 180s 重试一次（线上能看到几笔老单反复刷同一个错误）。
+//
+// 关单门槛是**双条件**，缺一不可：
+//   ① 订单已存在 ≥ 30 分钟 —— 宽限期内用户可能还在支付流程里（切后台、慢慢输密码），绝不关；
+//   ② 累计 3 轮对账微信都明确说「不存在」—— 单次查不到可能只是接口抖动。
+const RECONCILE_CLOSE_MIN_AGE_MS = 30 * 60 * 1000;
+const RECONCILE_CLOSE_MISSES = 3;
+// 微信对「查不到这笔订单」返回的 errcode（errmsg = 数据不存在）。
+// 官方对该码的描述是「请求参数字段错误，具体看 errmsg」，所以 errmsg 也要认。
+const VIRTUAL_PAY_ORDER_NOT_FOUND_ERRCODE = 268490002;
+const VIRTUAL_PAY_ORDER_NOT_FOUND_HINT = '数据不存在';
+
+/**
+ * 微信是否**明确表示**「这笔订单在我这儿不存在」。
+ *
+ * ⚠️ 只认这一种：网络超时、access_token 过期、限流等一律不算 —— 那些是「没问到」而不是「不存在」，
+ * 拿它们去关单会误伤用户正在支付的订单。
+ */
+export function isVirtualOrderNotFoundError(error) {
+  if (!error) return false;
+  if (Number(error.errcode) === VIRTUAL_PAY_ORDER_NOT_FOUND_ERRCODE) return true;
+  return String(error.message || '').includes(VIRTUAL_PAY_ORDER_NOT_FOUND_HINT);
+}
+
+/**
+ * 这笔 pending 订单现在够不够格自动关闭（纯函数，便于单测）。
+ *
+ * 两个条件都满足才关：累计 miss 数达标 **且** 已过宽限期。
+ * `createdAt` 解析不出来时一律返回 false —— 时间不明就保守不关。
+ */
+export function shouldCloseUnpaidOrder(order, nowMs = Date.now()) {
+  if (!order || String(order.status) !== 'pending') return false;
+  const misses = Number(order.meta && order.meta.reconcileMisses) || 0;
+  if (misses < RECONCILE_CLOSE_MISSES) return false;
+  const createdAtMs = Date.parse(String(order.createdAt || ''));
+  if (!Number.isFinite(createdAtMs)) return false;
+  return nowMs - createdAtMs >= RECONCILE_CLOSE_MIN_AGE_MS;
+}
+
 // 兜底发货：前端轮询订单状态时，若订单仍是 pending 且为虚拟支付单，主动查单确认后自发货。
 // 覆盖两种异常：① 发货推送未配置/丢失；② 推送到达但当时查单失败被微信重试前的空窗。
 async function reconcileVirtualOrder({ KV, sanitizeId, order }) {
@@ -445,7 +487,53 @@ async function reconcileVirtualOrder({ KV, sanitizeId, order }) {
     });
     return (await KV.kvGet('order_' + sanitizeId(outTradeNo))) || order;
   } catch (error) {
-    console.error('[recharge] 兜底查单失败:', outTradeNo, error?.code, error?.message || error);
+    console.error('[recharge] 兜底查单失败:', outTradeNo, error?.code, error?.errcode, error?.message || error);
+    // 微信明确说「不存在」→ 计数，够了就关单，别再无意义地每 3 分钟重试一次。
+    if (isVirtualOrderNotFoundError(error)) {
+      return countUnpaidMiss({ KV, sanitizeId, order, error });
+    }
+    return order;
+  }
+}
+
+// 记一次「微信侧查不到」，达到阈值就把这笔未支付订单关掉。
+//
+// 复用系统**已有**的 `closed` 状态（前台/后台的「已关闭」标签、筛选、图标都已支持），
+// 所以这次改动不涉及任何前端。另外 admin 的「恢复为已支付」只改状态、不发积分，不存在误发风险。
+async function countUnpaidMiss({ KV, sanitizeId, order, error }) {
+  const key = 'order_' + sanitizeId(String(order.id || ''));
+  try {
+    // 以 KV 里的最新记录为准：前端轮询与定时对账可能同时进来，用陈旧副本累加会丢计数。
+    const latest = (await KV.kvGet(key)) || order;
+    if (String(latest.status) !== 'pending') return latest;
+    const misses = (Number(latest.meta && latest.meta.reconcileMisses) || 0) + 1;
+    const next = {
+      ...latest,
+      meta: {
+        ...(latest.meta || {}),
+        reconcileMisses: misses,
+        reconcileLastMissAt: new Date().toISOString(),
+        reconcileLastErrcode: Number(error && error.errcode) || undefined,
+      },
+    };
+    if (shouldCloseUnpaidOrder(next)) {
+      next.status = 'closed';
+      next.closedAt = new Date().toISOString();
+      next.closedReason = 'unpaid_timeout';
+      next.closedBy = 'system';
+      await KV.kvPut(key, next);
+      console.log(
+        '[recharge] 未支付订单已自动关闭:',
+        order.id,
+        `累计 ${misses} 轮查不到，下单已超 ${Math.round(RECONCILE_CLOSE_MIN_AGE_MS / 60000)} 分钟`,
+      );
+      return next;
+    }
+    await KV.kvPut(key, next);
+    return next;
+  } catch (err) {
+    // 关单失败不能影响正常的补发货对账。
+    console.error('[recharge] 未支付订单计数失败:', order.id, err?.message || err);
     return order;
   }
 }
@@ -453,6 +541,7 @@ async function reconcileVirtualOrder({ KV, sanitizeId, order }) {
 // 定时对账：扫描「pending 且为虚拟支付」的近期订单，主动查单补发货。
 // 使命：让到账彻底不依赖微信「发货推送」——推送在微信后台可能配不上（报「系统繁忙」），
 // 且用户付完款立刻退出小程序时前端也不再轮询，这类漏单全部由服务端定时兜底。
+// 副产品：微信明确查不到的未支付订单会在几轮之后被关掉（见 countUnpaidMiss），不再无限重试。
 // key 形如 order_p<13位毫秒时间戳><随机hex>，先按时间戳排除老单，避免全量读 KV。
 const RECONCILE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export async function reconcilePendingVirtualOrders(KV, sanitizeId, {
@@ -460,7 +549,7 @@ export async function reconcilePendingVirtualOrders(KV, sanitizeId, {
   scanLimit = 3000,
   batch = 10,
 } = {}) {
-  const stats = { candidates: 0, pending: 0, delivered: 0 };
+  const stats = { candidates: 0, pending: 0, delivered: 0, closed: 0 };
   try {
     await loadVirtualPayConfig(KV);
     if (!virtualPayConfigured()) return stats;
@@ -479,10 +568,12 @@ export async function reconcilePendingVirtualOrders(KV, sanitizeId, {
         if (!order.meta.openid) continue;
         stats.pending += 1;
         const after = await reconcileVirtualOrder({ KV, sanitizeId, order });
-        if (String(after && after.status) === 'paid') stats.delivered += 1;
+        const afterStatus = String(after && after.status);
+        if (afterStatus === 'paid') stats.delivered += 1;
+        if (afterStatus === 'closed') stats.closed += 1;
       }
     }
-    if (stats.delivered > 0) console.log('[recharge] 定时对账补发货:', JSON.stringify(stats));
+    if (stats.delivered > 0 || stats.closed > 0) console.log('[recharge] 定时对账:', JSON.stringify(stats));
   } catch (error) {
     console.error('[recharge] 定时对账异常:', error?.code, error?.message || error);
   }
