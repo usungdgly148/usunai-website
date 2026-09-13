@@ -17,6 +17,7 @@ import * as KV from './kv-local.js';
 import nodemailer from 'nodemailer';
 import sharp from 'sharp';
 import { resolveMaxPlanValidity } from './plan-validity.mjs';
+import { hasVipAccess, isTrialPackage, vipRequiredMessage } from './plan-access.mjs';
 import { PAY_CONFIG_KV_KEY } from './wechat-pay.mjs';
 import {
   VIRTUAL_PAY,
@@ -1451,6 +1452,30 @@ async function findRegByEmail(email) {
 }
 function sanitizeIdSafe(s) { return String(s == null ? '' : s).replace(/[^a-zA-Z0-9_]/g, '_'); }
 
+/**
+ * 用户是否具备使用「VIP 专享」智能体/工作流的资格。
+ * 判定口径的唯一实现在 server/plan-access.mjs（试用中 / 已过期 / 无套餐一律无资格），
+ * 网页端 /api/coze/* 与小程序运行接口都调这里，保证两端口径不漂移。
+ */
+async function hasVipContentAccess(userId) {
+  const uid = sanitizeIdSafe(userId);
+  if (!uid) return false;
+  const [reg, user] = await Promise.all([KV.kvGet('reg_' + uid), KV.kvGet('user_' + uid)]);
+  const merged = { ...(reg || {}), ...(user || {}) };
+  return hasVipAccess(merged, getPlanValidity(merged));
+}
+
+/**
+ * VIP 专享门禁的拒绝出口（网页端）。
+ * 单独抽出来是为了 chat（SSE）与 workflow-run（SSE）两个入口给出同一份 403 文案，
+ * 前端 cozeApi 会读 body.error 抛给用户。
+ */
+function rejectVipRequired(res, name) {
+  res.statusCode = 403;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.end(JSON.stringify({ ok: false, error: vipRequiredMessage(name) }));
+}
+
 // ============ 手机号注册/登录辅助（2026-08-03）============
 // phone 唯一索引：phone_<sanitized> -> userId（避免 phoneUsers.json 孤岛，收敛进 SQLite KV）
 const phoneIndexKey = (phone) => 'phone_' + String(phone || '').trim().replace(/[^0-9]/g, '');
@@ -2353,6 +2378,7 @@ const server = http.createServer(async (req, res) => {
       readBody,
       getSession,
       isAdminSession,
+      getPlanValidity,
       sanitizeId: sanitizeIdSafe,
       getAgents: () => agents,
       port: PORT,
@@ -2461,6 +2487,12 @@ const server = http.createServer(async (req, res) => {
         res.statusCode = 402;
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify({ error: '算力不足，请先充值' }));
+        return;
+      }
+      // VIP 专享门禁：与小程序运行接口同一口径（试用中 / 已过期 / 无套餐都不放行）。
+      // 放在算力校验之后，让「没算力」先被提示出来，避免用户以为升级套餐就能解决算力问题。
+      if (cfg.vip === true && !(await hasVipContentAccess(session.userId))) {
+        rejectVipRequired(res, cfg.name);
         return;
       }
       const platform = cfg.platform || 'coze-new';
@@ -3101,6 +3133,11 @@ const server = http.createServer(async (req, res) => {
       if (!runtime) { res.statusCode = 404; emitSSEError(res, '工作流不存在或未发布。'); return; }
       const workflowCost = Math.max(1, Number(runtime.priceRate) || 1);
       if (await getUserPoints(session.userId) < workflowCost) { res.statusCode = 402; emitSSEError(res, '算力不足，请先充值。'); return; }
+      // VIP 专享门禁：与小程序运行接口同一口径（试用中 / 已过期 / 无套餐都不放行）。
+      if (runtime.vip === true && !(await hasVipContentAccess(session.userId))) {
+        rejectVipRequired(res, runtime.name);
+        return;
+      }
       const platform = runtime.platform || 'coze-old';
       const isOAuth = runtime.authType === 'oauth';
       if (!runtime.baseUrl || !String(runtime.baseUrl).trim()) { emitSSEError(res, '未配置 Base URL（扣子 API 域名）。'); return; }
@@ -4960,6 +4997,10 @@ const server = http.createServer(async (req, res) => {
           planValidDays: validityAfter.planValidDays,
         } : { points: amount },
       };
+      // 试用资格按人一次：管理员通过「免费试用」套餐发放/续期也算用过（与购买同口径，
+      // 见 server/plan-access.mjs 的 hasUsedTrial），否则后台手动发一次就能绕过限购。
+      const packageTrial = positive && isTrialPackage(packageInfo);
+      if (packageTrial) userPatch.trialPurchased = true;
       if (positive && packageName && validityWinner === 'incoming' && userPatch.planValidFrom && Object.prototype.hasOwnProperty.call(userPatch, 'planValidDays')) {
         const days = Number(userPatch.planValidDays);
         const startMs = new Date(userPatch.planValidFrom).getTime();
@@ -4968,7 +5009,7 @@ const server = http.createServer(async (req, res) => {
           : Number.isFinite(startMs) && Number.isFinite(days) && days > 0
             ? new Date(startMs + days * 86400000).toISOString().slice(0, 10)
             : '';
-        if (expireAt) userPatch.membership = { plan: packageName, expireAt };
+        if (expireAt) userPatch.membership = { plan: packageName, expireAt, trial: packageTrial };
       }
       const result = await KV.kvAdminAdjustPoints({ userId, amount, userPatch, computeRecord, orderRecord, requestId });
       if (!result.ok) {

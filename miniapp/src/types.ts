@@ -24,6 +24,8 @@ export interface ContentItem {
   tutorialTitle?: string;
   supportsImages?: boolean;
   assetCategory?: 'copy' | 'image' | 'video' | 'audio' | 'article';
+  /** 后台「VIP 专享」：仅持有生效中非试用套餐的用户可用（服务端硬拦 + 前端弹窗引导升级） */
+  vip?: boolean;
   formFields?: FormField[];
   outputFields?: Array<Record<string, unknown>>;
 }
@@ -94,6 +96,11 @@ export interface ComputePackage {
   published?: boolean;
   /** 微信虚拟支付道具 ID（后台「算力管理」填写；缺失表示该套餐未开放在线支付）。 */
   virtualProductId?: string;
+  /**
+   * 后台「试用套餐」开关：勾选后每个用户只能购买一次（服务端下单硬拦截）。
+   * 兼容规则：套餐名含「试用」时即使没勾也算试用套餐（线上「免费试用」就是这种）。
+   */
+  trial?: boolean;
 }
 export interface CustomerService {
   enabled: boolean;
@@ -204,6 +211,14 @@ export interface UserProfile {
   provider?: string;
   status?: string;
   hasPassword?: boolean;
+  /**
+   * 能否使用「VIP 专享」的智能体/工作流：只有生效中的、非试用的更高档套餐才为 true。
+   * 由服务端根据「当前生效套餐」算出（判定口径唯一实现在 server/plan-access.mjs）——
+   * 客户端不自行拼规则，只拿这个结果决定要不要弹升级引导。
+   */
+  vipAccess?: boolean;
+  /** 「免费试用」是否已用过（含上线前买入的老数据、后台手动发放）：充值页据此标「已购买」。 */
+  trialPurchased?: boolean;
 }
 
 export interface ApiEnvelope<T> {

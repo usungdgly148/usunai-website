@@ -1095,6 +1095,14 @@ button::after { border: 0; }
 .mini-recharge-card-points { display: block; margin-top: 16px; color: var(--mini-subtle); font-size: 32px; font-weight: 500; line-height: 1.2; }
 .mini-recharge-card-price { display: block; margin-top: 8px; color: var(--mini-primary); font-size: 36px; font-weight: 800; line-height: 1.2; }
 .mini-recharge-card-validity { display: block; margin-top: 12px; color: var(--mini-subtle-2); font-size: 22px; line-height: 1.35; }
+/* 试用套餐「已购买」态：虚线描边 + 灰底，勾选圈只留空圈（不可选），文案换成限购提示 */
+.mini-recharge-card--used { border-style: dashed; background: var(--mini-soft); box-shadow: none; }
+.mini-recharge-card--used .mini-recharge-card-name,
+.mini-recharge-card--used .mini-recharge-card-points,
+.mini-recharge-card--used .mini-recharge-card-price { color: var(--mini-subtle-2); }
+.mini-recharge-card--used .mini-recharge-check { border-style: dashed; }
+.mini-recharge-card--used .mini-recharge-check::after { display: none; }
+.mini-recharge-card-validity--used { color: var(--mini-warn); font-weight: 600; }
 
 .mini-recharge-pay { margin: 0; border-radius: 999px; background: var(--mini-primary); color: #fff; font-weight: 700; box-shadow: 0 8px 18px rgba(48, 92, 224, .25); }
 .mini-recharge-pay::after { border: 0; }

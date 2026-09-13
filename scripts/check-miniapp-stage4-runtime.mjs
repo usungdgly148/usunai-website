@@ -107,4 +107,37 @@ assert.match(appScss, /\.mini-recharge-check::after \{[\s\S]{0,400}?transform: r
 assert.match(appScss, /\.mini-recharge-vip-arrow \{[\s\S]{0,400}?rotate\(45deg\)/, '权益卡箭头必须用边框旋 45° 画');
 assert.doesNotMatch(appScss, /\.mini-recharge-radio/, '旧版单列卡片的选择圆点样式应当已删除');
 
+/**
+ * 「免费试用限购 1 次」+「VIP 专享门禁」的端上契约。
+ * 服务端闸门由 scripts/check-plan-access.mjs 钉住；这里钉的是小程序侧不许退化 ——
+ * 最容易发生的退化是「把弹窗改成 toast」「本地判定自己另写一套」。
+ */
+const vipGate = read('miniapp/src/utils/vip-gate.ts');
+const types = read('miniapp/src/types.ts');
+
+assert.match(types, /^\s*vip\?: boolean;/m, 'ContentItem 必须声明后台的 vip 字段');
+assert.match(types, /vipAccess\?: boolean;/, 'UserProfile 必须声明服务端算好的 vipAccess');
+assert.match(types, /trialPurchased\?: boolean;/, 'UserProfile 必须声明 trialPurchased（试用是否已用过）');
+assert.match(types, /trial\?: boolean;/, 'ComputePackage 必须声明后台「试用套餐」开关');
+
+// 前端判定口径：只读服务端结果，绝不自行拼套餐规则
+assert.match(vipGate, /profile\.vipAccess !== false/, 'vip-gate 必须只读服务端算好的 vipAccess');
+assert.doesNotMatch(vipGate, /TRIAL_PLAN_PATTERN|\/试用\//, 'vip-gate 不得自己按套餐名判定（口径唯一实现在 server/plan-access.mjs，文案里出现「免费试用」不算）');
+assert.match(vipGate, /Taro\.showModal\(/, 'VIP 门禁必须用弹窗（toast 无法承载「去升级」这一步）');
+assert.match(vipGate, /confirmText: '去升级'/, '弹窗必须给「去升级」按钮');
+assert.match(vipGate, /Taro\.navigateTo\(\{ url: RECHARGE_PAGE \}\)/, '确认后必须跳充值页');
+assert.match(vipGate, /item\.vip !== true/, '非 VIP 专享内容必须直接放行，不要多发一次请求');
+
+assert.match(chat, /if \(!\(await ensureVipAccess\(agent\)\)\) return;/, 'chat 发送前必须过 VIP 门禁');
+assert.match(workflow, /if \(!\(await ensureVipAccess\(workflow\)\)\) return;/, 'workflow 提交前必须过 VIP 门禁');
+
+// 试用限购：卡片「已购买」态 + 重复购买的弹窗（不是 toast）
+assert.match(recharge, /const trialUsed = data\?\.profile\?\.trialPurchased === true;/, '充值页必须读服务端 trialPurchased');
+assert.match(recharge, /TRIAL_ALREADY_PURCHASED_CODE = 'TRIAL_ALREADY_PURCHASED'/, '错误码必须与服务端 plan-access.mjs 对齐');
+assert.match(recharge, /if \(isTrialPackage\(pkg\) && trialUsed\)/, '已购试用再支付必须在本地先拦一道');
+assert.match(recharge, /error\.code === TRIAL_ALREADY_PURCHASED_CODE/, '服务端 409 必须按码识别');
+assert.match(recharge, /mini-recharge-card--used/, '试用套餐已购买态类名必须保留');
+assert.match(recharge, /已购买 · 每人限购 1 次/, '已购买态必须说明限购原因');
+assert.match(appScss, /\.mini-recharge-card--used \{/, '已购买态样式必须存在');
+
 console.log('miniapp stage 4 runtime contracts: ok');

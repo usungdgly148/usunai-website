@@ -711,6 +711,8 @@ export async function kvAdminAdjustPoints({ userId, amount, userPatch = {}, comp
     if (Object.prototype.hasOwnProperty.call(userPatch, 'planValidFrom')) allowedPatch.planValidFrom = userPatch.planValidFrom;
     if (Object.prototype.hasOwnProperty.call(userPatch, 'planValidDays')) allowedPatch.planValidDays = userPatch.planValidDays;
     if (userPatch.membership && typeof userPatch.membership === 'object') allowedPatch.membership = userPatch.membership;
+    // 试用资格凭证：「免费试用」每用户限购一次，下单前读它拦截（见 server/plan-access.mjs）。
+    if (userPatch.trialPurchased === true) allowedPatch.trialPurchased = true;
     const updatedUser = { ...user, ...allowedPatch, points: next };
     put.run(userKey, JSON.stringify(updatedUser, null, 2));
 

@@ -13,7 +13,7 @@ export default function AdminCompute() {
   const [filterType, setFilterType] = useState('all');
   const [pkgOpen, setPkgOpen] = useState(false);
   const [editingPkg, setEditingPkg] = useState(null);
-  const [pkgForm, setPkgForm] = useState({ name: '', points: '', price: '', validDays: '', validFrom: '', virtualProductId: '' });
+  const [pkgForm, setPkgForm] = useState({ name: '', points: '', price: '', validDays: '', validFrom: '', virtualProductId: '', trial: false });
   const [rechargeOpen, setRechargeOpen] = useState(false);
   const [rechargeUserId, setRechargeUserId] = useState('');
   const [rechargeAmount, setRechargeAmount] = useState('');
@@ -55,15 +55,22 @@ export default function AdminCompute() {
   useEffect(() => { setPage(1); }, [search, filterType]);
   useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
 
-  const openPkgAdd = () => { setEditingPkg(null); setPkgForm({ name: '', points: '', price: '', validDays: '', validFrom: '', virtualProductId: '' }); setPkgOpen(true); };
-  const openPkgEdit = (pkg) => { setEditingPkg(pkg); setPkgForm({ name: pkg.name, points: pkg.points, price: pkg.price, validDays: pkg.validDays ?? '', validFrom: pkg.validFrom || '', virtualProductId: pkg.virtualProductId || '' }); setPkgOpen(true); };
+  /**
+   * 是否「试用套餐」：后台开关优先，套餐名含「试用」兜底。
+   * ⚠️ 必须与服务端 server/plan-access.mjs 的 isTrialPackage 完全同规则 ——
+   * 线上「免费试用」套餐从来没有 trial 字段，只靠开关判会让限购直接失效。
+   */
+  const isTrialPkg = (pkg) => !!(pkg && (pkg.trial === true || /试用/.test(String(pkg.name || ''))));
+  const openPkgAdd = () => { setEditingPkg(null); setPkgForm({ name: '', points: '', price: '', validDays: '', validFrom: '', virtualProductId: '', trial: false }); setPkgOpen(true); };
+  // 编辑时回显**实际生效值**（而非裸 trial 字段）：否则「免费试用」会显示成未勾选，与真实行为不符。
+  const openPkgEdit = (pkg) => { setEditingPkg(pkg); setPkgForm({ name: pkg.name, points: pkg.points, price: pkg.price, validDays: pkg.validDays ?? '', validFrom: pkg.validFrom || '', virtualProductId: pkg.virtualProductId || '', trial: isTrialPkg(pkg) }); setPkgOpen(true); };
   const submitPkg = () => {
     const points = Number(pkgForm.points);
     const price = Number(pkgForm.price);
     if (!pkgForm.name || !points || !price) return;
     const validDays = pkgForm.validDays ? Number(pkgForm.validDays) : 0; // 0 = 永久有效
     const validFrom = pkgForm.validFrom ? pkgForm.validFrom : null;       // 留空 = 购买当天起算
-    const payload = { name: pkgForm.name, points, price, validDays, validFrom, virtualProductId: String(pkgForm.virtualProductId || '').trim() };
+    const payload = { name: pkgForm.name, points, price, validDays, validFrom, virtualProductId: String(pkgForm.virtualProductId || '').trim(), trial: !!pkgForm.trial };
     if (editingPkg) updateComputePackage(editingPkg.id, payload);
     else addComputePackage(payload);
     setPkgOpen(false);
@@ -139,7 +146,10 @@ export default function AdminCompute() {
             <div key={pkg.id} className="rounded-xl border border-slate-200 p-4 hover:border-blue-300 transition">
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="font-semibold text-slate-900">{pkg.name}</div>
+                  <div className="font-semibold text-slate-900 flex items-center gap-1.5">
+                    {pkg.name}
+                    {isTrialPkg(pkg) && <span className="text-[10px] leading-none px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">试用·限购1次</span>}
+                  </div>
                   <div className="text-xs text-slate-500 mt-0.5">{pkg.points.toLocaleString()} 点</div>
                   <div className="text-[11px] text-slate-400 mt-0.5">{pkgValidityText(pkg)}</div>
                 </div>
@@ -289,6 +299,17 @@ export default function AdminCompute() {
             <label className="block text-sm font-medium text-slate-700 mb-1.5">虚拟支付道具 ID（可选）</label>
             <input type="text" value={pkgForm.virtualProductId} onChange={e => setPkgForm({ ...pkgForm, virtualProductId: e.target.value })} placeholder="微信后台「虚拟支付 → 道具管理」创建并发布后的道具 ID" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
             <p className="mt-1 text-xs text-slate-400">填写后该套餐可在小程序用虚拟支付购买；道具价格必须与上方「价格（元）」一致（微信侧单位为分）。留空则小程序内提示「暂未开放在线支付」。</p>
+          </div>
+          {/* 试用套餐：勾上后每个用户只能购买一次（服务端下单硬拦截），且仅持该套餐的用户用不了「VIP 专享」内容 */}
+          <div className="rounded-lg border border-slate-200 p-3">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input type="checkbox" checked={!!pkgForm.trial} onChange={e => setPkgForm({ ...pkgForm, trial: e.target.checked })} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+              <span className="flex-1">
+                <span className="block text-sm font-medium text-slate-700">试用套餐（每个用户限购 1 次）</span>
+                <span className="mt-0.5 block text-xs text-slate-400">勾选后该套餐每个用户只能买一次，重复购买会被拒绝并弹窗提示；仅持有试用套餐（或套餐已过期、无套餐）的用户无法使用后台标记为「VIP 专享」的智能体与工作流。</span>
+              </span>
+            </label>
+            <p className="mt-2 text-xs text-slate-400">套餐名里带「试用」二字时，无需勾选也按试用套餐处理（兼容线上已有的「免费试用」）。</p>
           </div>
         </div>
       </Modal>

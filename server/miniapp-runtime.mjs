@@ -1,10 +1,25 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import { errorEnvelope, requestIdFor, sendJson, successEnvelope } from './miniapp-api.mjs';
+import { VIP_REQUIRED_CODE, hasVipAccess, vipRequiredMessage } from './plan-access.mjs';
 import { recordMiniappMetric } from './miniapp-observability.mjs';
 
 const JSON_LIMIT = 35 * 1024 * 1024;
 const TASK_RESULT_LIMIT = 12 * 1024 * 1024;
+
+/**
+ * 该用户是否有资格使用「VIP 专享」内容（判定口径唯一实现在 server/plan-access.mjs）。
+ * 依赖缺失（老调用方没传 getPlanValidity）时返回 true —— 宁可漏拦也不要把所有人都挡在门外。
+ */
+async function hasVipContentAccess(deps, userId) {
+  const { KV, sanitizeId, getPlanValidity } = deps;
+  if (!sanitizeId || typeof getPlanValidity !== 'function') return true;
+  const uid = sanitizeId(String(userId || ''));
+  if (!uid) return false;
+  const [reg, user] = await Promise.all([KV.kvGet('reg_' + uid), KV.kvGet('user_' + uid)]);
+  const merged = { ...(reg || {}), ...(user || {}) };
+  return hasVipAccess(merged, getPlanValidity(merged));
+}
 
 function miniappUser(req, res, requestId, { getSession, isAdminSession }) {
   const session = getSession(req);
@@ -179,8 +194,15 @@ export async function handleMiniappRuntime(req, res, url, deps) {
       const metricStartedAt = Date.now();
       let firstTokenMs = null;
       const agentId = decodeURIComponent(chatMatch[1]);
-      if (!loadPublishedAgent(deps.getAgents, agentId)) {
+      const agent = loadPublishedAgent(deps.getAgents, agentId);
+      if (!agent) {
         sendJson(res, 404, errorEnvelope('AGENT_NOT_FOUND', '智能体不存在或未上架', requestId), requestId);
+        return true;
+      }
+      // VIP 专享门禁：后台勾了「VIP 专享」的智能体，只对持有生效中非试用套餐的用户开放。
+      // 这里必须回 JSON 403（而不是透传上游 SSE），小程序才能按 VIP_REQUIRED 弹升级引导。
+      if (agent.vip === true && !(await hasVipContentAccess(deps, userId))) {
+        sendJson(res, 403, errorEnvelope(VIP_REQUIRED_CODE, vipRequiredMessage(agent.name), requestId), requestId);
         return true;
       }
       const body = await deps.readBody(req, JSON_LIMIT);
@@ -249,6 +271,11 @@ export async function handleMiniappRuntime(req, res, url, deps) {
       const workflow = await loadPublishedWorkflow(deps.KV, workflowId);
       if (!workflow) {
         sendJson(res, 404, errorEnvelope('WORKFLOW_NOT_FOUND', '工作流不存在或未上架', requestId), requestId);
+        return true;
+      }
+      // VIP 专享门禁：与 chat 同一口径，且放在幂等键校验之前 —— 没有资格就不该建任务。
+      if (workflow.vip === true && !(await hasVipContentAccess(deps, userId))) {
+        sendJson(res, 403, errorEnvelope(VIP_REQUIRED_CODE, vipRequiredMessage(workflow.name), requestId), requestId);
         return true;
       }
       const idempotency = String(req.headers['idempotency-key'] || '').trim();

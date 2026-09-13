@@ -20,7 +20,14 @@ import {
   queryOrderByOutTradeNo,
   wechatPayConfigured,
 } from './wechat-pay.mjs';
-import { resolveMaxPlanValidity } from './plan-validity.mjs';
+import {
+  TRIAL_ALREADY_PURCHASED_CODE,
+  TRIAL_ALREADY_PURCHASED_MESSAGE,
+  buildPlanPatch,
+  hasUsedTrial,
+  hasVipAccess,
+  isTrialPackage,
+} from './plan-access.mjs';
 
 const DEFAULT_PAGE_SIZE = 12;
 const MAX_PAGE_SIZE = 100;
@@ -220,6 +227,11 @@ export function safeUser(reg, user, getPlanValidity) {
     validTo: validity.validTo,
     expired: validity.expired,
     hasPassword: !!(merged.hasPassword || reg?.password),
+    // 是否具备使用「VIP 专享」智能体/工作流的资格（判定口径见 server/plan-access.mjs）。
+    // 前端只做「进页/提交前」的本地预判，真正的闸门在服务端运行接口，前端拿到 false 才弹升级引导。
+    vipAccess: hasVipAccess(merged, validity),
+    // 「免费试用」是否已用过（买过一次就置位）：充值页据此把试用套餐标成「已购买」。
+    trialPurchased: hasUsedTrial(merged),
   };
 }
 
@@ -352,30 +364,20 @@ async function deliverRechargeOrder({ KV, sanitizeId, order, payment, transactio
   if (!userId || !Number.isFinite(points) || points <= 0) return { ok: false, reason: 'invalid_order' };
   const now = new Date().toISOString();
   const packageName = order.meta && order.meta.packageName ? String(order.meta.packageName) : '';
-  const validDays = order.meta && Object.prototype.hasOwnProperty.call(order.meta, 'validDays') ? Number(order.meta.validDays) : 0;
+  // 缺 validDays 键 = 该套餐不涉及有效期（保持原值）；0 = 长期有效档，必须保留 0 不能折成 undefined。
+  const validDays = order.meta && Object.prototype.hasOwnProperty.call(order.meta, 'validDays') ? Number(order.meta.validDays) : undefined;
   const validFrom = order.meta && order.meta.validFrom ? String(order.meta.validFrom) : '';
-  // 有效期处理：与后台手动充值同规则（不叠加时长，永久优先）。
+  // 有效期处理：与后台手动充值同规则（不叠加时长，永久优先）；
+  // 试用套餐额外置位 trialPurchased —— 「免费试用每用户限购一次」的权威凭证。
   const userPatch = {};
   const existingUser = await KV.kvGet('user_' + sanitizeId(userId));
-  if (Number.isFinite(validDays) && validDays > 0) {
-    const resolved = resolveMaxPlanValidity(existingUser, {
-      validFrom,
-      validDays,
-      fallbackStart: now.slice(0, 10),
-    });
-    userPatch.planValidFrom = resolved.planValidFrom;
-    userPatch.planValidDays = resolved.planValidDays;
-    if (resolved.winner === 'incoming' && resolved.planValidFrom) {
-      const days = Number(resolved.planValidDays);
-      const startMs = new Date(resolved.planValidFrom).getTime();
-      const expireAt = days === 0
-        ? '长期有效'
-        : Number.isFinite(startMs) && days > 0
-          ? new Date(startMs + days * 86400000).toISOString().slice(0, 10)
-          : '';
-      if (expireAt) userPatch.membership = { plan: packageName, expireAt };
-    }
-  }
+  Object.assign(userPatch, buildPlanPatch(existingUser, {
+    packageName,
+    validDays,
+    validFrom,
+    packageTrial: Boolean(order.meta && order.meta.trial === true),
+    fallbackStart: now.slice(0, 10),
+  }).patch);
   const computeRecord = {
     id: outTradeNo,
     userId: sanitizeId(userId),
@@ -511,6 +513,16 @@ async function createRechargeOrder(req, res, requestId, session, deps) {
     sendJson(res, 400, errorEnvelope('INVALID_PACKAGE', '套餐配置无效，请稍后再试', requestId), requestId);
     return;
   }
+  // 「免费试用」每用户限购一次：前端只是提前禁用卡片，服务端这道闸门才作数 —— 否则改一下客户端就能绕。
+  // 已用过一律拒绝下单（不建订单、不产生扣款），客户端按 TRIAL_ALREADY_PURCHASED 弹窗引导改选套餐。
+  // 用 409 而非 401/403：客户端只对 401 与少数 403 码做「静默重登 + 重试」，这里必须当硬失败。
+  if (isTrialPackage(pkg)) {
+    const existingUser = await KV.kvGet('user_' + sanitizeId(String(session.userId || '')));
+    if (hasUsedTrial(existingUser)) {
+      sendJson(res, 409, errorEnvelope(TRIAL_ALREADY_PURCHASED_CODE, TRIAL_ALREADY_PURCHASED_MESSAGE, requestId), requestId);
+      return;
+    }
+  }
   // 虚拟支付道具 ID：在微信后台「虚拟支付 → 道具管理」创建并发布道具后，填到套餐配置里。
   const productId = String(pkg.virtualProductId || '').trim();
   if (!productId) {
@@ -559,6 +571,8 @@ async function createRechargeOrder(req, res, requestId, session, deps) {
       price,
       validDays: Object.prototype.hasOwnProperty.call(pkg, 'validDays') ? Number(pkg.validDays) : undefined,
       validFrom: pkg.validFrom || undefined,
+      // 下单即固化「是不是试用套餐」：发货时 order.meta 是唯一输入，那时套餐可能已被后台改动。
+      trial: isTrialPackage(pkg),
     },
   };
   await KV.kvPut('order_' + sanitizeId(outTradeNo), orderRecord);
@@ -820,30 +834,20 @@ async function handleRechargeNotify(req, res, requestId, deps) {
   }
   const now = new Date().toISOString();
   const packageName = order.meta && order.meta.packageName ? String(order.meta.packageName) : '';
-  const validDays = order.meta && Object.prototype.hasOwnProperty.call(order.meta, 'validDays') ? Number(order.meta.validDays) : 0;
+  // 缺 validDays 键 = 该套餐不涉及有效期（保持原值）；0 = 长期有效档，必须保留 0 不能折成 undefined。
+  const validDays = order.meta && Object.prototype.hasOwnProperty.call(order.meta, 'validDays') ? Number(order.meta.validDays) : undefined;
   const validFrom = order.meta && order.meta.validFrom ? String(order.meta.validFrom) : '';
-  // 有效期处理：与后台手动充值同规则（不叠加时长，永久优先）。
+  // 有效期处理：与后台手动充值同规则（不叠加时长，永久优先）；
+  // 试用套餐额外置位 trialPurchased —— 「免费试用每用户限购一次」的权威凭证。
   const userPatch = {};
   const existingUser = await KV.kvGet('user_' + sanitizeId(userId));
-  if (Number.isFinite(validDays) && validDays > 0) {
-    const resolved = resolveMaxPlanValidity(existingUser, {
-      validFrom,
-      validDays,
-      fallbackStart: now.slice(0, 10),
-    });
-    userPatch.planValidFrom = resolved.planValidFrom;
-    userPatch.planValidDays = resolved.planValidDays;
-    if (resolved.winner === 'incoming' && resolved.planValidFrom) {
-      const days = Number(resolved.planValidDays);
-      const startMs = new Date(resolved.planValidFrom).getTime();
-      const expireAt = days === 0
-        ? '长期有效'
-        : Number.isFinite(startMs) && days > 0
-          ? new Date(startMs + days * 86400000).toISOString().slice(0, 10)
-          : '';
-      if (expireAt) userPatch.membership = { plan: packageName, expireAt };
-    }
-  }
+  Object.assign(userPatch, buildPlanPatch(existingUser, {
+    packageName,
+    validDays,
+    validFrom,
+    packageTrial: Boolean(order.meta && order.meta.trial === true),
+    fallbackStart: now.slice(0, 10),
+  }).patch);
   const transactionId = String(confirmed.transaction_id || '');
   const computeRecord = {
     id: outTradeNo,

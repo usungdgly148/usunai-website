@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { PageState } from '../../components/page-state';
 import { useLoad } from '../../hooks/use-load';
 import { useThemePage } from '../../hooks/use-theme-page';
-import { createRechargeOrder, getMe, getPublicContent, getRechargeStatus, isLoggedOut, refreshMiniappSession } from '../../services/api';
+import { ApiError, createRechargeOrder, getMe, getPublicContent, getRechargeStatus, isLoggedOut, refreshMiniappSession } from '../../services/api';
 import type { ComputePackage, UserProfile, VirtualPaymentParams } from '../../types';
 
 interface RechargeData {
@@ -55,6 +55,24 @@ function splitInfoLines(text: string) {
     .map((line) => line.trim().replace(/^\d+\s*[.、)）]\s*/, ''))
     .filter(Boolean);
 }
+
+/**
+ * 是否「试用套餐」（每用户限购一次）。
+ * ⚠️ 必须与服务端 server/plan-access.mjs 的 isTrialPackage 同规则：开关优先 + 名称含「试用」兜底。
+ * 线上「免费试用」套餐没有 trial 字段，只认开关会让客户端的「已购买」标记完全失效。
+ */
+const TRIAL_PLAN_PATTERN = /试用/;
+
+function isTrialPackage(pkg?: ComputePackage | null) {
+  if (!pkg) return false;
+  return pkg.trial === true || TRIAL_PLAN_PATTERN.test(String(pkg.name || ''));
+}
+
+/**
+ * 服务端「试用套餐已购过」的错误码，跨端契约（定义在 server/plan-access.mjs）。
+ * 服务端把这个码回过来时前端必须弹窗，不能退化成 toast —— 用户会以为是网络问题而反复重试。
+ */
+const TRIAL_ALREADY_PURCHASED_CODE = 'TRIAL_ALREADY_PURCHASED';
 
 /** 版本号比较：v1 > v2 返回 1，相等返回 0，小于返回 -1。 */
 function compareVersion(v1: string, v2: string) {
@@ -208,10 +226,22 @@ export default function RechargePage() {
   const data = state.data;
   const packages = data?.computePackages || [];
   const infoLines = splitInfoLines(data?.rechargeInfo || '');
+  /** 「免费试用」是否已用过（服务端判定，含上线前买入的老数据）→ 试用套餐卡片转「已购买」态 */
+  const trialUsed = data?.profile?.trialPurchased === true;
 
   /** 权益卡右侧箭头指向「联系客服」——权益里的「使用咨询和专属技术支持」正落在这个页面。 */
   const openService = () => {
     void Taro.navigateTo({ url: '/pages/service/index' });
+  };
+
+  /** 已购过试用再点它：用弹窗说清原因（不是静默无反应），并引导改选其它套餐。 */
+  const showTrialUsed = () => {
+    void Taro.showModal({
+      title: '每个账号仅限购买一次',
+      content: '「免费试用」套餐每位用户只能购买一次，请选择其它套餐。',
+      showCancel: false,
+      confirmText: '知道了',
+    });
   };
 
   /** 支付后轮询订单状态确认到账（发货推送异步，服务端每次轮询都会查单兜底，最多 ~10s）。 */
@@ -228,6 +258,12 @@ export default function RechargePage() {
     const pkg = packages.find((item) => item.id === selectedId);
     if (!pkg) {
       Taro.showToast({ title: '请先选择套餐', icon: 'none' });
+      return;
+    }
+    // 本地先拦一道：已经买过试用就不必再走下单/支付，直接弹窗说明（服务端还有一道 409 硬拦截）。
+    if (isTrialPackage(pkg) && trialUsed) {
+      showTrialUsed();
+      setSelectedId(null);
       return;
     }
     if (!ensureVirtualPaySupported()) return;
@@ -256,6 +292,19 @@ export default function RechargePage() {
     } catch (error) {
       if (error instanceof Error && error.message === 'cancel') {
         Taro.showToast({ title: '已取消支付', icon: 'none' });
+        return;
+      }
+      // 服务端「试用套餐每用户限购一次」的硬拦截：必须弹窗（toast 会被误当成网络抖动），
+      // 并刷新一次档案 —— 刷新后该卡片会自动转成「已购买」态。
+      if (error instanceof ApiError && error.code === TRIAL_ALREADY_PURCHASED_CODE) {
+        setSelectedId(null);
+        void state.reload();
+        Taro.showModal({
+          title: '每个账号仅限购买一次',
+          content: error.message || '「免费试用」套餐每位用户只能购买一次，请选择其它套餐。',
+          showCancel: false,
+          confirmText: '换一个套餐',
+        });
         return;
       }
       const { text, hint } = describeVirtualPayError(error);
@@ -297,12 +346,14 @@ export default function RechargePage() {
           <View className='mini-recharge-grid'>
             {packages.map((pkg) => {
               const selected = selectedId === pkg.id;
+              // 试用套餐 + 已经买过 → 转「已购买」态：不可选中，点了用弹窗说明原因
+              const used = trialUsed && isTrialPackage(pkg);
               const { badge, label } = splitPackageName(pkg.name);
               return (
                 <View
                   key={pkg.id}
-                  className={`mini-recharge-card${selected ? ' mini-recharge-card--selected' : ''}`}
-                  onClick={() => setSelectedId(pkg.id)}
+                  className={`mini-recharge-card${selected ? ' mini-recharge-card--selected' : ''}${used ? ' mini-recharge-card--used' : ''}`}
+                  onClick={() => (used ? showTrialUsed() : setSelectedId(pkg.id))}
                 >
                   <View className='mini-recharge-card-head'>
                     <View className='mini-recharge-badge'>
@@ -315,7 +366,9 @@ export default function RechargePage() {
                   </View>
                   <Text className='mini-recharge-card-points'>{formatPoints(pkg.points)} 点</Text>
                   <Text className='mini-recharge-card-price'>¥{pkg.price}</Text>
-                  <Text className='mini-recharge-card-validity'>{validityText(pkg)}</Text>
+                  <Text className={`mini-recharge-card-validity${used ? ' mini-recharge-card-validity--used' : ''}`}>
+                    {used ? '已购买 · 每人限购 1 次' : validityText(pkg)}
+                  </Text>
                 </View>
               );
             })}

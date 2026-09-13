@@ -9,6 +9,7 @@ import { collectMediaUrls, fileToDataUrl, runtimeId } from '../../services/runti
 import { confirmDialog, hideFeedbackToast, loadingToast, toast } from '../../utils/feedback';
 import { resolveEntityAvatar, resolveUserAvatar, toMiniappUrl } from '../../utils/entity-visual';
 import { subscribeKeyboardOffset } from '../../utils/keyboard';
+import { ensureVipAccess } from '../../utils/vip-gate';
 import type { ContentItem } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
 
@@ -294,7 +295,12 @@ export default function ChatPage() {
       if (drafts.some((item) => item.status === 'error')) toast('有图片上传失败，请删除后重试', 'warning');
       return;
     }
-    void runTurn({ id: runtimeId('msg'), role: 'user', text, images: readyImages, createdAt: new Date().toISOString() }, messages);
+    const userMessage = { id: runtimeId('msg'), role: 'user' as const, text, images: readyImages, createdAt: new Date().toISOString() };
+    // VIP 专享门禁：无资格时弹窗引导升级并中止本次发送（服务端还有一道 403 兜底）。
+    void (async () => {
+      if (!(await ensureVipAccess(agent))) return;
+      await runTurn(userMessage, messages);
+    })();
   };
 
   const regenerate = (assistantId: string) => {
