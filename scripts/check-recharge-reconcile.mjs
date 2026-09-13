@@ -10,7 +10,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isVirtualOrderNotFoundError, shouldCloseUnpaidOrder } from '../server/miniapp-api.mjs';
+import {
+  RECONCILE_CLOSE_MIN_AGE_MS,
+  RECONCILE_CLOSE_MISSES,
+  isVirtualOrderNotFoundError,
+  shouldCloseUnpaidOrder,
+} from '../server/miniapp-api.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
@@ -42,19 +47,26 @@ assert.equal(isVirtualOrderNotFoundError({ errcode: 268490011, message: '数据�
 assert.equal(isVirtualOrderNotFoundError({ errcode: 268490015, message: '频率限制' }), false, '限流不算');
 
 // ============ 2. 关单门槛：miss 次数 + 宽限期，双条件 ============
+const GRACE = RECONCILE_CLOSE_MIN_AGE_MS;
+const MISSES = RECONCILE_CLOSE_MISSES;
+
+// 把主人定的口径钉住：改阈值必须是有意为之，不能被顺手改掉。
+assert.equal(GRACE, 15 * 60 * 1000, '宽限期应为 15 分钟（主人定的：超时未支付自动取消）');
+assert.equal(MISSES, 3, 'miss 门槛应为 3 轮（防微信接口单次抖动）');
+
 const pending = (ago, misses) => ({ id: 'p1', status: 'pending', createdAt: iso(ago), meta: { reconcileMisses: misses } });
 
-assert.equal(shouldCloseUnpaidOrder(pending(5 * MIN, 3), NOW), false, '刚下单 5 分钟，miss 再多也不关（宽限期）');
-assert.equal(shouldCloseUnpaidOrder(pending(29 * MIN, 9), NOW), false, '29 分钟仍在宽限期内');
-assert.equal(shouldCloseUnpaidOrder(pending(30 * MIN, 3), NOW), true, '满 30 分钟 + 3 次 miss → 关');
-assert.equal(shouldCloseUnpaidOrder(pending(40 * MIN, 3), NOW), true, '过宽限期 + 3 次 miss → 关');
-assert.equal(shouldCloseUnpaidOrder(pending(40 * MIN, 2), NOW), false, '过宽限期但只有 2 次 miss → 再等等');
-assert.equal(shouldCloseUnpaidOrder(pending(40 * MIN, 0), NOW), false, '没有 miss 记录 → 不关');
-assert.equal(shouldCloseUnpaidOrder({ ...pending(40 * MIN, 9), status: 'paid' }, NOW), false, '已支付绝不关');
-assert.equal(shouldCloseUnpaidOrder({ ...pending(40 * MIN, 9), status: 'closed' }, NOW), false, '已关闭不重复处理');
-assert.equal(shouldCloseUnpaidOrder({ ...pending(40 * MIN, 9), createdAt: '坏时间' }, NOW), false, '时间解析不出来 → 保守不关');
-assert.equal(shouldCloseUnpaidOrder({ ...pending(40 * MIN, 9), createdAt: undefined }, NOW), false, '没有 createdAt → 保守不关');
-assert.equal(shouldCloseUnpaidOrder({ id: 'p1', status: 'pending', createdAt: iso(40 * MIN) }, NOW), false, '没有 meta → 不关');
+assert.equal(shouldCloseUnpaidOrder(pending(5 * MIN, 99), NOW), false, '刚下单 5 分钟，miss 再多也不关（宽限期）');
+assert.equal(shouldCloseUnpaidOrder(pending(GRACE - MIN, 99), NOW), false, '还差 1 分钟到宽限期 → 不关');
+assert.equal(shouldCloseUnpaidOrder(pending(GRACE, MISSES), NOW), true, '刚满宽限期 + miss 达标 → 关');
+assert.equal(shouldCloseUnpaidOrder(pending(GRACE * 2, MISSES), NOW), true, '远超宽限期 + miss 达标 → 关');
+assert.equal(shouldCloseUnpaidOrder(pending(GRACE * 2, MISSES - 1), NOW), false, '超宽限期但 miss 差 1 次 → 再等等');
+assert.equal(shouldCloseUnpaidOrder(pending(GRACE * 2, 0), NOW), false, '没有 miss 记录 → 不关');
+assert.equal(shouldCloseUnpaidOrder({ ...pending(GRACE * 2, 9), status: 'paid' }, NOW), false, '已支付绝不关');
+assert.equal(shouldCloseUnpaidOrder({ ...pending(GRACE * 2, 9), status: 'closed' }, NOW), false, '已关闭不重复处理');
+assert.equal(shouldCloseUnpaidOrder({ ...pending(GRACE * 2, 9), createdAt: '坏时间' }, NOW), false, '时间解析不出来 → 保守不关');
+assert.equal(shouldCloseUnpaidOrder({ ...pending(GRACE * 2, 9), createdAt: undefined }, NOW), false, '没有 createdAt → 保守不关');
+assert.equal(shouldCloseUnpaidOrder({ id: 'p1', status: 'pending', createdAt: iso(GRACE * 2) }, NOW), false, '没有 meta → 不关');
 assert.equal(shouldCloseUnpaidOrder(null, NOW), false, '空订单不算');
 
 // ============ 3. 接线契约 ============
@@ -72,4 +84,6 @@ for (const page of ['frontend/src/pages/Orders.jsx', 'frontend/src/pages/AdminOr
   assert.match(read(page), /closed: '已关闭'/, `${page} 必须已支持 closed 状态（否则关单会显示空白）`);
 }
 
-console.log('Recharge reconcile check passed: 未支付死单会在宽限期后自动关闭，且只认「微信明确说订单不存在」。');
+console.log(
+  `Recharge reconcile check passed: 未支付死单满 ${GRACE / 60000} 分钟且 ${MISSES} 轮查不到后自动关闭，且只认「微信明确说订单不存在」。`,
+);

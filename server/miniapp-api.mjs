@@ -421,10 +421,12 @@ async function deliverRechargeOrder({ KV, sanitizeId, order, payment, transactio
 // 老行为只打日志，于是这类死单被对账循环每 180s 重试一次（线上能看到几笔老单反复刷同一个错误）。
 //
 // 关单门槛是**双条件**，缺一不可：
-//   ① 订单已存在 ≥ 30 分钟 —— 宽限期内用户可能还在支付流程里（切后台、慢慢输密码），绝不关；
+//   ① 订单已存在 ≥ 15 分钟 —— 宽限期内用户可能还在支付流程里（切后台、慢慢输密码），绝不关；
 //   ② 累计 3 轮对账微信都明确说「不存在」—— 单次查不到可能只是接口抖动。
-const RECONCILE_CLOSE_MIN_AGE_MS = 30 * 60 * 1000;
-const RECONCILE_CLOSE_MISSES = 3;
+// 对账每 180s 一轮，所以实际关单落在「15 ~ 18 分钟」。
+// 阈值导出给自测用：测试据此构造边界数据，改阈值时不会静默失同步。
+export const RECONCILE_CLOSE_MIN_AGE_MS = 15 * 60 * 1000;
+export const RECONCILE_CLOSE_MISSES = 3;
 // 微信对「查不到这笔订单」返回的 errcode（errmsg = 数据不存在）。
 // 官方对该码的描述是「请求参数字段错误，具体看 errmsg」，所以 errmsg 也要认。
 const VIRTUAL_PAY_ORDER_NOT_FOUND_ERRCODE = 268490002;
