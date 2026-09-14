@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import Taro, { useRouter } from '@tarojs/taro';
+import Taro, { useRouter, useShareAppMessage, useShareTimeline } from '@tarojs/taro';
 import { Button, Image, ScrollView, Text, View } from '@tarojs/components';
 import { PageState } from '../../components/page-state';
 import { EntityInfoCard, SideDrawer, timeAgo } from '../../components/inner-ui';
@@ -12,6 +12,7 @@ import { subscribeKeyboardOffset } from '../../utils/keyboard';
 import { ensureVipAccess } from '../../utils/vip-gate';
 import type { ContentItem } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
+import { shareTargets } from '../../utils/share';
 
 type ChatMessage = { id: string; role: 'user' | 'assistant'; text: string; reasoning?: string; images?: string[]; createdAt?: string };
 type HistoryRecord = Record<string, unknown> & { id?: string; title?: string; createdAt?: string; agentId?: string; messages?: Array<Record<string, unknown>> };
@@ -117,6 +118,10 @@ export default function ChatPage() {
   const { params } = useRouter();
   const agentId = params.id;
   const [agent, setAgent] = useState<ContentItem>();
+  // 转发/分享：hook 必须写在页面源码里 —— Taro 逐页扫源码决定是否开启转发（见 utils/share.ts）
+  const share = shareTargets({ title: agent?.name });
+  useShareAppMessage(() => share.app);
+  useShareTimeline(() => share.timeline);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [input, setInput] = useState('');

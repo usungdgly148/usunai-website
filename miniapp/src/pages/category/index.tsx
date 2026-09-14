@@ -1,4 +1,4 @@
-import Taro, { usePullDownRefresh, useRouter } from '@tarojs/taro';
+import Taro, { usePullDownRefresh, useRouter, useShareAppMessage, useShareTimeline } from '@tarojs/taro';
 import { useEffect, useMemo, useState } from 'react';
 import { Text, View } from '@tarojs/components';
 import { ContentCard } from '../../components/content-card';
@@ -10,6 +10,7 @@ import { useLoad } from '../../hooks/use-load';
 import { getPublicContent, getMiniappLayout } from '../../services/api';
 import type { ContentItem } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
+import { shareTargets } from '../../utils/share';
 
 function isAllCategory(item: { id: string; key?: string; name?: string; label?: string }) {
   const key = String(item.key || item.id || '').toLowerCase();
@@ -56,6 +57,10 @@ export default function CategoryPage() {
   // 「全部分类」浏览模式：不带 type/category 进入时，展示后台全部可见分类，点分类再进列表。
   const browseMode = !type && !category;
   const title = browseMode ? (rawTitle || '全部分类') : (rawTitle || '分类工具');
+  // 转发/分享：hook 必须写在页面源码里 —— Taro 逐页扫源码决定是否开启转发（见 utils/share.ts）
+  const share = shareTargets({ title: title });
+  useShareAppMessage(() => share.app);
+  useShareTimeline(() => share.timeline);
   const visibleCategories = (state.data?.categories || []).filter(
     (item) => !isAllCategory(item) && (item as { published?: boolean }).published !== false,
   );

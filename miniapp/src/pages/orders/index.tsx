@@ -1,4 +1,4 @@
-import Taro, { usePullDownRefresh } from '@tarojs/taro';
+import Taro, { usePullDownRefresh, useShareAppMessage, useShareTimeline } from '@tarojs/taro';
 import { useMemo, useState } from 'react';
 import { Input, ScrollView, Text, View } from '@tarojs/components';
 import { MiniappTabBar } from '../../components/miniapp-tab-bar';
@@ -9,6 +9,7 @@ import { useRecordList } from '../../hooks/use-record-list';
 import { useThemePage } from '../../hooks/use-theme-page';
 import { isLoggedOut } from '../../services/api';
 import { formatTime, orderStatusInfo, orderTypeLabel, paginateClient } from '../../utils/record-format';
+import { shareTargets } from '../../utils/share';
 
 const PAGE_SIZE = 12;
 
@@ -30,6 +31,10 @@ const COLUMNS: TableColumn[] = [
 
 export default function OrdersPage() {
   const { pageStyle } = useThemePage();
+  // 转发/分享：hook 必须写在页面源码里 —— Taro 逐页扫源码决定是否开启转发（见 utils/share.ts）
+  const share = shareTargets();
+  useShareAppMessage(() => share.app);
+  useShareTimeline(() => share.timeline);
   const { allItems, loading, error, reload } = useRecordList('orders');
   const [activeTab, setActiveTab] = useState('all');
   const [keyword, setKeyword] = useState('');

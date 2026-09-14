@@ -1,10 +1,11 @@
 import { useEffect } from 'react';
-import Taro from '@tarojs/taro';
+import Taro, { useShareAppMessage, useShareTimeline } from '@tarojs/taro';
 import { Image, Text, View } from '@tarojs/components';
 import { PageState } from '../../components/page-state';
 import { useLoad } from '../../hooks/use-load';
 import { useThemePage } from '../../hooks/use-theme-page';
 import { API_BASE, getPublicContent } from '../../services/api';
+import { shareTargets } from '../../utils/share';
 
 /** 二维码相对路径（/api/...）拼上 API_BASE，与 recharge 页同一规则 */
 const toAbsolute = (url: string) => {
@@ -20,6 +21,10 @@ const toAbsolute = (url: string) => {
  */
 export default function ServicePage() {
   const { pageStyle } = useThemePage();
+  // 转发/分享：hook 必须写在页面源码里 —— Taro 逐页扫源码决定是否开启转发（见 utils/share.ts）
+  const share = shareTargets();
+  useShareAppMessage(() => share.app);
+  useShareTimeline(() => share.timeline);
 
   useEffect(() => {
     Taro.setNavigationBarTitle({ title: '联系客服' });

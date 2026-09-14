@@ -1,12 +1,17 @@
 import { useState } from 'react';
-import Taro from '@tarojs/taro';
+import Taro, { useShareAppMessage, useShareTimeline } from '@tarojs/taro';
 import { Button, Input, Text, View } from '@tarojs/components';
 import { bindWebsiteAccount, sendPhoneCode, storeBoundSession } from '../../services/api';
 import { toast } from '../../utils/feedback';
 import { useThemePage } from '../../hooks/use-theme-page';
+import { shareTargets } from '../../utils/share';
 
 export default function BindPage() {
   const { pageStyle } = useThemePage();
+  // 转发/分享：hook 必须写在页面源码里 —— Taro 逐页扫源码决定是否开启转发（见 utils/share.ts）
+  const share = shareTargets();
+  useShareAppMessage(() => share.app);
+  useShareTimeline(() => share.timeline);
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);

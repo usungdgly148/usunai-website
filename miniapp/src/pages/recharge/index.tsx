@@ -1,4 +1,4 @@
-import Taro from '@tarojs/taro';
+import Taro, { useShareAppMessage, useShareTimeline } from '@tarojs/taro';
 import { Button, Text, View } from '@tarojs/components';
 import { useEffect, useState } from 'react';
 import { PageState } from '../../components/page-state';
@@ -6,6 +6,7 @@ import { useLoad } from '../../hooks/use-load';
 import { useThemePage } from '../../hooks/use-theme-page';
 import { ApiError, createRechargeOrder, getMe, getPublicContent, getRechargeStatus, isLoggedOut, refreshMiniappSession } from '../../services/api';
 import type { ComputePackage, UserProfile, VirtualPaymentParams } from '../../types';
+import { shareTargets } from '../../utils/share';
 
 interface RechargeData {
   computePackages: ComputePackage[];
@@ -206,6 +207,10 @@ function requestVirtualPayment(params: VirtualPaymentParams): Promise<void> {
  */
 export default function RechargePage() {
   const { pageStyle } = useThemePage();
+  // 转发/分享：hook 必须写在页面源码里 —— Taro 逐页扫源码决定是否开启转发（见 utils/share.ts）
+  const share = shareTargets();
+  useShareAppMessage(() => share.app);
+  useShareTimeline(() => share.timeline);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [payingId, setPayingId] = useState<string | null>(null);
 

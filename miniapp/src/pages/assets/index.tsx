@@ -1,4 +1,4 @@
-import Taro, { usePullDownRefresh } from '@tarojs/taro';
+import Taro, { usePullDownRefresh, useShareAppMessage, useShareTimeline } from '@tarojs/taro';
 import { useCallback, useEffect, useState } from 'react';
 import { Input, ScrollView, Text, View } from '@tarojs/components';
 import { MiniappTabBar } from '../../components/miniapp-tab-bar';
@@ -8,6 +8,7 @@ import { Pagination } from '../../components/pagination';
 import { TaskDetail } from '../../components/task-detail';
 import { getPagedRecords, isLoggedOut } from '../../services/api';
 import { useThemePage } from '../../hooks/use-theme-page';
+import { shareTargets } from '../../utils/share';
 
 /**
  * 我的资产页：与网页端「我的资产」表格视觉对齐。
@@ -33,6 +34,10 @@ const COLUMN_LABELS = ['任务名称', '类型', '状态', '创建时间', '耗�
 
 export default function AssetsPage() {
   const { pageStyle } = useThemePage();
+  // 转发/分享：hook 必须写在页面源码里 —— Taro 逐页扫源码决定是否开启转发（见 utils/share.ts）
+  const share = shareTargets();
+  useShareAppMessage(() => share.app);
+  useShareTimeline(() => share.timeline);
   const [activeTab, setActiveTab] = useState('task');
   const [keyword, setKeyword] = useState('');
   const [pendingKeyword, setPendingKeyword] = useState('');

@@ -1,10 +1,11 @@
-import Taro, { useRouter } from '@tarojs/taro';
+import Taro, { useRouter, useShareAppMessage, useShareTimeline } from '@tarojs/taro';
 import { Text, View } from '@tarojs/components';
 import { useEffect, useState } from 'react';
 import { PageState } from '../../components/page-state';
 import { MarkdownContent } from '../../components/markdown-content';
 import { useThemePage } from '../../hooks/use-theme-page';
 import { getLegalAgreements, type LegalAgreement } from '../../services/api';
+import { shareTargets } from '../../utils/share';
 
 const TYPE_META: Record<string, { title: string }> = {
   privacy: { title: '隐私政策' },
@@ -13,6 +14,10 @@ const TYPE_META: Record<string, { title: string }> = {
 
 export default function LegalPage() {
   const { pageStyle } = useThemePage();
+  // 转发/分享：hook 必须写在页面源码里 —— Taro 逐页扫源码决定是否开启转发（见 utils/share.ts）
+  const share = shareTargets();
+  useShareAppMessage(() => share.app);
+  useShareTimeline(() => share.timeline);
   const router = useRouter();
   const rawType = decodeURIComponent(String(router.params.type || ''));
   const type = rawType === 'privacy' ? 'privacy' : 'terms';

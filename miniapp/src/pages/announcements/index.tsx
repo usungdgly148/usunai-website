@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Text, View } from '@tarojs/components';
-import Taro from '@tarojs/taro';
+import Taro, { useShareAppMessage, useShareTimeline } from '@tarojs/taro';
 import { PageState } from '../../components/page-state';
 import { MarkdownContent } from '../../components/markdown-content';
 import { useLoad } from '../../hooks/use-load';
 import { getPublicContent } from '../../services/api';
 import { ANN_SEEN_EVENT, announcementTime, markAnnouncementsSeen, sortAnnouncements } from '../../services/announcements';
 import { useThemePage } from '../../hooks/use-theme-page';
+import { shareTargets } from '../../utils/share';
 
 /** 公告类型 → 中文标签（与网页端 ANN_TYPE_META 一致） */
 const ANN_TYPE_META: Record<string, string> = {
@@ -28,6 +29,10 @@ function formatTime(iso: string): string {
 
 export default function AnnouncementsPage() {
   const { pageStyle } = useThemePage();
+  // 转发/分享：hook 必须写在页面源码里 —— Taro 逐页扫源码决定是否开启转发（见 utils/share.ts）
+  const share = shareTargets();
+  useShareAppMessage(() => share.app);
+  useShareTimeline(() => share.timeline);
   const state = useLoad(async () => {
     const content = await getPublicContent();
     // 进入列表即视为已读：写入最新公告时间并广播，首页铃铛红点随之消失

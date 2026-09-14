@@ -1,4 +1,4 @@
-import Taro from '@tarojs/taro';
+import Taro, { useShareAppMessage, useShareTimeline } from '@tarojs/taro';
 import { Button, Image, Input, Text, View } from '@tarojs/components';
 import { useEffect, useState } from 'react';
 import { PageState } from '../../components/page-state';
@@ -7,6 +7,7 @@ import { changePassword, getMe, isLoggedOut, logoutSession, updateProfile } from
 import { useThemePage } from '../../hooks/use-theme-page';
 import { confirmDialog, toast } from '../../utils/feedback';
 import { resolveUserAvatar } from '../../utils/entity-visual';
+import { shareTargets } from '../../utils/share';
 
 const maskPhone = (phone?: string) => {
   if (!phone) return '';
@@ -15,6 +16,10 @@ const maskPhone = (phone?: string) => {
 
 export default function AccountSecurityPage() {
   const { pageStyle } = useThemePage();
+  // 转发/分享：hook 必须写在页面源码里 —— Taro 逐页扫源码决定是否开启转发（见 utils/share.ts）
+  const share = shareTargets();
+  useShareAppMessage(() => share.app);
+  useShareTimeline(() => share.timeline);
   const state = useLoad(async () => getMe(), []);
 
   useEffect(() => {

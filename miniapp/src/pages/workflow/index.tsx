@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import Taro, { useRouter } from '@tarojs/taro';
+import Taro, { useRouter, useShareAppMessage, useShareTimeline } from '@tarojs/taro';
 import { Button, Image, Input, ScrollView, Text, Textarea, Video, View } from '@tarojs/components';
 import { PageState } from '../../components/page-state';
 import { EntityInfoCard, SideDrawer, timeAgo } from '../../components/inner-ui';
@@ -11,6 +11,7 @@ import { resolveEntityAvatar } from '../../utils/entity-visual';
 import { ensureVipAccess } from '../../utils/vip-gate';
 import type { ContentItem, FormField, FormFieldOption, RuntimeTask } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
+import { shareTargets } from '../../utils/share';
 
 const ACTIVE_TASK_PREFIX = 'usunai_miniapp_active_workflow_';
 /**
@@ -145,6 +146,10 @@ function normalizeOption(option: string | FormFieldOption): FormFieldOption {
 function WorkflowPage() {
   const { params } = useRouter();
   const [workflow, setWorkflow] = useState<ContentItem>();
+  // 转发/分享：hook 必须写在页面源码里 —— Taro 逐页扫源码决定是否开启转发（见 utils/share.ts）
+  const share = shareTargets({ title: workflow?.name });
+  useShareAppMessage(() => share.app);
+  useShareTimeline(() => share.timeline);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [values, setValues] = useState<Record<string, unknown>>({});

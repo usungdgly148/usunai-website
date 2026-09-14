@@ -1,10 +1,11 @@
 import { useMemo } from 'react';
-import Taro, { useRouter } from '@tarojs/taro';
+import Taro, { useRouter, useShareAppMessage, useShareTimeline } from '@tarojs/taro';
 import { Button, Text, View } from '@tarojs/components';
 import { PageState } from '../../components/page-state';
 import { useLoad } from '../../hooks/use-load';
 import { getPublicContent } from '../../services/api';
 import { useThemePage } from '../../hooks/use-theme-page';
+import { shareTargets } from '../../utils/share';
 
 export default function DetailPage() {
   const { pageStyle } = useThemePage();
@@ -14,6 +15,10 @@ export default function DetailPage() {
     const list = params.type === 'workflow' ? state.data?.workflows : state.data?.agents;
     return list?.find((entry) => entry.id === params.id);
   }, [state.data, params.id, params.type]);
+  // 转发/分享：hook 必须写在页面源码里 —— Taro 逐页扫源码决定是否开启转发（见 utils/share.ts）
+  const share = shareTargets({ title: item?.name });
+  useShareAppMessage(() => share.app);
+  useShareTimeline(() => share.timeline);
   return <View className='page' style={pageStyle}>
     <PageState loading={state.loading} error={state.error} empty={!state.loading && !state.error && !item} onRetry={state.reload} />
     {item && <>

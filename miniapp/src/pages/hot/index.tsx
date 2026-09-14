@@ -1,4 +1,4 @@
-import Taro, { usePullDownRefresh, useRouter } from '@tarojs/taro';
+import Taro, { usePullDownRefresh, useRouter, useShareAppMessage, useShareTimeline } from '@tarojs/taro';
 import { useEffect, useMemo, useState } from 'react';
 import { Text, View } from '@tarojs/components';
 import { ContentCard } from '../../components/content-card';
@@ -7,6 +7,7 @@ import { recommendedEntries } from '../../components/layout-blocks';
 import { useLoad } from '../../hooks/use-load';
 import { getPublicContent } from '../../services/api';
 import { useThemePage } from '../../hooks/use-theme-page';
+import { shareTargets } from '../../utils/share';
 
 /**
  * 热门推荐二级页：展示后台 recommended 全部推荐（智能体 + 工作流混排，
@@ -14,6 +15,10 @@ import { useThemePage } from '../../hooks/use-theme-page';
  */
 export default function HotPage() {
   const { pageStyle } = useThemePage();
+  // 转发/分享：hook 必须写在页面源码里 —— Taro 逐页扫源码决定是否开启转发（见 utils/share.ts）
+  const share = shareTargets();
+  useShareAppMessage(() => share.app);
+  useShareTimeline(() => share.timeline);
   const { params } = useRouter();
   // type=workflow 入口只展示推荐中的工作流（预留 featured-workflows 区块）；默认全部混排
   const type = params.type === 'workflow' ? 'workflow' : 'all';

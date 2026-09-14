@@ -1,4 +1,4 @@
-import Taro, { usePullDownRefresh, useRouter } from '@tarojs/taro';
+import Taro, { usePullDownRefresh, useRouter, useShareAppMessage, useShareTimeline } from '@tarojs/taro';
 import { useMemo, useState } from 'react';
 import { Text, View } from '@tarojs/components';
 import { ContentCard } from '../../components/content-card';
@@ -9,6 +9,7 @@ import { useLoad } from '../../hooks/use-load';
 import { getPublicContent } from '../../services/api';
 import type { ContentItem } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
+import { shareTargets } from '../../utils/share';
 
 function matchesQuery(item: ContentItem, normalized: string) {
   if (!normalized) return true;
@@ -24,6 +25,10 @@ function matchesQuery(item: ContentItem, normalized: string) {
 
 export default function SearchPage() {
   const { pageStyle } = useThemePage();
+  // 转发/分享：hook 必须写在页面源码里 —— Taro 逐页扫源码决定是否开启转发（见 utils/share.ts）
+  const share = shareTargets();
+  useShareAppMessage(() => share.app);
+  useShareTimeline(() => share.timeline);
   const router = useRouter();
   // Taro 4 的 useRouter 不会自动 decodeURL，所以小程序的 `?q=中文` 拿到的是 %E5%... 形式，
   // 这里防御性解析一次；非法编码时退回到原值。

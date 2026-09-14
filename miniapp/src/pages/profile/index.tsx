@@ -1,4 +1,4 @@
-import Taro, { usePullDownRefresh } from '@tarojs/taro';
+import Taro, { usePullDownRefresh, useShareAppMessage, useShareTimeline } from '@tarojs/taro';
 import { Button, Image, Text, View } from '@tarojs/components';
 import { useState } from 'react';
 import { MiniappTabBar } from '../../components/miniapp-tab-bar';
@@ -9,6 +9,7 @@ import { useThemePage } from '../../hooks/use-theme-page';
 import { type ThemeMode, readMode, resolveTheme, setMode } from '../../utils/theme';
 import { resolveUserAvatar } from '../../utils/entity-visual';
 import { toast } from '../../utils/feedback';
+import { shareTargets } from '../../utils/share';
 
 /** 有效期文案：后端未配到期时间时给中性提示，别渲染出 "Invalid Date" */
 const expireText = (value: string | null) => value ? `有效期至 ${new Date(value).toLocaleDateString('zh-CN')}` : '有效期未设置';
@@ -38,6 +39,10 @@ const COMMON_ITEMS = [
 
 export default function ProfilePage() {
   const { pageStyle } = useThemePage();
+  // 转发/分享：hook 必须写在页面源码里 —— Taro 逐页扫源码决定是否开启转发（见 utils/share.ts）
+  const share = shareTargets();
+  useShareAppMessage(() => share.app);
+  useShareTimeline(() => share.timeline);
   // 主动退出登录后进入未登录视图；重新「微信一键登录」后回到已登录视图
   const [signedOut, setSignedOut] = useState<boolean>(() => isLoggedOut());
   const [loginBusy, setLoginBusy] = useState(false);
