@@ -107,6 +107,15 @@ export interface CustomerService {
   qr: string;
   lines: string[];
 }
+/**
+ * 分享设置（后台「小程序设置 → 分享设置」），对应微信原生 onShareAppMessage 的三个变量。
+ * 三项都可能为空串 = 未配置 → 客户端回退内置默认（见 utils/share.ts）。
+ */
+export interface ShareSettings {
+  title: string;
+  path: string;
+  imageUrl: string;
+}
 export interface PublicContent {
   agents: ContentItem[];
   workflows: ContentItem[];
@@ -118,6 +127,7 @@ export interface PublicContent {
   computePackages: ComputePackage[];
   rechargeInfo: string;
   customerService: CustomerService;
+  shareSettings: ShareSettings;
 }
 
 export type MiniappLayoutBlockType = 'carousel' | 'announcements' | 'search' | 'categories' | 'featured-agents' | 'featured-workflows' | 'tool-cards' | 'spacer';

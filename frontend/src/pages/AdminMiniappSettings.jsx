@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
-import { BadgeCheck, KeyRound } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { BadgeCheck, KeyRound, Share2 } from 'lucide-react';
 import { adminFetch } from '../authFetch.js';
+import { tryUploadToBlob } from '../blobUpload.js';
 import { AdminPageHeader, Card, PrimaryButton } from '../adminUI.jsx';
 
 const PUSH_CHARS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -45,10 +46,12 @@ function aesKeyIssue(value) {
 }
 
 /**
- * 小程序设置：微信支付凭证（APIv3 密钥 / 商户证书序列号 / 商户 API 私钥）
- * 与虚拟支付配置（OfferID / 现网 AppKey / 环境）。
+ * 小程序设置：微信支付凭证（APIv3 密钥 / 商户证书序列号 / 商户 API 私钥）、
+ * 虚拟支付配置（OfferID / 现网 AppKey / 环境），以及分享设置（转发卡片标题 / 落地路径 / 配图）。
  * 凭证存服务端 KV（miniappPaySettings / miniappVirtualPaySettings），仅管理员可读写；
  * 读回脱敏（密钥只显示「已设置」），留空保存时保留原值，避免回显脱敏后误清空。
+ * 分享设置存 miniappShareSettings，随小程序内容接口下发 —— 改标题不必重新发版，
+ * 所以这一块与上面两块相反：**明文回显、留空即清空**（清空 = 回退内置默认文案）。
  */
 export default function AdminMiniappSettings() {
   const [serialNo, setSerialNo] = useState('');
@@ -69,6 +72,15 @@ export default function AdminMiniappSettings() {
   const [vpConfigured, setVpConfigured] = useState(false);
   const [vpSaving, setVpSaving] = useState(false);
   const [vpMsg, setVpMsg] = useState(null);
+  // 分享设置（转发卡片：标题 / 落地路径 / 配图）。三项都为明文，留空即回退内置默认。
+  const [shareTitle, setShareTitle] = useState('');
+  const [sharePath, setSharePath] = useState('');
+  const [shareImageUrl, setShareImageUrl] = useState('');
+  const [shareConfigured, setShareConfigured] = useState(false);
+  const [shareUploading, setShareUploading] = useState(false);
+  const [shareSaving, setShareSaving] = useState(false);
+  const [shareMsg, setShareMsg] = useState(null);
+  const shareFileRef = useRef(null);
 
   const load = async () => {
     try {
@@ -96,6 +108,18 @@ export default function AdminMiniappSettings() {
       }
     } catch (e) {
       setVpMsg({ ok: false, msg: '读取虚拟支付配置失败：' + (e.message || e) });
+    }
+    try {
+      const r = await adminFetch('/api/admin/miniapp-share-settings');
+      const j = await r.json();
+      if (j && j.ok && j.data) {
+        setShareTitle(j.data.title || '');
+        setSharePath(j.data.path || '');
+        setShareImageUrl(j.data.imageUrl || '');
+        setShareConfigured(!!j.data.configured);
+      }
+    } catch (e) {
+      setShareMsg({ ok: false, msg: '读取分享设置失败：' + (e.message || e) });
     }
   };
 
@@ -152,11 +176,62 @@ export default function AdminMiniappSettings() {
     }
   };
 
+  const uploadShareImage = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    // 先清空 input：不清空的话，连续选同一张图第二次不会触发 change，看起来像「点了没反应」。
+    if (e.target) e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setShareMsg({ ok: false, msg: '请选择 PNG / JPG 图片' });
+      return;
+    }
+    setShareUploading(true);
+    setShareMsg(null);
+    try {
+      // 走与其它后台图片同一套上传：存到对象存储，返回 /api/blob/serve?key=… 相对地址。
+      // 失败时返回 null（不抛错），所以要显式判一次。
+      const url = await tryUploadToBlob(file, { admin: true });
+      if (!url) throw new Error('上传失败：对象存储未启用或图片过大');
+      setShareImageUrl(url);
+      setShareMsg({ ok: true, msg: '图片已上传，记得点下面的「保存分享设置」' });
+    } catch (error) {
+      setShareMsg({ ok: false, msg: error.message || '图片上传失败' });
+    } finally {
+      setShareUploading(false);
+    }
+  };
+
+  const saveShare = async () => {
+    setShareSaving(true);
+    setShareMsg(null);
+    try {
+      const r = await adminFetch('/api/admin/miniapp-share-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: shareTitle, path: sharePath, imageUrl: shareImageUrl }),
+      });
+      const j = await r.json();
+      if (!j || !j.ok) throw new Error(j && j.msg ? j.msg : '保存失败');
+      if (j.data) {
+        // 以服务端校验后的值为准回写（路径会被 trim、超长会被截断），避免界面与落库不一致。
+        setShareTitle(j.data.title || '');
+        setSharePath(j.data.path || '');
+        setShareImageUrl(j.data.imageUrl || '');
+        setShareConfigured(!!j.data.configured);
+      }
+      setShareMsg({ ok: true, msg: '已保存 · 小程序下次进入（最长 5 分钟）生效' });
+    } catch (e) {
+      setShareMsg({ ok: false, msg: '保存失败：' + (e.message || e) });
+    } finally {
+      setShareSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <AdminPageHeader
         title="小程序设置"
-        subtitle="配置小程序「算力充值」的支付能力：虚拟支付（道具直购，当前启用）与微信支付凭证。凭证仅管理员可见，保存后支付接口自动读取。"
+        subtitle="小程序的支付能力（虚拟支付 / 微信支付凭证）与「转发分享」卡片设置。支付凭证仅管理员可见；分享设置存服务端，改完不必重新构建、重新上传小程序。"
       />
 
       <Card className="p-6">
@@ -319,6 +394,86 @@ export default function AdminMiniappSettings() {
       </Card>
 
       <Card className="p-6">
+        <div className="flex items-center gap-2.5 mb-1">
+          <Share2 size={18} className="text-blue-600" />
+          <h2 className="font-semibold text-slate-800">分享设置（转发给朋友 / 朋友圈）</h2>
+        </div>
+        <p className="text-sm text-slate-500 mb-5">
+          对应小程序右上角「··· → 转发」卡片上的三样东西：标题、点开后的落地页、配图。
+          存服务端并随小程序内容一起下发，<span className="text-slate-700">改完不用重新构建、重新上传小程序</span>，
+          用户下次打开小程序（最长 5 分钟）自动生效。
+          三项都留空 = 用内置默认：标题「智能体名 · 友尚AI」、落点跟随用户当前所在页面、配图截当前页。
+        </p>
+
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs text-slate-500 mb-1 block">分享标题</label>
+            <input
+              value={shareTitle}
+              onChange={(e) => setShareTitle(e.target.value)}
+              placeholder="留空 = 「智能体名 · 友尚AI」；填写后所有页面统一用这个标题"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+            />
+            <p className="mt-1 text-xs text-slate-400">最多 60 字。填写后是全局统一标题；留空则按语境自动拼（详情页 / 对话页会带上对应的智能体名）。</p>
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-500 mb-1 block">点开卡片打开的页面（path）</label>
+            <input
+              value={sharePath}
+              onChange={(e) => setSharePath(e.target.value)}
+              placeholder="留空 = 跟随用户当前所在页面，例：/pages/home/index"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-blue-500"
+            />
+            <p className="mt-1 text-xs text-slate-400">
+              必须是本小程序的页面，形如 <span className="font-mono">/pages/home/index</span>，可带参数（<span className="font-mono">/pages/detail/index?id=xxx</span>）。
+              留空时，用户在详情页 / 分类页转发出去，点开仍落在原来那一页。
+            </p>
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-500 mb-1 block">卡片配图（imageUrl）</label>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                value={shareImageUrl}
+                onChange={(e) => setShareImageUrl(e.target.value)}
+                placeholder="留空 = 微信截取当前页面；也可粘贴 https 外链"
+                className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-blue-500"
+              />
+              <button
+                type="button"
+                onClick={() => shareFileRef.current && shareFileRef.current.click()}
+                disabled={shareUploading}
+                className="shrink-0 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:border-blue-300 hover:text-blue-600 disabled:opacity-60"
+              >
+                {shareUploading ? '上传中…' : '上传图片'}
+              </button>
+              <input ref={shareFileRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={uploadShareImage} />
+            </div>
+            <p className="mt-1 text-xs text-slate-400">
+              微信按 5:4 展示，建议 500×400 的 PNG / JPG。点「上传图片」存到本站图床；也可以填 https 外链。
+              <span className="text-amber-600">不能填小程序包内路径</span>（如微信文档示例里的 /images/share.png —— 后台改不了代码包，填了只会得到一张加载失败的卡片）。
+            </p>
+            {shareImageUrl && (
+              <div className="mt-3 flex items-center gap-3">
+                <img src={shareImageUrl} alt="分享配图预览" className="h-16 w-20 rounded-lg border border-slate-200 object-cover" />
+                <button type="button" onClick={() => setShareImageUrl('')} className="text-xs text-rose-600 hover:underline">移除图片</button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-5 flex items-center gap-3">
+          <PrimaryButton onClick={saveShare} disabled={shareSaving}>
+            {shareSaving ? '保存中…' : '保存分享设置'}
+          </PrimaryButton>
+          {shareMsg && (
+            <span className={`text-sm ${shareMsg.ok ? 'text-emerald-600' : 'text-rose-600'}`}>{shareMsg.msg}</span>
+          )}
+        </div>
+      </Card>
+
+      <Card className="p-6">
         <div className="flex items-center gap-2.5 mb-3">
           <KeyRound size={18} className="text-slate-400" />
           <h2 className="font-semibold text-slate-800">当前状态</h2>
@@ -339,6 +494,11 @@ export default function AdminMiniappSettings() {
         </div>
         <div className={`mt-4 rounded-lg px-4 py-3 text-sm font-medium ${configured ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
           {configured ? '✓ 支付凭证已齐全，小程序算力充值可正常发起支付' : '⚠ 凭证尚未配置齐全，充值下单将提示「微信支付尚未配置」'}
+        </div>
+        <div className={`mt-3 rounded-lg px-4 py-3 text-sm font-medium ${shareConfigured ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-50 text-slate-600'}`}>
+          {shareConfigured
+            ? '✓ 分享设置已配置，转发卡片按上面填写的标题 / 落地页 / 配图展示'
+            : '· 分享设置未配置，使用内置默认：标题「智能体名 · 友尚AI」、落点跟随当前页面、配图截当前页'}
         </div>
       </Card>
     </div>

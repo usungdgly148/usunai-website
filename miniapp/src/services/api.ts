@@ -1,5 +1,8 @@
 import Taro from '@tarojs/taro';
 import type { ApiEnvelope, MiniappLayout, MiniappLayoutBlockType, PublicContent, RechargeOrderResult, RechargeStatus, UserProfile } from '../types';
+// 分享设置（转发卡片标题 / 落地路径 / 配图）由后台配置、随内容一起下发，
+// 拉到内容后必须立刻落一份到本地缓存：微信的分享回调是同步求值的（见 utils/share.ts）。
+import { applyShareSettings } from '../utils/share';
 
 export const API_BASE = __MINIAPP_API_BASE__;
 export const MINIAPP_ENVIRONMENT = __MINIAPP_ENV__;
@@ -178,13 +181,24 @@ export async function loginWithWechat() {
 
 export async function getPublicContent(force = false): Promise<PublicContent> {
   const cached = Taro.getStorageSync<{ savedAt: number; data: PublicContent }>(CONTENT_CACHE_KEY);
-  if (!force && cached?.data && Date.now() - cached.savedAt < CONTENT_TTL) return cached.data;
+  // 命中缓存时也补一次分享设置：分享设置是单独存一份的（见下），本地那份被清掉时能自愈，
+  // 否则要等下一次内容请求、再过去 5 分钟才恢复。
+  if (!force && cached?.data && Date.now() - cached.savedAt < CONTENT_TTL) {
+    applyShareSettings(cached.data.shareSettings);
+    return cached.data;
+  }
   try {
     const response = await apiRequest<PublicContent>('/api/miniapp/v1/content', { auth: false });
     Taro.setStorageSync(CONTENT_CACHE_KEY, { savedAt: Date.now(), data: response.data });
+    // 分享设置（转发卡片标题 / 落地路径 / 配图）另外存一份：微信的分享回调是同步的，
+    // 不能在那儿现发请求，所以必须提前落地（见 utils/share.ts 的 applyShareSettings）。
+    applyShareSettings(response.data.shareSettings);
     return response.data;
   } catch (error) {
-    if (cached?.data) return cached.data;
+    if (cached?.data) {
+      applyShareSettings(cached.data.shareSettings);
+      return cached.data;
+    }
     throw error;
   }
 }

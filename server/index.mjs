@@ -26,6 +26,11 @@ import {
   virtualPayConfigured,
 } from './wechat-virtual-pay.mjs';
 import { handleMiniappApi, reconcilePendingVirtualOrders } from './miniapp-api.mjs';
+import {
+  SHARE_CONFIG_KV_KEY,
+  shareSettingsConfigured,
+  validateShareSettingsInput,
+} from './miniapp-share.mjs';
 import { handleMiniappAuth, identityStorageKeys } from './miniapp-auth.mjs';
 import { handleMiniappRuntime } from './miniapp-runtime.mjs';
 import { handleMiniappLayout } from './miniapp-layout.mjs';
@@ -4479,6 +4484,41 @@ const server = http.createServer(async (req, res) => {
       await KV.kvPut(VIRTUAL_PAY_CONFIG_KV_KEY, next);
       await loadVirtualPayConfig(KV);
       res.end(JSON.stringify({ ok: true, data: { configured: virtualPayConfigured() } }));
+      return;
+    }
+
+    // 小程序设置：分享设置（转发卡片的 标题 / 落地路径 / 配图）。
+    // 存 KV（miniappShareSettings）后随 /api/miniapp/v1/content 下发，小程序端在分享那一刻
+    // 从本地缓存同步取值 —— 所以改标题不必重新构建、重新上传小程序。
+    // 这里没有任何密钥，读回就是明文（与支付凭证那两块的脱敏逻辑不同）。
+    if (p === '/api/admin/miniapp-share-settings' && (req.method === 'GET' || req.method === 'POST')) {
+      res.setHeader('Content-Type', 'application/json');
+      if (!requireAdmin(req, res)) return;
+      const existing = (await KV.kvGet(SHARE_CONFIG_KV_KEY)) || {};
+      if (req.method === 'GET') {
+        const checked = validateShareSettingsInput(existing);
+        // 存量数据若是坏的（比如手工写进 KV 的非法路径），GET 不能 500：
+        // 退回空值让后台显示为「未配置」，由管理员自己重填。
+        const data = checked.ok ? checked.data : { title: '', path: '', imageUrl: '' };
+        res.end(JSON.stringify({
+          ok: true,
+          data: { ...data, configured: shareSettingsConfigured(data) },
+        }));
+        return;
+      }
+      const body = await readBody(req);
+      const checked = validateShareSettingsInput(body);
+      if (!checked.ok) {
+        res.end(JSON.stringify({ ok: false, msg: checked.msg }));
+        return;
+      }
+      // 三字段都是明文可清空的（不像密钥要「留空保留原值」）：清空 = 回退到内置默认文案，
+      // 这是管理员会主动做的操作，不能把它当成「没填」而保留旧值。
+      await KV.kvPut(SHARE_CONFIG_KV_KEY, checked.data);
+      res.end(JSON.stringify({
+        ok: true,
+        data: { ...checked.data, configured: shareSettingsConfigured(checked.data) },
+      }));
       return;
     }
 

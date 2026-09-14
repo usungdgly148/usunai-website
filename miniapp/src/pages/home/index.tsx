@@ -35,6 +35,8 @@ const EMPTY_CONTENT: PublicContent = {
   computePackages: [],
   rechargeInfo: '',
   customerService: { enabled: false, qr: '', lines: [] },
+  // 分享设置：空串 = 未配置 → 退回内置默认标题与「跟随当前页面」（见 utils/share.ts）。
+  shareSettings: { title: '', path: '', imageUrl: '' },
 };
 
 export default function HomePage() {

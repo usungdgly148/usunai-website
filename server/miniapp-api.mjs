@@ -28,6 +28,7 @@ import {
   hasVipAccess,
   isTrialPackage,
 } from './plan-access.mjs';
+import { SHARE_CONFIG_KV_KEY, normalizeShareSettings } from './miniapp-share.mjs';
 
 const DEFAULT_PAGE_SIZE = 12;
 const MAX_PAGE_SIZE = 100;
@@ -160,6 +161,11 @@ export function sanitizePublicContent(config = {}) {
             : [],
         }
       : { enabled: false, qr: '', lines: [] },
+    // 分享设置（转发卡片标题 / 落地路径 / 配图）：后台「小程序设置」可改，改完不用发版。
+    // 小程序端在「分享那一刻」从本地缓存同步取值（见 miniapp/src/utils/share.ts）——
+    // 分享回调不能发请求，所以必须提前随内容一起下发并按 5 分钟 TTL 缓存。
+    // 恒返回三个字符串（空串 = 未配置，客户端回退内置默认），别让客户端去判 null。
+    shareSettings: normalizeShareSettings(config.shareSettings),
   };
 }
 
@@ -1031,6 +1037,9 @@ export async function handleMiniappApi(req, res, url, deps) {
     const keys = ['agents', 'workflows', 'categories', 'categoryGroups', 'banners', 'announcements', 'recommended', 'computePackages', 'rechargeInfo', 'customerService'];
     const values = await Promise.all(keys.map((key) => KV.kvGet(key)));
     const config = Object.fromEntries(keys.map((key, index) => [key, values[index]]));
+    // 分享设置单独取：它跟上面那批不一样 —— KV 键名（miniappShareSettings）与
+    // 下发字段名（shareSettings）不是同一个字符串，塞不进上面那个「键名即字段名」的表。
+    config.shareSettings = await KV.kvGet(SHARE_CONFIG_KV_KEY);
     sendJson(res, 200, successEnvelope(sanitizePublicContent(config), requestId), requestId, 'public, max-age=30');
     return true;
   }
