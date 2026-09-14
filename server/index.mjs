@@ -3193,7 +3193,21 @@ const server = http.createServer(async (req, res) => {
         let structured = null;
         if (inner && typeof inner === 'object') {
           structured = inner;
-          if (!text2) { text2 = JSON.stringify(inner, null, 2); kind = 'json'; }
+          if (!text2) {
+            // 纯文本工作流的输出是「单一字符串变量」（如 { douyin_wenan: "文案" }）。
+            // 若把整份对象塞进 text，前端渲染和「复制结果」都会带上变量名和花括号。
+            // 只在这个明确的形状下解包；多变量 / 数组 / 非字符串值仍按 JSON 原样输出。
+            const values = Array.isArray(inner)
+              ? []
+              : Object.values(inner).filter((v) => v !== null && v !== undefined && !(typeof v === 'string' && !v.trim()));
+            if (values.length === 1 && typeof values[0] === 'string') {
+              text2 = values[0];
+              kind = 'text';
+            } else {
+              text2 = JSON.stringify(inner, null, 2);
+              kind = 'json';
+            }
+          }
         }
         if (!text2 && data.nodes && Array.isArray(data.nodes)) {
           const out = {};
