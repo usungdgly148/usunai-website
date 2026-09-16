@@ -9,6 +9,7 @@ import {
 
 const LOGIN_PATH = '/api/miniapp/v1/auth/login';
 const BIND_PATH = '/api/miniapp/v1/auth/bind';
+const BIND_PHONE_PATH = '/api/miniapp/v1/auth/bind-phone';
 const STATUS_PATH = '/api/miniapp/v1/auth/status';
 
 function digest(value) {
@@ -283,6 +284,74 @@ async function bind(req, res, requestId, deps) {
   }, requestId), requestId);
 }
 
+// 给当前小程序账号补手机号（主人方案里的「A+ 门禁」前置步骤）。
+//
+// 与 bind() 的区别：bind() 是「把当前微信身份挂到**另一个已有账号**上」（会换 token、
+// 换 userId）；这里是「把号码绑到**当前账号**上」，账号不变。
+// 客户端把两者合并在同一个「补手机号」页里：先调这里，只有拿到
+// PHONE_OWNED_BY_OTHER_ACCOUNT（号码属于有资产的别人账号）才退化成 bind()。
+async function bindPhone(req, res, requestId, deps) {
+  const session = requireMiniappUser(req, res, requestId, deps);
+  if (!session) return;
+  const body = await deps.readBody(req);
+  const phone = String(body.phone || '').trim();
+  if (!/^1[3-9]\d{9}$/.test(phone)) {
+    sendJson(res, 400, errorEnvelope('INVALID_PHONE', '请输入有效的手机号', requestId), requestId);
+    return;
+  }
+  const verified = await deps.verifyPhoneCode(phone, String(body.code || ''));
+  if (!verified.ok) {
+    sendJson(res, 401, errorEnvelope(
+      'PHONE_CODE_INVALID',
+      verified.message || '短信验证码错误或已过期',
+      requestId,
+    ), requestId);
+    return;
+  }
+  if (typeof deps.KV.kvBindPhoneToAccount !== 'function') {
+    sendJson(res, 500, errorEnvelope('PHONE_BIND_UNAVAILABLE', '手机号绑定暂时不可用', requestId), requestId);
+    return;
+  }
+  const result = await deps.KV.kvBindPhoneToAccount({
+    phone,
+    userId: session.userId,
+    updatedAt: new Date().toISOString(),
+  });
+  if (!result.ok) {
+    // 会话有效但账号记录已不在（注销 / 后台删号）→ 回 401 让客户端重登，
+    // 登录路径里的孤儿身份自愈会把身份重指向一个全新占位账号（同 2026-09-16 的修法）。
+    if (result.reason === 'user_not_found') {
+      sendJson(res, 401, errorEnvelope('USER_AUTH_REQUIRED', '登录态已失效，请重新进入', requestId), requestId);
+      return;
+    }
+    // 号码已属于另一个「有邮箱 / 有微信身份 / 有资产」的账号：绝不抢占，
+    // 交给客户端引导用户改走 bind() 的「绑定已有账号」。
+    // 这正是主人拍板的规则：空壳自动并、有资产不自动并。
+    if (result.reason === 'phone_owned_by_other') {
+      sendJson(res, 409, errorEnvelope(
+        'PHONE_OWNED_BY_OTHER_ACCOUNT',
+        '该手机号已绑定其他账号，请改用「绑定已有账号」',
+        requestId,
+      ), requestId);
+      return;
+    }
+    sendJson(res, 400, errorEnvelope('PHONE_BIND_FAILED', '手机号绑定失败，请稍后重试', requestId), requestId);
+    return;
+  }
+  const safeId = deps.sanitizeId(session.userId);
+  const [storedReg, storedUser] = await Promise.all([
+    deps.KV.kvGet('reg_' + safeId),
+    deps.KV.kvGet('user_' + safeId),
+  ]);
+  console.log('[miniapp-auth] phone bound user=' + safeId.slice(0, 16)
+    + ' merged=' + result.merged + ' previousOwner=' + (result.previousOwnerId || '-'));
+  sendJson(res, 200, successEnvelope({
+    user: safeUser(storedReg || {}, storedUser || {}, deps.getPlanValidity),
+    bindingRequired: false,
+    merged: !!result.merged,
+  }, requestId), requestId);
+}
+
 async function status(req, res, requestId, deps) {
   const session = requireMiniappUser(req, res, requestId, deps);
   if (!session) return;
@@ -295,11 +364,12 @@ async function status(req, res, requestId, deps) {
 
 export async function handleMiniappAuth(req, res, url, deps) {
   const path = url.pathname;
-  if (![LOGIN_PATH, BIND_PATH, STATUS_PATH].includes(path)) return false;
+  if (![LOGIN_PATH, BIND_PATH, BIND_PHONE_PATH, STATUS_PATH].includes(path)) return false;
   const requestId = requestIdFor(req);
   try {
     if (path === LOGIN_PATH && req.method === 'POST') await login(req, res, requestId, deps);
     else if (path === BIND_PATH && req.method === 'POST') await bind(req, res, requestId, deps);
+    else if (path === BIND_PHONE_PATH && req.method === 'POST') await bindPhone(req, res, requestId, deps);
     else if (path === STATUS_PATH && req.method === 'GET') await status(req, res, requestId, deps);
     else sendJson(res, 405, errorEnvelope('METHOD_NOT_ALLOWED', '该接口不支持当前请求方法', requestId), requestId);
   } catch (error) {

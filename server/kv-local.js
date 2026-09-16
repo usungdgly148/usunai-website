@@ -257,6 +257,94 @@ export async function kvMergeEmptyAccountByUnion({ unionKey, keeperIdentityKey, 
   })();
 }
 
+// 某账号名下是否挂着微信身份（小程序 openid 或网页扫码 openid 都算）。
+// 手机号冲突时用来挡住一件事：把号码让给 keeper 之前，必须先确认 loser 不只是「空壳」，
+// 而且**没有微信身份** —— 否则并完之后那个微信仍然指向 loser 账号，立刻变成孤儿身份
+// （登录时查不到 reg_/user_，用户会卡在「用户不存在」，正是 2026-09-16 修掉的那个坑）。
+function hasWechatIdentityForAccount(uid) {
+  try {
+    const rows = db.prepare("SELECT key, value FROM kv WHERE key GLOB 'wxmini_*'").all();
+    return collectWechatIdentityKeys(rows, String(uid)).size > 0;
+  } catch {
+    return true; // 查不动就当作有身份：宁可拒绝自动并，也不能制造孤儿
+  }
+}
+
+// 绑定手机号（小程序「补手机号」与网页「绑定手机号」的**唯一实现**）。
+//
+// 为什么不只是 kvPut('phone_' + phone)：手机号是**登录凭据**，`phone_<号码>` 索引直接决定
+// 「谁用这个号登录」。旧实现（server/index.mjs 的 /api/auth/bind-phone）是直接覆盖索引，
+// 于是 A 账号可以把已属于 B 账号的号码绑到自己名下，B 此后用手机号登录会登进 A 的账号。
+//
+// 冲突收敛沿用 kvMergeEmptyAccountByUnion 的同一范式：只有号码的现有持有者是「可回收空壳」
+// 才自动并过来；只要对方有邮箱、有微信身份、或有任何资产，就一律拒绝
+// （reason: phone_owned_by_other），由上层引导用户走「绑定已有账号」——
+// 绝不替用户做资产决策。
+//
+// 返回 { ok:true, userId, phone, merged, previousOwnerId }
+//   | { ok:false, reason:'invalid_phone'|'user_not_found'|'phone_owned_by_other', ownerUserId }
+export async function kvBindPhoneToAccount({ phone, userId, updatedAt }) {
+  const normalized = String(phone == null ? '' : phone).replace(/[^0-9]/g, '');
+  if (!/^1[3-9]\d{9}$/.test(normalized)) return { ok: false, reason: 'invalid_phone' };
+  const uid = String(userId == null ? '' : userId);
+  if (!uid) return { ok: false, reason: 'user_not_found' };
+
+  const select = db.prepare('SELECT value FROM kv WHERE key = ?');
+  const put = db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)');
+  const regKey = safeKey('reg_' + uid);
+  const userKey = safeKey('user_' + uid);
+  const phoneKey = safeKey('phone_' + normalized);
+  const now = updatedAt || new Date().toISOString();
+
+  return db.transaction(() => {
+    const regRow = select.get(regKey);
+    const userRow = select.get(userKey);
+    if (!regRow && !userRow) return { ok: false, reason: 'user_not_found' };
+
+    let ownerId = '';
+    const idxRow = select.get(phoneKey);
+    if (idxRow) {
+      try { ownerId = String(JSON.parse(idxRow.value) || ''); } catch { ownerId = ''; }
+    }
+
+    let merged = false;
+    if (ownerId && ownerId !== uid) {
+      const ownerReg = readRecordSafe('reg_' + safeKey(ownerId));
+      const ownerUser = readRecordSafe('user_' + safeKey(ownerId));
+      const ownerEmail = String(
+        (ownerReg && ownerReg.email) || (ownerUser && ownerUser.email) || '',
+      ).trim();
+      // 三道闸门：对方能用邮箱登录 / 挂着微信身份 / 有任何资产 —— 命中任一条都不并
+      if (ownerEmail || hasWechatIdentityForAccount(ownerId) || !isEmptyShellAccount(select, ownerId)) {
+        return { ok: false, reason: 'phone_owned_by_other', ownerUserId: ownerId };
+      }
+      // 可回收空壳：标记 merged（保留记录便于回溯），号码随即让给 keeper
+      for (const key of ['reg_' + safeKey(ownerId), 'user_' + safeKey(ownerId)]) {
+        const row = select.get(key);
+        if (!row) continue;
+        put.run(key, JSON.stringify({
+          ...JSON.parse(row.value),
+          status: 'merged',
+          mergedInto: uid,
+          updatedAt: now,
+        }));
+      }
+      merged = true;
+    }
+
+    // 写号码：reg_ 是登录权威源，user_ 是展示源，两份都要带 phone。
+    // 这里只改 phone 一个字段、其余原样保留 —— 绝不整份覆盖
+    //（user_ 里躺着 points/balance/avatar，历史上被覆盖过一次，把余额清成了 0）。
+    for (const entry of [[regRow, regKey], [userRow, userKey]]) {
+      const row = entry[0];
+      if (!row) continue;
+      put.run(entry[1], JSON.stringify({ ...JSON.parse(row.value), phone: normalized, updatedAt: now }));
+    }
+    put.run(phoneKey, JSON.stringify(uid));
+    return { ok: true, userId: uid, phone: normalized, merged, previousOwnerId: ownerId };
+  })();
+}
+
 // Repoint a verified mini-program identity to an existing website account in
 // one transaction. Existing balances, validity, assets and history are never
 // overwritten by the temporary mini-program account.

@@ -3824,14 +3824,27 @@ const server = http.createServer(async (req, res) => {
         }
         phoneCodes.delete(phone);
       }
-      // 更新 reg_ / user_ / phone_ 索引
-      const reg = await KV.kvGet('reg_' + sanitizeIdSafe(s.userId));
-      if (!reg) { res.end(JSON.stringify({ ok: false, msg: '账号不存在' })); return; }
-      await KV.kvPut('reg_' + sanitizeIdSafe(s.userId), { ...reg, phone });
-      // 2026-08-04：必须 syncUserFromRegKeepFields，不能直接 toSafeUser 覆盖 user_<id>
-      await syncUserFromRegKeepFields(s.userId, { ...reg, phone });
-      // phone_ 索引（如已有旧绑定，覆盖为当前 ID；手机号应唯一，但允许迁移场景）
-      await KV.kvPut(phoneIndexKey(phone), s.userId);
+      // 2026-09-17 收口：手机号是**登录凭据**（`phone_<号码>` 索引直接决定「谁用这个号登录」）。
+      // 旧实现是把 phone_ 索引无条件覆盖成当前账号 id —— 于是 A 账号可以把已属于
+      // B 账号的号码绑到自己名下，B 此后用手机号登录会登进 A 的账号。
+      // 现在与小程序走**同一个实现** kvBindPhoneToAccount：号码的现有持有者是「可回收空壳」
+      // 才自动并过来，只要对方有邮箱 / 有微信身份 / 有任何资产就拒绝，绝不替用户做资产决策。
+      const bound = await KV.kvBindPhoneToAccount({
+        phone, userId: s.userId, updatedAt: new Date().toISOString(),
+      });
+      if (!bound.ok) {
+        if (bound.reason === 'phone_owned_by_other') {
+          res.statusCode = 409;
+          res.end(JSON.stringify({
+            ok: false,
+            code: 'PHONE_OWNED_BY_OTHER',
+            msg: '该手机号已绑定其他账号，请先解绑或联系管理员',
+          }));
+          return;
+        }
+        res.end(JSON.stringify({ ok: false, msg: '手机号绑定失败，请稍后重试' }));
+        return;
+      }
       res.end(JSON.stringify({ ok: true, msg: '手机号绑定成功' }));
       return;
     }
