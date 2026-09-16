@@ -61,6 +61,28 @@ const NESTED_BLOCKED_FIELDS = new Set([
   'baseurl', 'projectid', 'botid', 'workflowid', 'workspaceid',
 ]);
 
+/**
+ * 登录态指向的账号记录已不存在（注销账号 / 后台删用户留下的「孤儿身份」）。
+ *
+ * ⚠️ 必须返回 **401**，不能返回 404。
+ * 原先这里返回 404 USER_NOT_FOUND「用户不存在」，但小程序客户端的
+ * `needsSessionRefresh`（miniapp/src/services/api.ts）只把「401 / SESSION_REFRESH_CODES 里的 403」
+ * 判为可通过重新登录恢复，404 不在其中；而 `ensureMiniappSession` 默认**复用本地缓存 token**、
+ * 不会主动重登。于是「重新加载」永远拿着同一个旧 token 复现同一个 404，
+ * 用户**永久卡在「暂时无法加载 / 用户不存在」页**（2026-09-16 线上实况）。
+ *
+ * 返回 401 后，客户端会走「丢弃 token → 静默重登 → 重试一次」，而登录侧本来就有
+ * 「孤儿身份自愈」（miniapp-auth.mjs 用 kvResetOrphanWechatIdentity 把该身份重指向
+ * 全新占位账号，等价于以该微信重新注册），用户无感。
+ * ⇒ 自愈逻辑保持**唯一实现**，此处不重复造第二份。
+ *
+ * 附注：客户端的 `if (error.statusCode === 401) return true;` 对**任意** 401 都判为可恢复，
+ * 所以线上已发布的旧版小程序同样受益，不必等客户端发版。
+ */
+function sendStaleSession(res, requestId) {
+  sendJson(res, 401, errorEnvelope('USER_AUTH_REQUIRED', '登录态已失效，请重新进入', requestId), requestId);
+}
+
 function cleanNested(value) {
   if (Array.isArray(value)) return value.map(cleanNested);
   if (!value || typeof value !== 'object') return value;
@@ -316,7 +338,7 @@ async function updateProfile(req, res, requestId, session, deps) {
     KV.kvGet('user_' + safeId),
   ]);
   if (!reg && !user) {
-    sendJson(res, 404, errorEnvelope('USER_NOT_FOUND', '用户不存在', requestId), requestId);
+    sendStaleSession(res, requestId);
     return;
   }
   const nextReg = { ...(reg || {}), id: String(session.userId) };
@@ -1077,7 +1099,7 @@ export async function handleMiniappApi(req, res, url, deps) {
   if (path === '/api/miniapp/v1/me') {
     const [reg, user] = await Promise.all([KV.kvGet('reg_' + safeId), KV.kvGet('user_' + safeId)]);
     if (!reg && !user) {
-      sendJson(res, 404, errorEnvelope('USER_NOT_FOUND', '用户不存在', requestId), requestId);
+      sendStaleSession(res, requestId);
       return true;
     }
     sendJson(res, 200, successEnvelope(safeUser(reg, user, getPlanValidity), requestId), requestId);

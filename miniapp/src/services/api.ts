@@ -33,6 +33,10 @@ const SESSION_REFRESH_CODES = new Set([
 function needsSessionRefresh(error: unknown): error is ApiError {
   if (!(error instanceof ApiError)) return false;
   if (error.statusCode === 401) return true;
+  // 账号记录已被删除（注销账号 / 后台删用户）留下的「孤儿身份」：服务端现在返回 401，
+  // 已由上一行覆盖。这里再兜一层 —— 万一回滚到仍返回 404 USER_NOT_FOUND 的旧服务端，
+  // 也要能靠「丢弃 token → 静默重登」自愈，否则「重新加载」会永久复现同一个 404。
+  if (error.statusCode === 404 && String(error.code || '') === 'USER_NOT_FOUND') return true;
   return error.statusCode === 403 && SESSION_REFRESH_CODES.has(String(error.code || ''));
 }
 
