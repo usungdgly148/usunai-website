@@ -88,6 +88,28 @@ export function hasVipAccess(mergedUser, validity) {
   return !(validity && validity.expired === true);
 }
 
+/** 命中「未绑定手机号」门禁时的错误码（小程序按码弹「去绑定」引导，不靠猜文案）。 */
+export const PHONE_BIND_REQUIRED_CODE = 'PHONE_BIND_REQUIRED';
+
+/** 未绑定手机号门禁的提示文案（小程序 / 网页共用，避免两端各写一版）。 */
+export function phoneBindRequiredMessage() {
+  return '请先绑定手机号后再使用该功能。';
+}
+
+/**
+ * 账号是否已绑定手机号（付费功能门禁的唯一判据）。
+ *
+ * ⚠️ 只看 reg_.phone，**不要**去读微信身份的 bindingState —— 后者的语义是
+ * 「这个微信有没有被绑定到某个**已有网站账号**上」（由 kvBindWechatIdentity 设置），
+ * 跟「这个账号有没有手机号」是两件毫不相干的事：静默登录建出来的账号 bindingState
+ * 是 unbound，但它照样可以已经有手机号；反过来绑过网站账号的也可能一直没手机号。
+ *
+ * @param regRecord reg_<id> 记录（登录权威源；user_ 侧不保证带 phone）
+ */
+export function hasPhoneBound(regRecord) {
+  return !!String((regRecord && regRecord.phone) || '').trim();
+}
+
 /**
  * 构造套餐有效期补丁（发货 / 后台调整三处共用）。
  *

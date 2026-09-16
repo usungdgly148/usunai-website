@@ -21,12 +21,15 @@ import {
   wechatPayConfigured,
 } from './wechat-pay.mjs';
 import {
+  PHONE_BIND_REQUIRED_CODE,
   TRIAL_ALREADY_PURCHASED_CODE,
   TRIAL_ALREADY_PURCHASED_MESSAGE,
   buildPlanPatch,
+  hasPhoneBound,
   hasUsedTrial,
   hasVipAccess,
   isTrialPackage,
+  phoneBindRequiredMessage,
 } from './plan-access.mjs';
 import { SHARE_CONFIG_KV_KEY, normalizeShareSettings } from './miniapp-share.mjs';
 
@@ -613,6 +616,15 @@ export async function reconcilePendingVirtualOrders(KV, sanitizeId, {
 // 创建充值订单并返回 wx.requestVirtualPayment 所需参数（signData / paySig / signature）。
 async function createRechargeOrder(req, res, requestId, session, deps) {
   const { KV, sanitizeId } = deps;
+  // 手机号门禁（充值）：主人拍板的门禁点 = 充值 + 付费功能（chat / workflow）。
+  // 放在最前面 —— 不建订单、不产生扣款、也不碰虚拟支付配置。
+  // 用 403 + 专属错误码：客户端只对 401 与少数 403 码做「静默重登 + 重试」，这里必须是
+  // 硬失败，让小程序弹「去绑定手机号」的引导，而不是傻等一个永远不会成功的重试。
+  const gateReg = await KV.kvGet('reg_' + sanitizeId(String(session.userId || '')));
+  if (!hasPhoneBound(gateReg)) {
+    sendJson(res, 403, errorEnvelope(PHONE_BIND_REQUIRED_CODE, phoneBindRequiredMessage(), requestId), requestId);
+    return;
+  }
   await loadVirtualPayConfig(KV);
   const body = await deps.readBody(req);
   const packageId = sanitizeId(String(body && body.packageId));

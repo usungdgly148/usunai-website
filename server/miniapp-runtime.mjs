@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import { errorEnvelope, requestIdFor, sendJson, successEnvelope } from './miniapp-api.mjs';
-import { VIP_REQUIRED_CODE, hasVipAccess, vipRequiredMessage } from './plan-access.mjs';
+import { PHONE_BIND_REQUIRED_CODE, VIP_REQUIRED_CODE, hasPhoneBound, hasVipAccess, phoneBindRequiredMessage, vipRequiredMessage } from './plan-access.mjs';
 import { recordMiniappMetric } from './miniapp-observability.mjs';
 
 const JSON_LIMIT = 35 * 1024 * 1024;
@@ -19,6 +19,20 @@ async function hasVipContentAccess(deps, userId) {
   const [reg, user] = await Promise.all([KV.kvGet('reg_' + uid), KV.kvGet('user_' + uid)]);
   const merged = { ...(reg || {}), ...(user || {}) };
   return hasVipAccess(merged, getPlanValidity(merged));
+}
+
+/**
+ * 该用户是否已绑定手机号（判定口径唯一实现在 server/plan-access.mjs 的 hasPhoneBound）。
+ * 与 VIP 门禁同一条底线：依赖缺失时返回 true —— 宁可漏拦，也不要把所有人挡在门外，
+ * 更不能因为一次 KV 抖动就把付费用户锁死。
+ */
+async function hasPhoneBoundForUser(deps, userId) {
+  const { KV, sanitizeId } = deps;
+  if (!sanitizeId || !KV) return true;
+  const uid = sanitizeId(String(userId || ''));
+  if (!uid) return false;
+  // ⚠️ 认 reg_.phone，**不能**读身份的 bindingState（那个语义是「有没有绑到已有网站账号」）。
+  return hasPhoneBound(await KV.kvGet('reg_' + uid));
 }
 
 function miniappUser(req, res, requestId, { getSession, isAdminSession }) {
@@ -199,6 +213,12 @@ export async function handleMiniappRuntime(req, res, url, deps) {
         sendJson(res, 404, errorEnvelope('AGENT_NOT_FOUND', '智能体不存在或未上架', requestId), requestId);
         return true;
       }
+      // 手机号门禁：付费功能（对话）要求账号完整 —— 先补手机号，再谈套餐权益。
+      // 必须回 JSON 403（不能透传上游 SSE），小程序才能按 PHONE_BIND_REQUIRED 弹「去绑定」。
+      if (!(await hasPhoneBoundForUser(deps, userId))) {
+        sendJson(res, 403, errorEnvelope(PHONE_BIND_REQUIRED_CODE, phoneBindRequiredMessage(), requestId), requestId);
+        return true;
+      }
       // VIP 专享门禁：后台勾了「VIP 专享」的智能体，只对持有生效中非试用套餐的用户开放。
       // 这里必须回 JSON 403（而不是透传上游 SSE），小程序才能按 VIP_REQUIRED 弹升级引导。
       if (agent.vip === true && !(await hasVipContentAccess(deps, userId))) {
@@ -271,6 +291,11 @@ export async function handleMiniappRuntime(req, res, url, deps) {
       const workflow = await loadPublishedWorkflow(deps.KV, workflowId);
       if (!workflow) {
         sendJson(res, 404, errorEnvelope('WORKFLOW_NOT_FOUND', '工作流不存在或未上架', requestId), requestId);
+        return true;
+      }
+      // 手机号门禁：与 chat 同一口径，同样放在幂等键校验之前 —— 账号不完整就不该建任务。
+      if (!(await hasPhoneBoundForUser(deps, userId))) {
+        sendJson(res, 403, errorEnvelope(PHONE_BIND_REQUIRED_CODE, phoneBindRequiredMessage(), requestId), requestId);
         return true;
       }
       // VIP 专享门禁：与 chat 同一口径，且放在幂等键校验之前 —— 没有资格就不该建任务。
