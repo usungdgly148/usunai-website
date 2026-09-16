@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { handleMiniappAuth } from '../server/miniapp-auth.mjs';
+import { handleMiniappAuth, identityStorageKeys } from '../server/miniapp-auth.mjs';
+import { handleMiniappApi } from '../server/miniapp-api.mjs';
+import { handleMiniappRuntime } from '../server/miniapp-runtime.mjs';
 
 /**
  * 回归：手机号绑定必须走 kvBindPhoneToAccount，**绝不能直接覆盖 `phone_` 索引**。
@@ -232,8 +234,182 @@ if (realDb === 'ran') {
   assert.equal((await KV.kvBindPhoneToAccount({ phone: '13800000009', userId: 'u_missing' })).reason, 'user_not_found');
   assert.equal(await KV.kvGet('phone_13800000009'), null, '账号不存在时不得留下半截索引');
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 4. 三身份端到端验收 —— 本轮改造的验收本体
+  //
+  // 上面 1~3 段验的是「零件对不对」；这一段验「整条链路在三种真实的人身上跑通没有」：
+  //   ① 全新微信用户        登录 → 三处门禁全拦 → 补手机号 → 三处全放行
+  //   ② 已绑手机号的老微信  登录 → 三处一处都不拦（门禁不能误伤老用户）
+  //   ③ 号码属有资产的别人  补号 409 → 改走「绑定已有账号」→ 换到原账号、资产原封不动
+  //
+  // ⚠️ 这一段必须在**真库**里跑：它验的恰恰是「登录写下的东西，门禁读得对不对」，
+  // 桩 KV 各写各的，读不出这类错位（bindingState vs reg_.phone 就是这个坑）。
+  // ═══════════════════════════════════════════════════════════════════════════
+  const APP_ID = baseDeps.config.appId;
+  const realDeps = {
+    ...baseDeps,
+    KV,
+    // 与 index.mjs 的 findUserByPhone 同语义：先查 phone_ 索引，再取 reg_（登录权威源）。
+    findUserByPhone: async (phone) => {
+      const uid = await KV.kvGet('phone_' + String(phone || '').trim());
+      if (!uid) return null;
+      return KV.kvGet('reg_' + String(uid).replace(/[^a-zA-Z0-9_]/g, '_'));
+    },
+  };
+  const agents = [{ id: 'a_free', name: '免费智能体', published: true, vip: false }];
+  await KV.kvPut('workflows', [{ id: 'w_free', name: '免费工作流', published: true, vip: false }]);
+
+  const hit = async (kind, path, session, opts = {}) => {
+    const res = makeResponse();
+    const req = {
+      method: opts.method || 'POST',
+      headers: { 'x-request-id': 'e2e', ...(opts.headers || {}) },
+      session: session || null,
+      body: opts.body || {},
+    };
+    const url = new URL('http://local' + path);
+    // port 指向 1（必然拒连）：只为让「越过门禁」的那次请求就地失败，不会真的打到上游。
+    const deps = { ...realDeps, port: 1, getAgents: () => agents };
+    if (kind === 'runtime') await handleMiniappRuntime(req, res, url, deps);
+    else if (kind === 'api') await handleMiniappApi(req, res, url, deps);
+    else await handleMiniappAuth(req, res, url, deps);
+    return res;
+  };
+  const loginAs = async (openid) => {
+    const res = makeResponse();
+    await handleMiniappAuth(
+      { method: 'POST', headers: { 'x-request-id': 'e2e-login' }, body: { code: 'code_' + openid } },
+      res,
+      new URL('http://local/api/miniapp/v1/auth/login'),
+      {
+        ...realDeps,
+        fetchImpl: async () => ({
+          ok: true,
+          json: async () => ({ openid, unionid: '', session_key: 'sk_' + openid }),
+        }),
+      },
+    );
+    assert.equal(res.statusCode, 200, '微信静默登录必须成功：' + openid);
+    return {
+      res,
+      session: {
+        userId: res.body.data.user.id,
+        role: 'user',
+        client: 'miniapp',
+        identityKey: identityStorageKeys(APP_ID, openid, '').identityKey,
+      },
+    };
+  };
+  const expectPhoneGated = (res, label) => {
+    assert.equal(res.statusCode, 403,
+      label + '：未绑手机号必须回 403（回 401 会被客户端判成「登录态失效」并静默重登，白跑一趟还掩盖真因）');
+    assert.equal(res.body.error.code, 'PHONE_BIND_REQUIRED',
+      label + '：必须回专属错误码，客户端才能弹「去绑定手机号」');
+  };
+
+  // ── 身份①：全新微信用户 ───────────────────────────────────────────────────
+  const fresh = await loginAs('o_brand_new');
+  assert.equal(fresh.res.body.data.bindingRequired, true, '全新用户身份未绑定');
+  assert.equal(fresh.res.body.data.user.phoneBound, false,
+    'phoneBound 是客户端门禁预判的依据，全新用户必须下发 false');
+  assert.equal(fresh.res.body.data.user.points, 0, '新用户积分必须为 0（不赠送算力，铁律）');
+  assert.ok(!fresh.res.body.data.user.phone, '全新用户的 reg_ 里不该凭空多出手机号');
+
+  expectPhoneGated(
+    await hit('runtime', '/api/miniapp/v1/agents/a_free/chat', fresh.session, { body: { messages: [] } }),
+    'chat 门禁');
+  // 带上合法幂等键：若门禁排在幂等键校验之后，这里会变成 202 而不是 403 —— 顺带把顺序也钉住。
+  expectPhoneGated(
+    await hit('runtime', '/api/miniapp/v1/workflows/w_free/tasks', fresh.session,
+      { headers: { 'idempotency-key': 'e2e-fresh-1' }, body: { parameters: {} } }),
+    'workflow 门禁');
+  expectPhoneGated(
+    await hit('api', '/api/miniapp/v1/recharge/order', fresh.session, { body: { packageId: 'pkg_e2e' } }),
+    'recharge 门禁');
+
+  // 补手机号（号码空闲，不是并任何人的账号）
+  const freshBound = await hit('auth', '/api/miniapp/v1/auth/bind-phone', fresh.session,
+    { body: { phone: '13911110001', code: '1234' } });
+  assert.equal(freshBound.statusCode, 200, '号码空闲时必须绑定成功');
+  assert.equal(freshBound.body.data.bindingRequired, false);
+  assert.equal(freshBound.body.data.merged, false, '号码空闲时不该并任何账号');
+  assert.equal(freshBound.body.data.user.phoneBound, true, '补号成功后必须立刻下发 phoneBound=true');
+  assert.equal(await KV.kvGet('phone_13911110001'), fresh.session.userId, '号码索引必须指向本账号');
+
+  const chatAfter = await hit('runtime', '/api/miniapp/v1/agents/a_free/chat', fresh.session, { body: { messages: [] } });
+  assert.notEqual(chatAfter.body.error?.code, 'PHONE_BIND_REQUIRED', '补号后 chat 不得再被手机号门禁拦下');
+  assert.notEqual(chatAfter.statusCode, 403, '补号后 chat 不得再回 403');
+  const wfAfter = await hit('runtime', '/api/miniapp/v1/workflows/w_free/tasks', fresh.session, { body: { parameters: {} } });
+  assert.equal(wfAfter.body.error?.code, 'IDEMPOTENCY_KEY_REQUIRED',
+    '补号后 workflow 应当越过门禁走到幂等键校验 —— 同时证明门禁确实排在幂等键之前');
+  const rcAfter = await hit('api', '/api/miniapp/v1/recharge/order', fresh.session,
+    { body: { packageId: 'pkg_e2e_absent' } });
+  assert.equal(rcAfter.body.error?.code, 'PACKAGE_NOT_FOUND',
+    '补号后充值应当越过门禁走到套餐校验（不再被 403 拦下）');
+
+  // ── 身份②：已绑手机号的老微信用户（门禁绝不能误伤） ────────────────────────
+  // 手工造一个「老身份 + 老账号（带手机号）」的既成事实，等价于线上已跑过一轮的用户。
+  const oldOpenid = 'o_old_bird';
+  const oldIdentityKey = identityStorageKeys(APP_ID, oldOpenid, '').identityKey;
+  await KV.kvPut(oldIdentityKey, {
+    id: oldIdentityKey, appId: APP_ID, openid: oldOpenid, unionid: null,
+    userId: 'u_wx', bindingState: 'bound',
+  });
+  await KV.kvPut(identityStorageKeys(APP_ID, '', '', 'u_wx').userIndexKey, oldIdentityKey);
+
+  const oldBird = await loginAs(oldOpenid);
+  assert.equal(oldBird.session.userId, 'u_wx', '老身份必须归到原账号，不得另建新账号');
+  assert.equal(oldBird.res.body.data.isNewUser, false, '老身份不能再被当成新用户');
+  assert.equal(oldBird.res.body.data.user.phoneBound, true, '已有手机号的老用户必须下发 phoneBound=true');
+
+  const oldChat = await hit('runtime', '/api/miniapp/v1/agents/a_free/chat', oldBird.session, { body: { messages: [] } });
+  assert.notEqual(oldChat.statusCode, 403, '已绑手机号的老用户不得被手机号门禁误伤（chat）');
+  const oldWf = await hit('runtime', '/api/miniapp/v1/workflows/w_free/tasks', oldBird.session, { body: { parameters: {} } });
+  assert.equal(oldWf.body.error?.code, 'IDEMPOTENCY_KEY_REQUIRED', '已绑手机号的老用户不得被门禁误伤（workflow）');
+  const oldRc = await hit('api', '/api/miniapp/v1/recharge/order', oldBird.session,
+    { body: { packageId: 'pkg_e2e_absent' } });
+  assert.equal(oldRc.body.error?.code, 'PACKAGE_NOT_FOUND', '已绑手机号的老用户不得被门禁误伤（recharge）');
+
+  // ── 身份③：号码属于另一个**有资产**的账号 ─────────────────────────────────
+  await account('u_owner', { phone: '13911110003' }, { points: 500, balance: 12 });
+  await KV.kvPut('phone_13911110003', 'u_owner');
+
+  const stranger = await loginAs('o_stranger');
+  const conflict = await hit('auth', '/api/miniapp/v1/auth/bind-phone', stranger.session,
+    { body: { phone: '13911110003', code: '1234' } });
+  assert.equal(conflict.statusCode, 409, '号码属于有资产的别人账号必须 409，绝不抢占');
+  assert.equal(conflict.body.error.code, 'PHONE_OWNED_BY_OTHER_ACCOUNT',
+    '必须是客户端能据以引导「绑定已有账号」的错误码');
+  assert.ok(!String(conflict.body.error.code).startsWith('SESSION_'),
+    '不得用会让客户端静默重登的错误码（重登也解决不了号码归属）');
+  assert.equal(await KV.kvGet('phone_13911110003'), 'u_owner', '被拒时号码索引必须原样不动');
+  assert.equal((await KV.kvGet('user_u_owner')).points, 500, '被拒时对方资产不得被动');
+  assert.equal((await KV.kvGet('reg_u_owner')).status, 'active', '被拒时对方账号不得被标记 merged');
+  assert.equal((await KV.kvGet('reg_' + stranger.session.userId)).status, 'active',
+    '被拒时本账号也必须保持原样');
+
+  // 正确出路：走 auth/bind 的「绑定已有账号」（会换 token、换 userId，回到原账号）
+  const adoptedAccount = await hit('auth', '/api/miniapp/v1/auth/bind', stranger.session,
+    { body: { method: 'phone', phone: '13911110003', code: '4321' } });
+  assert.equal(adoptedAccount.statusCode, 200, '号码属于有资产账号时，正确出路是「绑定已有账号」并登录回原账号');
+  assert.equal(adoptedAccount.body.data.token, 'miniapp-token:u_owner:' + stranger.session.identityKey,
+    '换绑后 token 必须指向原账号');
+  assert.equal(adoptedAccount.body.data.user.id, 'u_owner');
+  assert.equal(adoptedAccount.body.data.user.points, 500, '并入后原账号资产必须原封不动');
+  assert.equal(adoptedAccount.body.data.user.phoneBound, true, '原账号本来就绑了手机号，并入后仍是 true');
+  assert.equal((await KV.kvGet('reg_u_owner')).status, 'active', '目标账号不得被标记 merged');
+  assert.equal((await KV.kvGet('reg_' + stranger.session.userId)).status, 'merged',
+    '临时空壳账号要标记 merged（留痕不删，便于回溯）');
+
+  // 换绑之后，同一个微信再登录必须落在原账号上 —— 这才是「这个微信从此属于老账号」的证明
+  const strangerAgain = await loginAs('o_stranger');
+  assert.equal(strangerAgain.session.userId, 'u_owner', '换绑后同一微信再登录必须回到原账号');
+  assert.equal(strangerAgain.res.body.data.isNewUser, false);
+
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* Windows 下 WAL 可能仍被占用 */ }
 }
 
 console.log('miniapp bind phone check passed: 端点映射正确；真库段=' + realDb
-  + '（真库缺失时只验端点与源码闸门，请在服务器上补跑一次全量）');
+  + (realDb === 'ran'
+    ? '（含三身份端到端：全新用户补号放行 / 老用户不误伤 / 号码被占改走绑定已有账号）'
+    : '（真库缺失时只验端点与源码闸门，三身份端到端未跑，请在服务器上补跑一次全量）'));
