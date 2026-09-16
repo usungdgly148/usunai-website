@@ -301,7 +301,9 @@ async function bindPhone(req, res, requestId, deps) {
   }
   const verified = await deps.verifyPhoneCode(phone, String(body.code || ''));
   if (!verified.ok) {
-    sendJson(res, 401, errorEnvelope(
+    // 用 400 而不是 401：客户端把**任意** 401 判为「登录态失效」→ 会静默重登再重试一次，
+    // 而验证码错误跟登录态毫无关系，重登只会白白多跑一次 wx.login、还可能掩盖真实原因。
+    sendJson(res, 400, errorEnvelope(
       'PHONE_CODE_INVALID',
       verified.message || '短信验证码错误或已过期',
       requestId,

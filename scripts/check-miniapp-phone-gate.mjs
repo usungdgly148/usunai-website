@@ -157,4 +157,42 @@ assert.ok(rechargeGate > rechargeFnAt && rechargeGate < rechargeConfig,
   '充值：手机号门禁必须在加载虚拟支付配置之前');
 assert.ok(rechargeGate < rechargePackages, '充值：手机号门禁必须在读套餐、建订单之前');
 
-console.log('miniapp phone gate check passed: 充值 / 对话 / 工作流三处未绑手机号一律 403 PHONE_BIND_REQUIRED');
+// ── 客户端侧：三处调用点 + 补手机号页双模式 + 「版本差必须放行」的兜底 ────────
+const gateSource = fs.readFileSync(new URL('../miniapp/src/utils/phone-gate.ts', import.meta.url), 'utf8');
+const chatSource = fs.readFileSync(new URL('../miniapp/src/pages/chat/index.tsx', import.meta.url), 'utf8');
+const workflowSource = fs.readFileSync(new URL('../miniapp/src/pages/workflow/index.tsx', import.meta.url), 'utf8');
+const rechargeSource = fs.readFileSync(new URL('../miniapp/src/pages/recharge/index.tsx', import.meta.url), 'utf8');
+const bindSource = fs.readFileSync(new URL('../miniapp/src/pages/bind/index.tsx', import.meta.url), 'utf8');
+const clientApi = fs.readFileSync(new URL('../miniapp/src/services/api.ts', import.meta.url), 'utf8');
+
+// 预判口径不得在前端重写：只读服务端算好的 phoneBound，且只有明确 false 才拦
+assert.match(gateSource, /if \(current\.phoneBound !== false\) return true;/,
+  '客户端只有明确拿到 phoneBound=false 才拦；老服务端不下发该字段时必须放行（版本差不能误拦）');
+const gateCodeOnly = gateSource.replace(/^\s*\*.*$/gm, '').replace(/^\s*\/\/.*$/gm, '');
+assert.ok(!gateCodeOnly.includes('bindingState'),
+  '客户端不得读 bindingState 重写判定口径（那是「绑没绑已有网站账号」，与手机号无关）');
+
+assert.match(clientApi, /export async function bindPhoneNumber\(/);
+assert.match(clientApi, /'\/api\/miniapp\/v1\/auth\/bind-phone'/);
+assert.match(clientApi, /export function markPhoneBound\(/);
+
+for (const [label, source] of [['对话', chatSource], ['工作流', workflowSource], ['充值', rechargeSource]]) {
+  assert.match(source, /ensurePhoneBound\(/, `${label}页必须挂上手机号门禁的本地预检`);
+}
+// 顺序必须与服务端一致：先手机号，后 VIP
+assert.ok(chatSource.indexOf('ensurePhoneBound()') < chatSource.indexOf('ensureVipAccess(agent)'),
+  '对话页：手机号门禁必须排在 VIP 门禁之前（与服务端同序）');
+assert.ok(workflowSource.indexOf('ensurePhoneBound()') < workflowSource.indexOf('ensureVipAccess(workflow)'),
+  '工作流页：手机号门禁必须排在 VIP 门禁之前（与服务端同序）');
+assert.match(rechargeSource, /error\.code === PHONE_BIND_REQUIRED_CODE/,
+  '充值页必须兜住服务端 403 PHONE_BIND_REQUIRED，不能退化成一句「支付失败」');
+
+// 补手机号页：bind / adopt 双模式，adopt 必须让用户重新获取验证码
+assert.match(bindSource, /'PHONE_OWNED_BY_OTHER_ACCOUNT'/);
+assert.match(bindSource, /setMode\('adopt'\)[\s\S]{0,160}setCode\(''\)/,
+  '切到 adopt 必须清空验证码：短信码是一次性的，bind 那一次已经把它用掉了');
+assert.match(bindSource, /bindWebsiteAccount/, 'adopt 分支必须改走「绑定已有账号」');
+assert.ok(!bindSource.includes('请输入网站注册手机号'),
+  '旧的误导文案必须去掉：全新用户没有「网站注册手机号」，只会有困惑');
+
+console.log('miniapp phone gate check passed: 充值 / 对话 / 工作流三处未绑手机号一律 403 PHONE_BIND_REQUIRED（含客户端预检）');

@@ -8,6 +8,7 @@ import { fetchAllRecords, getHistoryDetail, getPublicContent, getRuntimeTask, sa
 import { fileToDataUrl, runtimeId } from '../../services/runtime';
 import { hideFeedbackToast, loadingToast, toast } from '../../utils/feedback';
 import { resolveEntityAvatar } from '../../utils/entity-visual';
+import { ensurePhoneBound } from '../../utils/phone-gate';
 import { ensureVipAccess } from '../../utils/vip-gate';
 import type { ContentItem, FormField, FormFieldOption, RuntimeTask } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
@@ -392,7 +393,9 @@ function WorkflowPage() {
 
   const submit = async () => {
     if (!workflow || task?.status === 'queued' || task?.status === 'running') return;
-    // VIP 专享门禁：先判资格再校验表单 —— 反正要升级，不该让用户先把参数填一遍。
+    // 门禁顺序与服务端一致（server/miniapp-runtime.mjs：先补手机号，再看套餐权益），
+    // 且都排在表单校验之前 —— 反正要先去处理完才能提交，不该让用户先把参数填一遍。
+    if (!(await ensurePhoneBound())) return;
     if (!(await ensureVipAccess(workflow))) return;
     if (fields.some((field, index) => isFieldUploading(field, index))) { toast('附件上传中，请稍候…', 'warning'); return; }
     const missing = fields.find((field, index) => field.required && !fieldHasValue(field, index));

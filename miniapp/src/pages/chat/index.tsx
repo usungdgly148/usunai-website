@@ -9,6 +9,7 @@ import { collectMediaUrls, fileToDataUrl, runtimeId } from '../../services/runti
 import { confirmDialog, hideFeedbackToast, loadingToast, toast } from '../../utils/feedback';
 import { resolveEntityAvatar, resolveUserAvatar, toMiniappUrl } from '../../utils/entity-visual';
 import { subscribeKeyboardOffset } from '../../utils/keyboard';
+import { ensurePhoneBound } from '../../utils/phone-gate';
 import { ensureVipAccess } from '../../utils/vip-gate';
 import type { ContentItem } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
@@ -301,8 +302,10 @@ export default function ChatPage() {
       return;
     }
     const userMessage = { id: runtimeId('msg'), role: 'user' as const, text, images: readyImages, createdAt: new Date().toISOString() };
-    // VIP 专享门禁：无资格时弹窗引导升级并中止本次发送（服务端还有一道 403 兜底）。
+    // 门禁顺序与**服务端**保持一致（server/miniapp-runtime.mjs：先补手机号，再看套餐权益）。
+    // 两道都只是把弹窗提前到「点下去那一刻」，服务端各有一道 403 兜底。
     void (async () => {
+      if (!(await ensurePhoneBound())) return;
       if (!(await ensureVipAccess(agent))) return;
       await runTurn(userMessage, messages);
     })();

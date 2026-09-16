@@ -121,11 +121,11 @@ const missingRes = await callBindPhone({ phone: '13800000006', code: '1234' }, '
 assert.equal(missingRes.statusCode, 500);
 assert.equal(missingRes.body.error.code, 'PHONE_BIND_UNAVAILABLE');
 
-// 验证码不对 → 401，且绝不能已经动了号码
+// 验证码不对 → 400（不是 401：客户端把任意 401 判为「登录态失效」会静默重登再重试一次）
 const badCodeRes = await callBindPhone({ phone: '13800000007', code: '0000' },
   { ok: true, userId: 'u_keeper', phone: '13800000007' },
   { verifyPhoneCode: async () => ({ ok: false, message: '验证码错误或已过期' }) });
-assert.equal(badCodeRes.statusCode, 401, '验证码不对必须 401');
+assert.equal(badCodeRes.statusCode, 400, '验证码不对必须 400：用 401 会触发客户端无谓的静默重登');
 assert.equal(badCodeRes.body.error.code, 'PHONE_CODE_INVALID');
 
 // 手机号格式非法 → 400

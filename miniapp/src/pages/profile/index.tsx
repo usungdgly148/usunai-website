@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { MiniappTabBar } from '../../components/miniapp-tab-bar';
 import { PageState } from '../../components/page-state';
 import { useLoad } from '../../hooks/use-load';
-import { getMe, isBindingRequired, isLoggedOut, loginWithWechat } from '../../services/api';
+import { getMe, isLoggedOut, loginWithWechat } from '../../services/api';
 import { useThemePage } from '../../hooks/use-theme-page';
 import { type ThemeMode, readMode, resolveTheme, setMode } from '../../utils/theme';
 import { resolveUserAvatar } from '../../utils/entity-visual';
@@ -174,7 +174,10 @@ export default function ProfilePage() {
           </View>
         </View>
 
-        {isBindingRequired() && <View className='mini-bind-card'><View><Text className='mini-bind-title'>绑定已有网站账号</Text><Text className='mini-bind-desc'>同步已有算力、资产和历史记录</Text></View><Button className='mini-bind-button' onClick={() => Taro.navigateTo({ url: '/pages/bind/index' })}>去绑定</Button></View>}
+        {/* 账号不完整（未绑手机号）→ 引导去补。判据用服务端下发的 phoneBound（= reg_.phone，
+            与充值/对话/工作流三道门禁同源），不再用本地那个 bindingRequired：
+            静默登录来的新用户根本没有「已有网站账号」可绑，挂一张「去绑定」只会让人困惑。 */}
+        {state.data.phoneBound === false && <View className='mini-bind-card'><View><Text className='mini-bind-title'>绑定手机号</Text><Text className='mini-bind-desc'>绑定后才能充值和使用 AI 智能体、工作流</Text></View><Button className='mini-bind-button' onClick={() => Taro.navigateTo({ url: '/pages/bind/index' })}>去绑定</Button></View>}
       </>
     ) : null}
 

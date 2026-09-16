@@ -258,6 +258,10 @@ export function safeUser(reg, user, getPlanValidity) {
     validTo: validity.validTo,
     expired: validity.expired,
     hasPassword: !!(merged.hasPassword || reg?.password),
+    // 是否已绑定手机号 —— 付费功能门禁的**客户端预判**依据（真正的闸门仍在服务端）。
+    // ⚠️ 与门禁同源：hasPhoneBound(reg) 只看 reg_.phone，不看微信身份的 bindingState
+    //（bindingState 的语义是「有没有绑到已有网站账号」，与手机号无关）。
+    phoneBound: hasPhoneBound(reg),
     // 是否具备使用「VIP 专享」智能体/工作流的资格（判定口径见 server/plan-access.mjs）。
     // 前端只做「进页/提交前」的本地预判，真正的闸门在服务端运行接口，前端拿到 false 才弹升级引导。
     vipAccess: hasVipAccess(merged, validity),

@@ -309,6 +309,35 @@ export async function bindWebsiteAccount(payload: { method: 'email'; email: stri
   })).data;
 }
 
+/**
+ * 给**当前**账号补手机号（不换账号、不换 token）。
+ *
+ * 与 bindWebsiteAccount 的分工：后者是「把当前微信身份挂到另一个**已有**账号上」
+ * （换 token、换 userId，用于「我本来就有网站账号」）；这里是「给当前这个新账号补上手机号」，
+ * 是静默登录用户的常态。号码已属于另一个账号时服务端回 409
+ * PHONE_OWNED_BY_OTHER_ACCOUNT，调用方据此改走 bindWebsiteAccount
+ * （见 pages/bind/index.tsx 的 adopt 分支）。
+ *
+ * ⚠️ 号码属于**空壳**账号时服务端会自动并过来，此时 merged=true —— 可以对用户说
+ * 「已合并你之前的空账号」，但绝不能说成「登录到别的账号」（那是 adopt 分支才发生的事）。
+ */
+export async function bindPhoneNumber(payload: { phone: string; code: string }) {
+  return (await apiRequest<{ user: UserProfile; bindingRequired: boolean; merged: boolean }>(
+    '/api/miniapp/v1/auth/bind-phone', { method: 'POST', data: payload },
+  )).data;
+}
+
+/**
+ * 账号已补全手机号 → 清掉「绑定已有网站账号」的引导标记。
+ *
+ * 那个标记（BINDING_KEY）的语义是「要不要引导用户去挂靠一个**已有**网站账号」，
+ * 只对老用户有意义。新用户补完手机号后账号已经完整，再挂着一张「去绑定」的卡片
+ * 只会让人以为账号还有问题。
+ */
+export function markPhoneBound() {
+  Taro.setStorageSync(BINDING_KEY, false);
+}
+
 export async function sendPhoneCode(phone: string) {
   const response = await Taro.request<{ ok: boolean; msg?: string; cooldown?: number }>({
     url: `${API_BASE}/api/auth/phone-code`,

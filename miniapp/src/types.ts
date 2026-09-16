@@ -229,6 +229,12 @@ export interface UserProfile {
   vipAccess?: boolean;
   /** 「免费试用」是否已用过（含上线前买入的老数据、后台手动发放）：充值页据此标「已购买」。 */
   trialPurchased?: boolean;
+  /**
+   * 是否已绑定手机号 —— 充值 / 对话 / 工作流三处门禁的判据
+   * （服务端闸门在 server/plan-access.mjs 的 hasPhoneBound，只看 reg_.phone）。
+   * 客户端只拿它做「点下去那一刻」的预判；老服务端不下发该字段时按放行处理。
+   */
+  phoneBound?: boolean;
 }
 
 export interface ApiEnvelope<T> {

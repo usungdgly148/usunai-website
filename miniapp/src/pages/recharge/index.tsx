@@ -6,6 +6,7 @@ import { useLoad } from '../../hooks/use-load';
 import { useThemePage } from '../../hooks/use-theme-page';
 import { ApiError, createRechargeOrder, getMe, getPublicContent, getRechargeStatus, isLoggedOut, refreshMiniappSession } from '../../services/api';
 import type { ComputePackage, UserProfile, VirtualPaymentParams } from '../../types';
+import { ensurePhoneBound, promptBindPhone } from '../../utils/phone-gate';
 import { shareTargets } from '../../utils/share';
 
 interface RechargeData {
@@ -79,6 +80,13 @@ function isTrialPackage(pkg?: ComputePackage | null) {
  */
 const TRIAL_ALREADY_PURCHASED_CODE = 'TRIAL_ALREADY_PURCHASED';
 const TRIAL_ALREADY_PURCHASED_MESSAGE = '「免费试用」套餐每位用户仅限购买一次，请选择其它套餐。';
+
+/**
+ * 服务端「未绑定手机号」门禁的错误码（定义在 server/plan-access.mjs）。
+ * 本地预检（ensurePhoneBound）读的是进页时那份档案，可能已经过期，所以服务端这道 403
+ * 必须兜住：拿到它就直接弹「去绑定」，别退化成一句支付失败。
+ */
+const PHONE_BIND_REQUIRED_CODE = 'PHONE_BIND_REQUIRED';
 
 /** 版本号比较：v1 > v2 返回 1，相等返回 0，小于返回 -1。 */
 function compareVersion(v1: string, v2: string) {
@@ -270,6 +278,10 @@ export default function RechargePage() {
       Taro.showToast({ title: '请先选择套餐', icon: 'none' });
       return;
     }
+    // 手机号门禁：与服务端 createRechargeOrder 的第一道闸门同序（都排在限购校验之前）。
+    // 服务端回 403 PHONE_BIND_REQUIRED 才是最终闸门，这里只是把弹窗提前，
+    // 省掉一次注定失败的下单往返。
+    if (!(await ensurePhoneBound(data?.profile))) return;
     // 本地先拦一道：已经买过试用就不必再走下单/支付，直接弹窗说明（服务端还有一道 409 硬拦截）。
     if (isTrialPackage(pkg) && trialUsed) {
       showTrialUsed();
@@ -315,6 +327,12 @@ export default function RechargePage() {
           showCancel: false,
           confirmText: '换一个套餐',
         });
+        return;
+      }
+      // 服务端手机号门禁的兜底（本地预检用的是进页时那份档案，可能已经过期）：
+      // 必须弹「去绑定」引导，不能退化成 appear 成网络抖动的支付失败提示。
+      if (error instanceof ApiError && error.code === PHONE_BIND_REQUIRED_CODE) {
+        void promptBindPhone();
         return;
       }
       const { text, hint } = describeVirtualPayError(error);
