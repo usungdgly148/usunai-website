@@ -646,7 +646,7 @@ export const genCaptcha = () => {
 
 function LoginModal({ onClose }) {
   const { login, register, loginWithEmail, loginWithWechat, forgotPasswordVerify, forgotPasswordReset } = useStore();
-  const [mode, setMode] = useState('phone');
+  const [mode, setMode] = useState('wechat');
 
   // 手机号模式
   const [phone, setPhone] = useState('');
@@ -751,9 +751,9 @@ function LoginModal({ onClose }) {
           </div>
 
           <div className="flex bg-slate-100 rounded-lg p-1 mb-6">
+            <button onClick={() => setMode('wechat')} className={tabCls(mode === 'wechat')}>微信</button>
             <button onClick={() => setMode('phone')} className={tabCls(mode === 'phone')}>手机号</button>
             <button onClick={() => setMode('email')} className={tabCls(mode === 'email')}>邮箱</button>
-            <button onClick={() => setMode('wechat')} className={tabCls(mode === 'wechat')}>微信</button>
           </div>
 
           {mode === 'phone' && (

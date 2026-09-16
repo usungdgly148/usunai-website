@@ -222,7 +222,7 @@ export function SubHeader({ entity, type, onToggleHistory, onToggleInfo, right, 
 
 export function RequireLoginModal({ onClose }) {
   const { login, register, loginWithEmail, loginWithWechat } = useStore();
-  const [mode, setMode] = useState('phone'); // 'phone' | 'email' | 'wechat'
+  const [mode, setMode] = useState('wechat'); // 'phone' | 'email' | 'wechat'
 
   // 手机号模式
   const [phone, setPhone] = useState('');
@@ -306,11 +306,11 @@ export function RequireLoginModal({ onClose }) {
           <h3 className="text-lg font-bold text-slate-900">登录后开始创作</h3>
           <p className="text-sm text-slate-500 mt-1 mb-5">登录即可使用智能体，并为你保存每一次对话历史</p>
 
-          {/* 手机号 / 邮箱 切换 */}
+          {/* 微信 / 手机号 / 邮箱 切换 */}
           <div className="flex bg-slate-100 rounded-lg p-1 mb-4">
+            <button type="button" onClick={() => { setMode('wechat'); setError(''); }} className={`flex-1 py-1.5 text-xs font-medium rounded-md transition ${mode === 'wechat' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>微信</button>
             <button type="button" onClick={() => { setMode('phone'); setError(''); }} className={`flex-1 py-1.5 text-xs font-medium rounded-md transition ${mode === 'phone' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>手机号</button>
             <button type="button" onClick={() => { setMode('email'); setError(''); }} className={`flex-1 py-1.5 text-xs font-medium rounded-md transition ${mode === 'email' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>邮箱</button>
-            <button type="button" onClick={() => { setMode('wechat'); setError(''); }} className={`flex-1 py-1.5 text-xs font-medium rounded-md transition ${mode === 'wechat' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>微信</button>
           </div>
 
           {error && <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-3">{error}</div>}
