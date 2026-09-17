@@ -22,6 +22,9 @@ import { handleMiniappRuntime } from '../server/miniapp-runtime.mjs';
  *   ⑤ 号码属于**能用邮箱登录**的账号 → 拒绝（并掉会破坏对方的邮箱登录）
  *   ⑥ 重复绑自己的号码             → 幂等成功
  *   ⑦ 小程序端点把 ② 表现为 200、把 ③ 表现为 409 + 可引导的错误码
+ *   ⑧ 取号方式由 `body.method` 选择：`'sms'`（缺省，向后兼容线上 0.1.2 客户端）/
+ *      `'wechat'`（P1-1 一键绑定，动态令牌换号）。**两条路取到号码后共用同一个落库出口**，
+ *      且 `'wechat'` 分支绑定的号码只能来自微信换号结果 —— 取信 `body.phone` 等于绕过验证。
  *
  * 本脚本分两层跑：
  *   · 端点层 + 源码闸门层 —— 纯桩，任何环境都能跑（进 verify 链的就是这部分）。
@@ -51,6 +54,16 @@ assert.match(indexSource, /await KV\.kvBindPhoneToAccount\(\{/,
   'index.mjs 的 /api/auth/bind-phone 必须改走共用实现');
 assert.match(authSource, /const BIND_PHONE_PATH = '\/api\/miniapp\/v1\/auth\/bind-phone'/);
 assert.match(authSource, /path === BIND_PHONE_PATH && req\.method === 'POST'/);
+
+// ── 1b. 源码闸门（P1-1）：一键取号只是「另一种取号方式」，不得长出第二条落库旁路 ──
+const wechatPhoneSource = fs.readFileSync(new URL('../server/wechat-phone.mjs', import.meta.url), 'utf8');
+assert.match(wechatPhoneSource, /getuserphonenumber/, '换号必须走微信官方接口');
+assert.ok(!/\bkvPut\b/.test(wechatPhoneSource),
+  'wechat-phone.mjs 只负责换号，不得自己写库 —— 写库只能有一个出口（kvBindPhoneToAccount）');
+assert.match(authSource, /const method = String\(body\.method \|\| 'sms'\)/,
+  "缺省必须是 'sms'：线上 0.1.2 客户端不带 method，默认值变了就是线上全量回归");
+assert.ok(authSource.indexOf('const method = String(body.method') < authSource.indexOf('deps.KV.kvBindPhoneToAccount'),
+  '取号分支必须全部收敛在落库之前 —— 不允许 wechat 分支另走一条写库路径');
 
 // ── 2. 端点层：错误码 → HTTP 状态的映射（桩 KV 精确控制 kvBindPhoneToAccount 的返回）──
 const store = new Map([
@@ -134,6 +147,106 @@ assert.equal(badCodeRes.body.error.code, 'PHONE_CODE_INVALID');
 const badPhoneRes = await callBindPhone({ phone: '12345', code: '1234' }, { ok: true });
 assert.equal(badPhoneRes.statusCode, 400);
 assert.equal(badPhoneRes.body.error.code, 'INVALID_PHONE');
+
+// ── 2b. P1-1 微信一键绑定：method='wechat' 的三条分支 ────────────────────────
+//
+// 这个能力把「证明这个号码是我的」从短信码换成了**微信侧验证过的号码**，
+// 所以有两条红线必须钉住：
+//   ① 号码只能来自微信换号结果，**绝不能取 body.phone** —— 否则客户端传
+//      `{method:'wechat', phone:'别人的号'}` 就把短信那道「人证」整个绕过去了。
+//   ② 任何失败都要能**退化到短信**（能力未开通 / 次数用尽 / 微信抖动），不能让用户卡死。
+// 动态令牌来自 `<button open-type="getPhoneNumber">`，5 分钟有效、只能消费一次。
+const callBindPhoneWechat = async ({ body, exchange, kvResult = { ok: true, userId: 'u_keeper' }, extraDeps = {} }) => {
+  let bindArgs = null;
+  const KV = {
+    async kvGet(key) { return store.get(key) ?? null; },
+    async kvPut(key, value) { store.set(key, value); return true; },
+    async kvBindPhoneToAccount(args) { bindArgs = args; return kvResult; },
+  };
+  const deps = { ...baseDeps, KV, ...extraDeps };
+  if (exchange) deps.exchangeWechatPhoneCode = exchange;
+  const res = makeResponse();
+  await handleMiniappAuth(
+    { method: 'POST', headers: { 'x-request-id': 'bind-phone-wx' }, session, body },
+    res,
+    new URL('http://local/api/miniapp/v1/auth/bind-phone'),
+    deps,
+  );
+  return { res, bindArgs };
+};
+
+// ① 成功：号码由微信换回 → 直接放行，无需短信码
+let seenDynamicCode = null;
+const wxOk = await callBindPhoneWechat({
+  body: { method: 'wechat', code: 'DYN-OK' },
+  exchange: async (code) => { seenDynamicCode = code; return { phone: '13800001234', countryCode: '86' }; },
+  kvResult: { ok: true, userId: 'u_keeper', phone: '13800001234', merged: false },
+});
+assert.equal(seenDynamicCode, 'DYN-OK', '必须把 body.code（动态令牌）原样交给换号函数');
+assert.equal(wxOk.res.statusCode, 200, '一键绑定成功必须 200');
+assert.equal(wxOk.res.body.data.bindingRequired, false, '一键绑定成功后门禁必须解除');
+assert.equal(wxOk.bindArgs.phone, '13800001234', '落库号码必须来自微信换号结果');
+
+// 红线①：body 里塞的号码一律无效（否则等于让客户端自带号码绕过验证）
+const wxSpoof = await callBindPhoneWechat({
+  body: { method: 'wechat', code: 'DYN-OK', phone: '13900009999' },
+  exchange: async () => ({ phone: '13800001235', countryCode: '86' }),
+  kvResult: { ok: true, userId: 'u_keeper', phone: '13800001235' },
+});
+assert.equal(wxSpoof.bindArgs.phone, '13800001235',
+  "method='wechat' 时必须忽略 body.phone —— 取信它等于绕过微信验证，把任意号码绑到自己名下");
+
+// ② 令牌失效 / 已被消费 / 号码格式异常 → 400 + 原样错误码（客户端据此引导「重新点一次」）
+for (const errorCode of ['WECHAT_PHONE_CODE_REQUIRED', 'WECHAT_PHONE_CODE_INVALID', 'WECHAT_PHONE_INVALID_NUMBER']) {
+  const thrown = new Error('令牌不好使');
+  thrown.code = errorCode;
+  const badToken = await callBindPhoneWechat({
+    body: { method: 'wechat', code: 'DYN-BAD' },
+    exchange: async () => { throw thrown; },
+  });
+  assert.equal(badToken.res.statusCode, 400, `${errorCode} 必须 400（回 401 会被客户端判成登录态失效而静默重登）`);
+  assert.equal(badToken.res.body.error.code, errorCode, '400 必须原样回传语义错误码，客户端才能分辨原因');
+  assert.equal(badToken.bindArgs, null, '取号失败时绝不能落库');
+}
+
+// ③ 能力未开通 / 微信侧不可用 → 503（客户端据此退化到短信，绝不让用户卡死）
+const downThrown = new Error('微信侧繁忙');
+downThrown.code = 'WECHAT_PHONE_UNAVAILABLE';
+const wxDown = await callBindPhoneWechat({
+  body: { method: 'wechat', code: 'DYN-X' },
+  exchange: async () => { throw downThrown; },
+});
+assert.equal(wxDown.res.statusCode, 503, '一键绑定不可用必须 503，客户端才能退回短信');
+assert.equal(wxDown.res.body.error.code, 'WECHAT_PHONE_UNAVAILABLE');
+assert.equal(wxDown.bindArgs, null);
+
+// 服务端版本差：老调用方没注入换号函数 → 同样 503（不能崩、也不能误判成「号码错误」）
+const notWired = await callBindPhoneWechat({ body: { method: 'wechat', code: 'DYN-X' } });
+assert.equal(notWired.res.statusCode, 503, 'deps 缺 exchangeWechatPhoneCode 时必须 503');
+assert.equal(notWired.res.body.error.code, 'WECHAT_PHONE_UNAVAILABLE');
+
+// 认不出的 method → 400。绝不能静默当成短信：那样会拿着空 phone 去发码/建号
+const badMethod = await callBindPhoneWechat({ body: { method: 'face', phone: '13800000001', code: '1234' } });
+assert.equal(badMethod.res.statusCode, 400, '未知 method 必须明确拒绝，不能静默退化');
+assert.equal(badMethod.res.body.error.code, 'INVALID_BIND_METHOD');
+assert.equal(badMethod.bindArgs, null);
+
+// 缺省 method（线上 0.1.2 客户端）→ 仍走短信路径，行为与上线前逐字节一致
+const legacy = await callBindPhoneWechat({
+  body: { phone: '13800000088', code: '1234' },
+  kvResult: { ok: true, userId: 'u_keeper', phone: '13800000088' },
+});
+assert.equal(legacy.res.statusCode, 200, '不带 method 的老客户端必须仍走短信路径');
+assert.equal(legacy.bindArgs.phone, '13800000088');
+
+// 缺省 method + 验证码不对 → 仍是原错误码（不得因为新增分支而改变老路径语义）
+const legacyBad = await callBindPhoneWechat({
+  body: { phone: '13800000089', code: '0000' },
+  kvResult: { ok: true },
+  extraDeps: { verifyPhoneCode: async () => ({ ok: false, message: '验证码错误或已过期' }) },
+});
+assert.notEqual(legacyBad.res.statusCode, 200, '缺省路径的验证码校验不得被新分支削弱');
+assert.equal(legacyBad.res.body.error.code, 'PHONE_CODE_INVALID');
 
 // 未登录 / 网页会话 → 不得走小程序补手机号端点
 const anonRes = makeResponse();
@@ -409,7 +522,7 @@ if (realDb === 'ran') {
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* Windows 下 WAL 可能仍被占用 */ }
 }
 
-console.log('miniapp bind phone check passed: 端点映射正确；真库段=' + realDb
+console.log('miniapp bind phone check passed: 端点映射正确（含 method=wechat 三分支：成功 / 400 令牌 / 503 退化）；真库段=' + realDb
   + (realDb === 'ran'
     ? '（含三身份端到端：全新用户补号放行 / 老用户不误伤 / 号码被占改走绑定已有账号）'
     : '（真库缺失时只验端点与源码闸门，三身份端到端未跑，请在服务器上补跑一次全量）'));

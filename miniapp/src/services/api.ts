@@ -9,7 +9,6 @@ export const MINIAPP_ENVIRONMENT = __MINIAPP_ENV__;
 export const MINIAPP_VERSION = __MINIAPP_VERSION__;
 export const MINIAPP_BUILD = __MINIAPP_BUILD__;
 const TOKEN_KEY = 'usunai_miniapp_token';
-const BINDING_KEY = 'usunai_miniapp_binding_required';
 /** 用户主动退出登录标记（退出后不再静默登录，需点「微信一键登录」才重新进入） */
 const LOGGED_OUT_KEY = 'usunai_miniapp_logged_out';
 const CONTENT_CACHE_KEY = 'usunai_miniapp_content_v2';
@@ -132,7 +131,6 @@ export async function ensureMiniappSession(force = false): Promise<string> {
       method: 'POST', data: { code: login.code }, auth: false,
     });
     Taro.setStorageSync(TOKEN_KEY, response.data.token);
-    Taro.setStorageSync(BINDING_KEY, response.data.bindingRequired);
     return response.data.token;
   })();
   try { return await loginPromise; } finally { loginPromise = null; }
@@ -172,7 +170,6 @@ export async function logoutSession() {
     } catch { /* 吊销失败不阻塞本地登出 */ }
   }
   Taro.removeStorageSync(TOKEN_KEY);
-  Taro.removeStorageSync(BINDING_KEY);
   Taro.setStorageSync(LOGGED_OUT_KEY, true);
 }
 
@@ -262,13 +259,8 @@ export async function getRechargeStatus(orderId: string) {
   return (await apiRequest<RechargeStatus>(`/api/miniapp/v1/recharge/status?orderId=${encodeURIComponent(orderId)}`)).data;
 }
 
-export function isBindingRequired() {
-  return !!Taro.getStorageSync<boolean>(BINDING_KEY);
-}
-
 export function storeBoundSession(token: string) {
   Taro.setStorageSync(TOKEN_KEY, token);
-  Taro.setStorageSync(BINDING_KEY, false);
 }
 
 export async function getPagedRecords(
@@ -328,14 +320,25 @@ export async function bindPhoneNumber(payload: { phone: string; code: string }) 
 }
 
 /**
- * 账号已补全手机号 → 清掉「绑定已有网站账号」的引导标记。
+ * 微信一键绑定手机号（P1-1）：把 `<button open-type="getPhoneNumber">` 回调里的动态令牌
+ * 交给服务端去微信换号 —— 用户点一下即可，不用等短信。
  *
- * 那个标记（BINDING_KEY）的语义是「要不要引导用户去挂靠一个**已有**网站账号」，
- * 只对老用户有意义。新用户补完手机号后账号已经完整，再挂着一张「去绑定」的卡片
- * 只会让人以为账号还有问题。
+ * ⚠️ `dynamicCode` 是**微信手机号组件**的动态令牌（5 分钟有效、只能消费一次），
+ * 与 `wx.login` 的 code 完全不是一回事，不能混用。
+ *
+ * 失败分支（调用方必须都处理，且都要能**退化到短信**，不能让用户卡死）：
+ *   · 400 WECHAT_PHONE_CODE_INVALID / WECHAT_PHONE_CODE_REQUIRED —— 令牌失效或被用过，重新点一次按钮
+ *   · 503 WECHAT_PHONE_UNAVAILABLE —— 能力未开通 / 次数用尽 / 微信侧不可用
+ *   · 409 PHONE_OWNED_BY_OTHER_ACCOUNT —— 号码已属有资产的别的账号，改走 adopt（那里只能靠短信）
+ *
+ * ⚠️ 成功后**不要**调 `storeBoundSession`：这条路不换账号、**token 不变**
+ *（它只是给当前账号补手机号）。只要 reLaunch 回个人中心、让 `/me` 重新拉一次最新 `user`
+ *（含 phoneBound=true）即可，否则个人中心还会挂着「去绑定」的卡片。
  */
-export function markPhoneBound() {
-  Taro.setStorageSync(BINDING_KEY, false);
+export async function bindPhoneByWechat(dynamicCode: string) {
+  return (await apiRequest<{ user: UserProfile; bindingRequired: boolean; merged: boolean }>(
+    '/api/miniapp/v1/auth/bind-phone', { method: 'POST', data: { method: 'wechat', code: dynamicCode } },
+  )).data;
 }
 
 export async function sendPhoneCode(phone: string) {

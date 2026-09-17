@@ -31,6 +31,7 @@ import {
   shareSettingsConfigured,
   validateShareSettingsInput,
 } from './miniapp-share.mjs';
+import { exchangeWechatPhoneCode } from './wechat-phone.mjs';
 import { handleMiniappAuth, identityStorageKeys } from './miniapp-auth.mjs';
 import { handleMiniappRuntime } from './miniapp-runtime.mjs';
 import { handleMiniappLayout } from './miniapp-layout.mjs';
@@ -2376,6 +2377,9 @@ const server = http.createServer(async (req, res) => {
       findUserByPhone,
       verifyPassword: verifyPasswordStore,
       verifyPhoneCode: verifyPhoneCodeValue,
+      // 微信一键手机号（P1-1）：用「手机号快速验证组件」下发的动态令牌换号。
+      // 与短信码二选一，由请求体的 method 决定（缺省 sms）。
+      exchangeWechatPhoneCode,
       config: WECHAT_MINIAPP,
     })) return;
     if (await handleMiniappRuntime(req, res, u, {

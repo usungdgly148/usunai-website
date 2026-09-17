@@ -290,25 +290,69 @@ async function bind(req, res, requestId, deps) {
 // 换 userId）；这里是「把号码绑到**当前账号**上」，账号不变。
 // 客户端把两者合并在同一个「补手机号」页里：先调这里，只有拿到
 // PHONE_OWNED_BY_OTHER_ACCOUNT（号码属于有资产的别人账号）才退化成 bind()。
+//
+// 取号方式有两种，由 body.method 选择（缺省 'sms'，保证老客户端行为不变）：
+//   · 'wechat' —— 微信「手机号快速验证组件」动态令牌换号（见 server/wechat-phone.mjs）。
+//     号码由微信侧验证，与短信同等可信，因此不再需要短信码。
+//   · 'sms'    —— 短信验证码（阿里云 Dypns）。
+// 两条路取到号码后**完全共用**下面的闸门与写入逻辑（kvBindPhoneToAccount 是唯一实现）。
 async function bindPhone(req, res, requestId, deps) {
   const session = requireMiniappUser(req, res, requestId, deps);
   if (!session) return;
   const body = await deps.readBody(req);
-  const phone = String(body.phone || '').trim();
-  if (!/^1[3-9]\d{9}$/.test(phone)) {
-    sendJson(res, 400, errorEnvelope('INVALID_PHONE', '请输入有效的手机号', requestId), requestId);
+  let phone = String(body.phone || '').trim();
+  // 两条取号路径（P1-1 新增第一条；老客户端不带 method 时走第二条，保持向后兼容）：
+  //   method='wechat' —— 微信「手机号快速验证组件」的动态令牌换号（一键、无短信，号码由微信验证）
+  //   method='sms'（默认）—— 手机号 + 短信验证码（阿里云 Dypns）
+  const method = String(body.method || 'sms').trim().toLowerCase();
+  if (method === 'wechat') {
+    if (typeof deps.exchangeWechatPhoneCode !== 'function') {
+      sendJson(res, 503, errorEnvelope(
+        'WECHAT_PHONE_UNAVAILABLE', '微信一键绑定暂时不可用，请改用短信验证', requestId,
+      ), requestId);
+      return;
+    }
+    try {
+      const info = await deps.exchangeWechatPhoneCode(String(body.code || ''));
+      phone = String(info.phone || '');
+    } catch (error) {
+      const code = String(error?.code || '');
+      // 令牌失效 / 已被消费 / 号码格式不对 → 让用户重新点一次按钮。
+      // 用 400 不能 401（理由同下：401 会触发客户端静默重登，与取号无关）。
+      if (code === 'WECHAT_PHONE_CODE_REQUIRED'
+        || code === 'WECHAT_PHONE_CODE_INVALID'
+        || code === 'WECHAT_PHONE_INVALID_NUMBER') {
+        sendJson(res, 400, errorEnvelope(
+          code, error.message || '微信手机号校验失败，请重新点击授权', requestId,
+        ), requestId);
+        return;
+      }
+      // 能力未开通 / AppSecret 缺失 / 微信侧不可用 → 503，客户端据此退化到短信，绝不让用户卡死。
+      console.warn('[miniapp-auth] wechat phone exchange failed:', code || error?.message);
+      sendJson(res, 503, errorEnvelope(
+        'WECHAT_PHONE_UNAVAILABLE', '微信一键绑定暂时不可用，请改用短信验证', requestId,
+      ), requestId);
+      return;
+    }
+  } else if (method !== 'sms') {
+    sendJson(res, 400, errorEnvelope('INVALID_BIND_METHOD', '仅支持短信或微信一键绑定手机号', requestId), requestId);
     return;
-  }
-  const verified = await deps.verifyPhoneCode(phone, String(body.code || ''));
-  if (!verified.ok) {
-    // 用 400 而不是 401：客户端把**任意** 401 判为「登录态失效」→ 会静默重登再重试一次，
-    // 而验证码错误跟登录态毫无关系，重登只会白白多跑一次 wx.login、还可能掩盖真实原因。
-    sendJson(res, 400, errorEnvelope(
-      'PHONE_CODE_INVALID',
-      verified.message || '短信验证码错误或已过期',
-      requestId,
-    ), requestId);
-    return;
+  } else {
+    if (!/^1[3-9]\d{9}$/.test(phone)) {
+      sendJson(res, 400, errorEnvelope('INVALID_PHONE', '请输入有效的手机号', requestId), requestId);
+      return;
+    }
+    const verified = await deps.verifyPhoneCode(phone, String(body.code || ''));
+    if (!verified.ok) {
+      // 用 400 而不是 401：客户端把**任意** 401 判为「登录态失效」→ 会静默重登再重试一次，
+      // 而验证码错误跟登录态毫无关系，重登只会白白多跑一次 wx.login、还可能掩盖真实原因。
+      sendJson(res, 400, errorEnvelope(
+        'PHONE_CODE_INVALID',
+        verified.message || '短信验证码错误或已过期',
+        requestId,
+      ), requestId);
+      return;
+    }
   }
   if (typeof deps.KV.kvBindPhoneToAccount !== 'function') {
     sendJson(res, 500, errorEnvelope('PHONE_BIND_UNAVAILABLE', '手机号绑定暂时不可用', requestId), requestId);

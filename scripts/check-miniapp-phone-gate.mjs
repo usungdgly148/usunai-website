@@ -174,7 +174,65 @@ assert.ok(!gateCodeOnly.includes('bindingState'),
 
 assert.match(clientApi, /export async function bindPhoneNumber\(/);
 assert.match(clientApi, /'\/api\/miniapp\/v1\/auth\/bind-phone'/);
-assert.match(clientApi, /export function markPhoneBound\(/);
+
+// ── 死代码不得回归（2026-09-17 清理）──────────────────────────────────────────
+// bindingRequired 是「有没有绑到已有网站账号」的旧字段，与手机号门禁无关；
+// 客户端曾把它落进 storage 并导出 isBindingRequired()，实际无任何调用点。
+// 留着它会诱使后人拿它当手机号判据 —— 直接把整条链路钉死在源码里。
+const miniappSrcFiles = [];
+const collectSrc = (dir) => {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = new URL(entry.name + (entry.isDirectory() ? '/' : ''), dir);
+    if (entry.isDirectory()) collectSrc(full);
+    else if (/\.tsx?$/.test(entry.name)) miniappSrcFiles.push(full);
+  }
+};
+collectSrc(new URL('../miniapp/src/', import.meta.url));
+for (const needle of ['isBindingRequired', 'BINDING_KEY', 'markPhoneBound']) {
+  const hits = miniappSrcFiles.filter((file) => fs.readFileSync(file, 'utf8').includes(needle));
+  assert.equal(hits.length, 0,
+    `死代码 ${needle} 不得回归（命中：${hits.map((f) => f.pathname).join(', ')}）`);
+}
+
+// ── P1-1 微信一键绑定：链路两端都在，且失败必须能退化到短信 ────────────────────
+const wechatPhoneSource = fs.readFileSync(new URL('../server/wechat-phone.mjs', import.meta.url), 'utf8');
+const authSource = fs.readFileSync(new URL('../server/miniapp-auth.mjs', import.meta.url), 'utf8');
+const indexSource = fs.readFileSync(new URL('../server/index.mjs', import.meta.url), 'utf8');
+
+// 服务端换号：走微信官方接口，且复用虚拟支付的 access_token 缓存（同一 AppId 另建一份会互相作废）
+assert.match(wechatPhoneSource, /export async function exchangeWechatPhoneCode\(/);
+assert.match(wechatPhoneSource, /\/wxa\/business\/getuserphonenumber\?access_token=/);
+assert.match(wechatPhoneSource, /import \{ getAccessToken \} from '\.\/wechat-virtual-pay\.mjs'/,
+  'access_token 必须复用虚拟支付那套进程内缓存，不另建第二份凭证');
+assert.ok(wechatPhoneSource.includes('不能混用'),
+  '必须留下「动态令牌与 wx.login 的 code 不是一回事」的注释，否则后人必然混用');
+
+// 服务端取值：method 双路，缺省 sms（线上 0.1.2 客户端不带该字段，改错会让所有补号请求 400）
+assert.match(authSource, /const method = String\(body\.method \|\| 'sms'\)/,
+  "method 缺省必须是 'sms' —— 老客户端不带它，默认值变了就是线上回归");
+assert.match(authSource, /if \(method === 'wechat'\) \{/);
+assert.match(authSource, /else if \(method !== 'sms'\)[\s\S]{0,140}INVALID_BIND_METHOD/);
+assert.equal((authSource.match(/deps\.KV\.kvBindPhoneToAccount\(/g) || []).length, 1,
+  '两条取号路径必须共用同一个落库出口 —— 闸门（kvBindPhoneToAccount）不能被复制成两份');
+assert.match(indexSource, /import \{ exchangeWechatPhoneCode \} from '\.\/wechat-phone\.mjs'/);
+assert.match(indexSource, /exchangeWechatPhoneCode,/, 'index.mjs 必须把它注入 handleMiniappAuth 的 deps');
+
+// 客户端请求体
+assert.match(clientApi, /export async function bindPhoneByWechat\(dynamicCode: string\)/);
+assert.match(clientApi, /method: 'wechat', code: dynamicCode/);
+
+// 客户端页面：真的挂上组件，且每条失败路径都能回落到短信
+assert.match(bindSource, /openType='getPhoneNumber'/,
+  '必须用官方 open-type 组件取号 —— 只有它拿到的动态令牌能换手机号');
+assert.match(bindSource, /onGetPhoneNumber=\{onWechatPhone\}/);
+assert.match(bindSource, /bindPhoneByWechat\(dynamicCode\)/);
+assert.match(bindSource, /1400001/, '额度用尽（errno 1400001）要单独提示，否则用户只看到「未授权」无从判断');
+const oneClickBody = bindSource.slice(bindSource.indexOf('const onWechatPhone'), bindSource.indexOf('const submit'));
+assert.ok(oneClickBody.length > 200, 'onWechatPhone 处理器必须存在（源码被改动？）');
+assert.match(oneClickBody, /PHONE_OWNED_BY_OTHER_ACCOUNT[\s\S]{0,220}setMode\('adopt'\)[\s\S]{0,140}setCode\(''\)/,
+  '一键路径撞上「号码属于有资产的别人」也必须交回 adopt 并重发短信 —— 一键拿到的号不足以证明账号归属');
+assert.ok(!oneClickBody.includes('storeBoundSession'),
+  '一键路径不换账号、token 不变；调 storeBoundSession 会覆盖 token（对 adopt 才是对的）');
 
 for (const [label, source] of [['对话', chatSource], ['工作流', workflowSource], ['充值', rechargeSource]]) {
   assert.match(source, /ensurePhoneBound\(/, `${label}页必须挂上手机号门禁的本地预检`);
