@@ -237,11 +237,17 @@ assert.ok(!oneClickBody.includes('storeBoundSession'),
 for (const [label, source] of [['对话', chatSource], ['工作流', workflowSource], ['充值', rechargeSource]]) {
   assert.match(source, /ensurePhoneBound\(/, `${label}页必须挂上手机号门禁的本地预检`);
 }
-// 顺序必须与服务端一致：先手机号，后 VIP
-assert.ok(chatSource.indexOf('ensurePhoneBound()') < chatSource.indexOf('ensureVipAccess(agent)'),
-  '对话页：手机号门禁必须排在 VIP 门禁之前（与服务端同序）');
-assert.ok(workflowSource.indexOf('ensurePhoneBound()') < workflowSource.indexOf('ensureVipAccess(workflow)'),
-  '工作流页：手机号门禁必须排在 VIP 门禁之前（与服务端同序）');
+// 顺序必须与服务端一致：先手机号，再套餐，最后算力。
+// ⚠️ 门禁的调用签名带上了档案（三道门禁只取一次 getMe）—— 传的是 `me`，不再是空参。
+// 完整的三道顺序断言在 check-miniapp-points-gate.mjs，这里只钉住「手机号永远排第一」。
+for (const [label, source] of [['对话', chatSource], ['工作流', workflowSource]]) {
+  const phoneAt = source.indexOf('ensurePhoneBound(me)');
+  const vipAt = source.indexOf('ensureVipAccess(');
+  const pointsAt = source.indexOf('ensureEnoughPoints(');
+  assert.ok(phoneAt > 0, `${label}页必须把档案传给手机号门禁（ensurePhoneBound(me)）`);
+  assert.ok(phoneAt < vipAt, `${label}页：手机号门禁必须排在 VIP 门禁之前（与服务端同序）`);
+  assert.ok(vipAt < pointsAt, `${label}页：套餐门禁必须排在算力门禁之前 —— 0 算力 + 非 VIP 的新用户，服务端先回的是 VIP_REQUIRED`);
+}
 assert.match(rechargeSource, /error\.code === PHONE_BIND_REQUIRED_CODE/,
   '充值页必须兜住服务端 403 PHONE_BIND_REQUIRED，不能退化成一句「支付失败」');
 

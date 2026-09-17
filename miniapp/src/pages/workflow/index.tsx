@@ -4,11 +4,12 @@ import { Button, Image, Input, ScrollView, Text, Textarea, Video, View } from '@
 import { PageState } from '../../components/page-state';
 import { EntityInfoCard, SideDrawer, timeAgo } from '../../components/inner-ui';
 import { TdIcon } from '../../components/td-icon';
-import { fetchAllRecords, getHistoryDetail, getPublicContent, getRuntimeTask, saveRuntimeAsset, saveRuntimeHistory, submitWorkflowTask, uploadRuntimeFile } from '../../services/api';
+import { fetchAllRecords, getHistoryDetail, getMe, getPublicContent, getRuntimeTask, saveRuntimeAsset, saveRuntimeHistory, submitWorkflowTask, uploadRuntimeFile } from '../../services/api';
 import { fileToDataUrl, runtimeId } from '../../services/runtime';
 import { hideFeedbackToast, loadingToast, toast } from '../../utils/feedback';
 import { resolveEntityAvatar } from '../../utils/entity-visual';
 import { ensurePhoneBound } from '../../utils/phone-gate';
+import { ensureEnoughPoints, handlePointsInsufficient, isPointsInsufficient, pointsInsufficientHint } from '../../utils/points-gate';
 import { ensureVipAccess } from '../../utils/vip-gate';
 import type { ContentItem, FormField, FormFieldOption, RuntimeTask } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
@@ -179,6 +180,14 @@ function WorkflowPage() {
   const audioRef = useRef<Taro.InnerAudioContext | null>(null);
   /** 最近一次提交的参数快照：运行中卡片回显输入 + 落历史记录时一并写入 */
   const lastSnapshotRef = useRef<Record<string, unknown> | null>(null);
+  /**
+   * 已经因为「算力不足」弹过充值弹窗的任务 id。
+   *
+   * 工作流的算力校验发生在**入队之后**（提交先返 202，后台才真正跑），所以这类失败是以
+   * **任务状态**回来的、不是提交时的 402；而任务状态在多处会被读到（提交后轮询、
+   * 切页回到本页时按 storage 恢复、历史列表加载），不去重就会反复弹同一个弹窗。
+   */
+  const pointsPromptedRef = useRef<Set<string>>(new Set());
   const fields = useMemo(() => (workflow?.formFields || []).filter((field) => field.enabled !== false), [workflow]);
   /** 工作流头像：有真头像用图片，没有则退化成图标字形色块（与智能体页头一致） */
   const workflowAvatar = resolveEntityAvatar(workflow, 'workflow');
@@ -232,6 +241,22 @@ function WorkflowPage() {
     return () => clearTimeout(timer);
   }, [editingIndex]);
 
+  /**
+   * 任务失败原因是「算力不足」时，弹窗引导去充值。
+   *
+   * ⚠️ 提交前那道 `ensureEnoughPoints` 只挡得住「余额为 0」；「余额不够本次消耗」只有服务端
+   * 算得出（工作流成本随配置变化），所以必须在这里接住——否则用户只会看到卡片上一行红字。
+   * 按 `task.id` 去重：这个函数会被轮询与切页恢复各调一次。
+   */
+  const promptIfPointsFailed = (current: RuntimeTask) => {
+    if (current.status !== 'failed' || !isPointsInsufficient(current.error)) return;
+    const id = String(current.id || '');
+    if (!id || pointsPromptedRef.current.has(id)) return;
+    // 先登记再 await：并发进来时也不会叠出两个弹窗。
+    pointsPromptedRef.current.add(id);
+    void handlePointsInsufficient(current.error, { name: workflow?.name });
+  };
+
   const refreshTask = async (taskId: string, workflowId: string) => {
     try {
       const current = await getRuntimeTask(taskId);
@@ -239,6 +264,7 @@ function WorkflowPage() {
       if (current.status === 'queued' || current.status === 'running') setTimeout(() => void refreshTask(taskId, workflowId), 1800);
       else {
         Taro.removeStorageSync(`${ACTIVE_TASK_PREFIX}${workflowId}`);
+        promptIfPointsFailed(current);
         if (current.status === 'succeeded') {
           await saveRuntimeHistory({
             id: runtimeId('hist'),
@@ -393,10 +419,16 @@ function WorkflowPage() {
 
   const submit = async () => {
     if (!workflow || task?.status === 'queued' || task?.status === 'running') return;
-    // 门禁顺序与服务端一致（server/miniapp-runtime.mjs：先补手机号，再看套餐权益），
+    // 门禁顺序与服务端一致（server/miniapp-runtime.mjs：先补手机号，再看套餐权益，算力最后），
     // 且都排在表单校验之前 —— 反正要先去处理完才能提交，不该让用户先把参数填一遍。
-    if (!(await ensurePhoneBound())) return;
-    if (!(await ensureVipAccess(workflow))) return;
+    // 档案只取一次：三道读的是同一份数据，逐道各取一次会白跑两个来回。
+    // 取不到档案就整体放行（与三个门禁各自「拿不到就放行」的姿态一致），交给服务端兜底。
+    const me = await getMe().catch(() => null);
+    if (me) {
+      if (!(await ensurePhoneBound(me))) return;
+      if (!(await ensureVipAccess(workflow, me))) return;
+      if (!(await ensureEnoughPoints(workflow, me))) return;
+    }
     if (fields.some((field, index) => isFieldUploading(field, index))) { toast('附件上传中，请稍候…', 'warning'); return; }
     const missing = fields.find((field, index) => field.required && !fieldHasValue(field, index));
     if (missing) { toast(`请填写${fieldLabel(missing, fields.indexOf(missing))}`, 'warning'); return; }
@@ -777,7 +809,13 @@ function WorkflowPage() {
               {failed ? '运行失败' : task.status === 'queued' ? '排队中' : '运行中…'}
             </Text>
           </View>
-          <Text className='run-running-hint' selectable>{failed ? (task.error || '本次运行失败，请调整参数后重试') : 'AI 正在生成，请稍候…'}</Text>
+          <Text className='run-running-hint' selectable>
+            {failed
+              // 算力不足换成一句人话（弹窗已经承担引导，这里不再照抄服务端原文）；
+              // 其它失败原因照旧原样展示，便于用户／客服定位。
+              ? (isPointsInsufficient(task.error) ? pointsInsufficientHint('workflow') : (task.error || '本次运行失败，请调整参数后重试'))
+              : 'AI 正在生成，请稍候…'}
+          </Text>
         </View>
       </View>
     </View>;

@@ -10,6 +10,7 @@ import { confirmDialog, hideFeedbackToast, loadingToast, toast } from '../../uti
 import { resolveEntityAvatar, resolveUserAvatar, toMiniappUrl } from '../../utils/entity-visual';
 import { subscribeKeyboardOffset } from '../../utils/keyboard';
 import { ensurePhoneBound } from '../../utils/phone-gate';
+import { ensureEnoughPoints, handlePointsInsufficient, pointsInsufficientHint } from '../../utils/points-gate';
 import { ensureVipAccess } from '../../utils/vip-gate';
 import type { ContentItem } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
@@ -286,10 +287,42 @@ export default function ChatPage() {
         });
       } catch { /* 历史落库失败不阻断对话 */ }
     } catch (reason) {
+      // 算力不足单独走弹窗：它是一类**用户可自助解决**的状态（充值即可继续），
+      // 不该和「上游报错」共用一条红色横幅 + 一句「调用失败：…」的死文字。
+      // 弹窗已经承担引导，所以这里既不留横幅、也不把服务端原文照抄进气泡。
+      if (await handlePointsInsufficient(reason, { name: agent.name })) {
+        setError('');
+        setMessages((current) => current.map((item) => item.id === assistantId
+          ? { ...item, text: item.text || pointsInsufficientHint('chat') }
+          : item));
+        return;
+      }
       const message = reason instanceof Error ? reason.message : '智能体调用失败';
       setError(message);
       setMessages((current) => current.map((item) => item.id === assistantId ? { ...item, text: item.text || `调用失败：${message}` } : item));
     } finally { setSending(false); }
+  };
+
+  /**
+   * 发出去之前的三道门禁：手机号 → 套餐权益 → 算力。
+   *
+   * 顺序必须与**服务端**一致（server/miniapp-runtime.mjs 的 chat 分支：先 403 PHONE_BIND_REQUIRED，
+   * 再 403 VIP_REQUIRED，之后才由上游 /api/coze/chat 判算力）。
+   * ⚠️ 刻意**不**把算力提到套餐之前：对一个「0 算力 + 非 VIP」的新用户，服务端先回的是 VIP_REQUIRED；
+   * 客户端要是先弹「去充值」，用户充完回来照样撞 VIP，等于把人往错的方向引。
+   *
+   * 三道都只是把弹窗提前到「点下去那一刻」，服务端各有一道兜底（403 / 402）。
+   * 档案只取一次：三道读的是同一份数据，逐道各取一次会白跑两个来回。
+   */
+  const passGates = async () => {
+    const me = await getMe().catch(() => null);
+    // 取不到档案就整体放行 —— 与三个门禁各自「拿不到就放行」的失败姿态保持一致，
+    // 让服务端给出准确结果，别因为一次网络抖动把用户挡在门外。
+    if (!me) return true;
+    if (!(await ensurePhoneBound(me))) return false;
+    if (!(await ensureVipAccess(agent, me))) return false;
+    if (!(await ensureEnoughPoints(agent, me))) return false;
+    return true;
   };
 
   const send = (override?: string) => {
@@ -302,11 +335,10 @@ export default function ChatPage() {
       return;
     }
     const userMessage = { id: runtimeId('msg'), role: 'user' as const, text, images: readyImages, createdAt: new Date().toISOString() };
-    // 门禁顺序与**服务端**保持一致（server/miniapp-runtime.mjs：先补手机号，再看套餐权益）。
-    // 两道都只是把弹窗提前到「点下去那一刻」，服务端各有一道 403 兜底。
+    // 门禁跑在 runTurn **之前**：runTurn 一进去就 setInput('') 把输入清掉，
+    // 拦不住就等于是「用户点了发送、输入框空了、什么都没发生」。
     void (async () => {
-      if (!(await ensurePhoneBound())) return;
-      if (!(await ensureVipAccess(agent))) return;
+      if (!(await passGates())) return;
       await runTurn(userMessage, messages);
     })();
   };
@@ -321,7 +353,12 @@ export default function ChatPage() {
     }
     if (userIdx < 0) return;
     const userMessage = { ...messages[userIdx], id: runtimeId('msg'), createdAt: new Date().toISOString() };
-    void runTurn(userMessage, messages.slice(0, userIdx));
+    // 「重新生成」同样要过门禁：它是充值回来后最自然的重试入口，不检查就会拿着 0 算力
+    // 再打一次请求、再看到同一条失败。顺带补上原先漏掉的手机号 / 套餐两道。
+    void (async () => {
+      if (!(await passGates())) return;
+      await runTurn(userMessage, messages.slice(0, userIdx));
+    })();
   };
 
   /**

@@ -38,18 +38,29 @@ export async function promptUpgrade(name?: string): Promise<boolean> {
 /**
  * 使用某个智能体/工作流前的门禁：命中 VIP 专享且当前无资格时弹窗引导升级。
  *
+ * @param item          智能体 / 工作流
+ * @param cachedProfile 调用方已经取到的档案；传了就不再自己请求一次
+ *                      （调用页通常要连过手机号 / VIP / 算力三道门禁，档案只该取一次）
  * @returns true = 放行（可以继续发送/提交）；false = 已拦截（弹窗已展示或已跳转升级）
  */
-export async function ensureVipAccess(item?: Pick<ContentItem, 'vip' | 'name'> | null): Promise<boolean> {
+export async function ensureVipAccess(
+  item?: Pick<ContentItem, 'vip' | 'name'> | null,
+  cachedProfile?: UserProfile | null,
+): Promise<boolean> {
   if (!item || item.vip !== true) return true;
-  let profile: UserProfile | null = null;
-  try {
-    profile = await getMe();
-  } catch {
-    // 拿不到档案（未登录 / 网络异常）时不在这里拦：交给服务端闸门给出准确结果，
-    // 否则会在登录态异常时把用户挡在一个说不出原因的弹窗上。
-    return true;
+  let profile: UserProfile | null = cachedProfile || null;
+  if (!profile) {
+    try {
+      profile = await getMe();
+    } catch {
+      // 拿不到档案（未登录 / 网络异常）时不在这里拦：交给服务端闸门给出准确结果，
+      // 否则会在登录态异常时把用户挡在一个说不出原因的弹窗上。
+      return true;
+    }
   }
+  // getMe() 声明为非空，但运行时 `.data` 也可能是 null（例如会话刚失效那一刻）。
+  // 语义上仍是「拿不到档案」→ 放行，而不是让 null.vipAccess 抛出去把整个门禁链打断。
+  if (!profile) return true;
   if (profile.vipAccess !== false) return true;
   await promptUpgrade(item.name);
   return false;
