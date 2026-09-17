@@ -290,7 +290,7 @@ export default function ChatPage() {
       // 算力不足单独走弹窗：它是一类**用户可自助解决**的状态（充值即可继续），
       // 不该和「上游报错」共用一条红色横幅 + 一句「调用失败：…」的死文字。
       // 弹窗已经承担引导，所以这里既不留横幅、也不把服务端原文照抄进气泡。
-      if (await handlePointsInsufficient(reason, { name: agent.name })) {
+      if (await handlePointsInsufficient(reason)) {
         setError('');
         setMessages((current) => current.map((item) => item.id === assistantId
           ? { ...item, text: item.text || pointsInsufficientHint('chat') }
@@ -321,7 +321,7 @@ export default function ChatPage() {
     if (!me) return true;
     if (!(await ensurePhoneBound(me))) return false;
     if (!(await ensureVipAccess(agent, me))) return false;
-    if (!(await ensureEnoughPoints(agent, me))) return false;
+    if (!(await ensureEnoughPoints(me))) return false;
     return true;
   };
 

@@ -141,18 +141,25 @@ const createHarness = ({ profile, modalConfirm = true, source = gateSource, file
   const { mod } = createHarness({});
   const text = mod.pointsInsufficientContent;
 
-  const zero = text('文案小助手', 0);
-  assert.ok(zero.includes('「文案小助手」'), '必须点出是哪一个智能体/工作流，否则用户不知道刚点的是什么');
-  assert.ok(zero.includes('0'), '已知余额为 0 就该念出来 —— 比「余额不足」更能让用户确认自己不是被误拦');
-  assert.ok(zero.includes('充值'), '正文必须把出路说出来');
+  // 主人 2026-09-17 定的文案，逐字钉住：改文案必须同步改这里（否则就是悄悄改了口径）
+  const zero = text(0);
+  assert.equal(zero, '当前算力余额 0 点，充值后可继续使用。');
+  assert.ok(!zero.includes('「'), '正文不再点实体名称 —— 别把名称前缀又加回来');
 
-  const unknown = text('文案小助手');
+  const unknown = text(undefined);
+  assert.equal(unknown, '当前算力余额不足，充值后可继续使用。');
   assert.ok(!/\d/.test(unknown), `不知道余额时不得编一个数字出来（当前：${unknown}）`);
-  assert.ok(unknown.includes('余额不足'));
 
-  assert.ok(mod.pointsInsufficientContent(undefined, 0).includes('该内容'),
-    '没给名字时要有兜底主语，不能出现空引号');
-  assert.ok(mod.pointsInsufficientContent('  ', 0).includes('该内容'), '只有空白也算没给名字');
+  // ⚠️ 脏输入必须走「不念数字」那一支：`Number(null)` / `Number('')` 都是 **0**，
+  // 只用 Number.isFinite(Number(x)) 会把「未知」静默念成「余额 0 点」。
+  for (const bad of [null, '', 'abc', '0', NaN, undefined, { points: 0 }]) {
+    const out = text(bad);
+    assert.ok(!/\d/.test(out), `非数字输入（${JSON.stringify(bad) ?? String(bad)}）不得被念成余额：${out}`);
+    assert.ok(out.includes('余额不足'), '脏输入要退到「不念数字」那一支');
+  }
+
+  // 负数余额（越界充值后的脏数据）照实念 —— 不编数字，但也别瞒着用户
+  assert.ok(text(-5).includes('-5'), `负数余额应照实念出：${text(-5)}`);
 
   // 两句「替代服务端原文」的说明：都不许再出现「请先充值」这种光说不做的口吻
   const chat = mod.pointsInsufficientHint('chat');
@@ -167,8 +174,8 @@ const createHarness = ({ profile, modalConfirm = true, source = gateSource, file
   const { mod, calls, state } = createHarness({});
   state.modalQueue = [];
   // 前两次并发调用应当收敛成**一个**弹窗
-  const p1 = mod.promptRecharge({ name: '文案小助手', points: 0 });
-  const p2 = mod.promptRecharge({ name: '文案小助手', points: 0 });
+  const p1 = mod.promptRecharge(0);
+  const p2 = mod.promptRecharge(0);
   assert.equal(calls.showModal.length, 1,
     '并发调用只允许弹一个窗 —— 发送按钮在预检期间不置 sending，连点两下会叠出两个弹窗甚至两次跳转');
   state.modalQueue.forEach((resolve) => resolve());
@@ -180,12 +187,14 @@ const createHarness = ({ profile, modalConfirm = true, source = gateSource, file
   assert.equal(calls.navigateTo.length, 1, '两次并发也只该跳一次充值页');
 
   // 弹窗完成后再调 → 必须能正常弹第二次（模块级 promise 要清干净，不能一次之后永久静音）
-  const r3 = await mod.promptRecharge({ nope: 1 });
+  const r3 = await mod.promptRecharge();
   assert.equal(calls.showModal.length, 2, 'inFlightPrompt 必须在结束时清空，否则用户第二次永远看不到弹窗');
   assert.equal(r3, true);
 
   const withGap = calls.showModal[0];
   assert.equal(withGap.title, '算力不足');
+  assert.equal(withGap.content, '当前算力余额 0 点，充值后可继续使用。',
+    '弹窗正文必须与主人 2026-09-17 定的措辞逐字一致');
   assert.equal(withGap.confirmText, '去充值', '主按钮必须直说去处');
   assert.equal(withGap.cancelText, '再想想', '次按钮不能写成「取消」那种官腔');
   assert.equal(withGap.confirmColor, '#305CE0', '主色要与其他门禁弹窗一致（vip-gate 同色）');
@@ -193,13 +202,13 @@ const createHarness = ({ profile, modalConfirm = true, source = gateSource, file
 
   // 用户点了「再想想」→ 不跳转、且不留任何副作用
   const decline = createHarness({ modalConfirm: false });
-  assert.equal(await decline.mod.promptRecharge({ name: 'x', points: 0 }), false);
+  assert.equal(await decline.mod.promptRecharge(0), false);
   assert.equal(decline.calls.navigateTo.length, 0, '用户拒绝后不得跳转');
 
   // ⑤ 页面栈满 → navigateTo 失败，必须退化 redirectTo，而不是让「去充值」点了没反应
   const fallback = createHarness({});
   fallback.state.navigateThrows = true;
-  assert.equal(await fallback.mod.promptRecharge({ name: 'x', points: 0 }), true);
+  assert.equal(await fallback.mod.promptRecharge(0), true);
   assert.equal(fallback.calls.navigateTo.length, 1);
   assert.equal(fallback.calls.redirectTo.length, 1, 'navigateTo 失败必须退一步 redirectTo（小程序页面栈上限 10 层）');
   assert.equal(fallback.calls.redirectTo[0].url, '/pages/recharge/index');
@@ -208,66 +217,74 @@ const createHarness = ({ profile, modalConfirm = true, source = gateSource, file
   const dead = createHarness({});
   dead.state.navigateThrows = true;
   dead.state.redirectThrows = true;
-  assert.equal(await dead.mod.promptRecharge({}), true, '跳转彻底失败也不该把异常抛回调用页（那会在对话页炸出错误态）');
+  assert.equal(await dead.mod.promptRecharge(), true, '跳转彻底失败也不该把异常抛回调用页（那会在对话页炸出错误态）');
 }
 
 // ── ②③ ensureEnoughPoints：只在明确 <= 0 时拦，其余一律放行 ───────────────────
 {
   // 有余额 → 放行，且不弹窗
   const rich = createHarness({ profile: { points: 120 } });
-  assert.equal(await rich.mod.ensureEnoughPoints({ name: '文案小助手' }, { points: 120 }), true);
+  assert.equal(await rich.mod.ensureEnoughPoints({ points: 120 }), true);
   assert.equal(rich.calls.showModal.length, 0, '有算力时不该弹任何窗');
 
   // 余额为 0（新用户常态）→ 拦下 + 弹窗
   const broke = createHarness({ profile: { points: 0 } });
-  assert.equal(await broke.mod.ensureEnoughPoints({ name: '文案小助手' }, { points: 0 }), false);
+  assert.equal(await broke.mod.ensureEnoughPoints({ points: 0 }), false);
   assert.equal(broke.calls.showModal.length, 1);
-  assert.ok(broke.calls.showModal[0].content.includes('0'));
+  assert.equal(broke.calls.showModal[0].content, '当前算力余额 0 点，充值后可继续使用。');
   assert.equal(broke.calls.getMe, 0, '调用方已经取过档案时不得再请求一次（三道门禁只该取一次）');
 
   // 负数余额（越界充值后的脏数据）也要拦
   const negative = createHarness({ profile: { points: -5 } });
-  assert.equal(await negative.mod.ensureEnoughPoints({ name: 'x' }, { points: -5 }), false);
+  assert.equal(await negative.mod.ensureEnoughPoints({ points: -5 }), false);
+  assert.ok(negative.calls.showModal[0].content.includes('-5'), '负数余额照实念，别抹平成 0');
 
   // 没有传档案 → 自己取一次
   const noCache = createHarness({ profile: { points: 0 } });
-  assert.equal(await noCache.mod.ensureEnoughPoints({ name: 'x' }), false);
+  assert.equal(await noCache.mod.ensureEnoughPoints(), false);
   assert.equal(noCache.calls.getMe, 1, '没传档案时应自己取一次');
 
   // ② 失败即放行：取档案抛错 / points 缺失（老服务端）/ 整体没档案
   const offline = createHarness({ profile: { points: 0 } });
   offline.state.profileThrows = true;
-  assert.equal(await offline.mod.ensureEnoughPoints({ name: 'x' }), true,
+  assert.equal(await offline.mod.ensureEnoughPoints(), true,
     '取档案失败必须放行 —— 一次网络抖动不该把还能用的用户挡在门外');
 
   const legacy = createHarness({ profile: { points: undefined } });
-  assert.equal(await legacy.mod.ensureEnoughPoints({ name: 'x' }, { points: undefined }), true,
+  assert.equal(await legacy.mod.ensureEnoughPoints({ points: undefined }), true,
     '老服务端不下发 points 时必须放行（版本差不能误拦）');
   assert.equal(legacy.calls.showModal.length, 0);
 
   const noProfile = createHarness({ profile: null });
-  assert.equal(await noProfile.mod.ensureEnoughPoints({ name: 'x' }), true, '拿不到档案（未登录）同样放行');
+  assert.equal(await noProfile.mod.ensureEnoughPoints(), true, '拿不到档案（未登录）同样放行');
 
   // ③ 有余但可能不够本次消耗 —— 客户端不猜，由服务端那条路接住
   const thin = createHarness({ profile: { points: 1 } });
-  assert.equal(await thin.mod.ensureEnoughPoints({ name: 'x' }, { points: 1 }), true,
+  assert.equal(await thin.mod.ensureEnoughPoints({ points: 1 }), true,
     '「不够本次消耗」只有服务端算得出（工作流成本随配置变化），客户端不得凭余额猜');
 }
 
 // ── handlePointsInsufficient：只对算力不足起作用，返回值必须准确 ──────────────
 {
   const hit = createHarness({});
-  assert.equal(await hit.mod.handlePointsInsufficient({ statusCode: 402, message: '算力不足，请先充值' }, { name: 'x' }), true);
+  assert.equal(await hit.mod.handlePointsInsufficient({ statusCode: 402, message: '算力不足，请先充值' }), true);
   assert.equal(hit.calls.showModal.length, 1);
+  assert.equal(hit.calls.showModal[0].content, '当前算力余额不足，充值后可继续使用。',
+    '402 这条路径手上没有余额 → 走「不念数字」的那句');
+
+  // 手上确实知道余额时也支持传进来（页面在别处已经取过档案的场景）
+  const withBalance = createHarness({});
+  assert.equal(await withBalance.mod.handlePointsInsufficient({ statusCode: 402 }, 0), true);
+  assert.equal(withBalance.calls.showModal[0].content, '当前算力余额 0 点，充值后可继续使用。');
 
   const miss = createHarness({});
-  assert.equal(await miss.mod.handlePointsInsufficient(new Error('上游超时'), { name: 'x' }), false,
+  assert.equal(await miss.mod.handlePointsInsufficient(new Error('上游超时')), false,
     '非算力错误必须返回 false —— 调用方要靠它决定「照旧走红色横幅」');
   assert.equal(miss.calls.showModal.length, 0, '非算力错误绝不能弹充值窗（那是误导）');
 
   // 工作流那条：task.error 是纯字符串
   const taskFail = createHarness({});
-  assert.equal(await taskFail.mod.handlePointsInsufficient('算力不足，本次运行未执行', { name: 'x' }), true);
+  assert.equal(await taskFail.mod.handlePointsInsufficient('算力不足，本次运行未执行'), true);
 }
 
 // ── 空档案不得把整条门禁链打断 ───────────────────────────────────────────────
@@ -279,7 +296,7 @@ const createHarness = ({ profile, modalConfirm = true, source = gateSource, file
   const vipHarness = (profile) => createHarness({ profile, source: vipGateSource, fileName: 'vip-gate.ts' });
 
   const nullProfile = createHarness({ profile: null });
-  assert.equal(await nullProfile.mod.ensureEnoughPoints({ name: 'x' }), true,
+  assert.equal(await nullProfile.mod.ensureEnoughPoints(), true,
     'getMe() 返回 null 必须放行 —— 绝不能走成 null.points');
 
   const vipNull = vipHarness(null);
@@ -318,6 +335,26 @@ assert.match(serverIndex, /statusCode = 402|statusCode: 402|\b402\b/,
 assert.ok(runtimeSource.includes('proxyRequest(deps.port, \'/api/coze/chat\''),
   'miniapp-runtime 必须原样透传上游状态码，否则 402 到不了客户端，预检之外的兜底就断了');
 
+// 正文文案逐字钉住（主人 2026-09-17 定稿的措辞）：改文案必须同步改这里，否则就是悄悄改了口径
+assert.match(gateSource, /return `当前算力余额 \$\{balance\} 点，充值后可继续使用。`;/,
+  '知道余额时的正文模板');
+assert.match(gateSource, /return '当前算力余额不足，充值后可继续使用。';/,
+  '余额未知时的正文（不编数字）');
+assert.match(gateSource, /typeof points === 'number' && Number\.isFinite\(points\)/,
+  '余额必须先用 typeof 卡一道：Number(null) / Number(\'\') 都是 0，只写 Number.isFinite(Number(x)) 会把「未知」念成「余额 0 点」');
+
+// 公开形状：正文不再点实体名称 → 这三个函数都不该再收 name / item（死参数会误导后人）
+assert.match(gateSource, /export async function promptRecharge\(points\?: number\): Promise<boolean> \{/);
+assert.match(gateSource, /export async function ensureEnoughPoints\(profile\?: UserProfile \| null\): Promise<boolean> \{/,
+  'ensureEnoughPoints 只收档案（与 ensurePhoneBound 对齐）—— 正文不用实体名了，别留没人读的 item 入参');
+assert.match(gateSource, /export async function handlePointsInsufficient\(reason: unknown, points\?: number\): Promise<boolean> \{/);
+for (const [label, source] of [['对话', chatSource], ['工作流', workflowSource]]) {
+  assert.match(source, /await ensureEnoughPoints\(me\)/,
+    `${label}页：ensureEnoughPoints 现在只收档案`);
+  assert.doesNotMatch(source, /ensureEnoughPoints\((?:agent|workflow),/,
+    `${label}页：正文不再点实体名，不要再往 ensureEnoughPoints 传实体名`);
+}
+
 // 跳转目标：与 vip-gate 的升级落地页必须是同一个（都指充值页）
 assert.match(gateSource, /const RECHARGE_PAGE = '\/pages\/recharge\/index';/);
 assert.match(vipGateSource, /const RECHARGE_PAGE = '\/pages\/recharge\/index';/,
@@ -330,7 +367,7 @@ assert.ok(appConfig.includes('pages/recharge/index'),
 const chatGateAt = chatSource.indexOf('const passGates = async () => {');
 assert.ok(chatGateAt > 0, '对话页必须有统一的 passGates（避免三道门禁被复制到 send / regenerate 两处各写一遍）');
 const chatGateBody = chatSource.slice(chatGateAt, chatSource.indexOf('\n  };', chatGateAt));
-const orderChat = ['ensurePhoneBound(me)', 'ensureVipAccess(agent, me)', 'ensureEnoughPoints(agent, me)']
+const orderChat = ['ensurePhoneBound(me)', 'ensureVipAccess(agent, me)', 'ensureEnoughPoints(me)']
   .map((needle) => chatGateBody.indexOf(needle));
 assert.ok(orderChat.every((at) => at > 0), `对话页三道门禁必须都在 passGates 里（${orderChat.join(',')}）`);
 assert.ok(orderChat[0] < orderChat[1] && orderChat[1] < orderChat[2],
@@ -347,7 +384,7 @@ assert.match(chatSource, /if \(!\(await passGates\(\)\)\) return;\r?\n\s+await r
 assert.match(chatSource, /if \(!\(await passGates\(\)\)\) return;\r?\n\s+await runTurn\(userMessage, messages\.slice/,
   '「重新生成」是充值回来后最自然的重试入口，同样必须先过门禁');
 
-const chatCatchAt = chatSource.indexOf('if (await handlePointsInsufficient(reason, { name: agent.name })) {');
+const chatCatchAt = chatSource.indexOf('if (await handlePointsInsufficient(reason)) {');
 assert.ok(chatCatchAt > 0, '对话页 catch 必须单独接住算力不足');
 const chatCatchBody = chatSource.slice(chatCatchAt, chatSource.indexOf('const message = reason instanceof Error', chatCatchAt));
 assert.match(chatCatchBody, /setError\(''\)/,
@@ -361,14 +398,14 @@ assert.ok(!chatCatchBody.includes('`调用失败：'),
 const wfGateAt = workflowSource.indexOf('const me = await getMe().catch(() => null);');
 assert.ok(wfGateAt > 0, '工作流页提交前必须取一次档案');
 const wfGateBody = workflowSource.slice(wfGateAt, workflowSource.indexOf('if (fields.some(', wfGateAt));
-const orderWf = ['ensurePhoneBound(me)', 'ensureVipAccess(workflow, me)', 'ensureEnoughPoints(workflow, me)']
+const orderWf = ['ensurePhoneBound(me)', 'ensureVipAccess(workflow, me)', 'ensureEnoughPoints(me)']
   .map((needle) => wfGateBody.indexOf(needle));
 assert.ok(orderWf.every((at) => at > 0), `工作流页三道门禁必须都在（${orderWf.join(',')}）`);
 assert.ok(orderWf[0] < orderWf[1] && orderWf[1] < orderWf[2],
   '工作流页顺序必须是 手机号 → 套餐 → 算力（与服务端同序）');
 // 门禁要排在表单校验之前（同一处 submit 里比较，避免 indexOf 撞到别处的同名调用）
 {
-  const gateAt = workflowSource.indexOf('ensureEnoughPoints(workflow, me)', wfGateAt);
+  const gateAt = workflowSource.indexOf('ensureEnoughPoints(me)', wfGateAt);
   const formAt = workflowSource.indexOf('if (fields.some(', wfGateAt);
   assert.ok(gateAt > 0 && formAt > 0 && gateAt < formAt,
     '门禁必须排在表单校验之前 —— 反正要先去处理完才能提交，不该让用户先把参数填一遍');

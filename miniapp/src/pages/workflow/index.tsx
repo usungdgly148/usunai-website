@@ -254,7 +254,7 @@ function WorkflowPage() {
     if (!id || pointsPromptedRef.current.has(id)) return;
     // 先登记再 await：并发进来时也不会叠出两个弹窗。
     pointsPromptedRef.current.add(id);
-    void handlePointsInsufficient(current.error, { name: workflow?.name });
+    void handlePointsInsufficient(current.error);
   };
 
   const refreshTask = async (taskId: string, workflowId: string) => {
@@ -427,7 +427,7 @@ function WorkflowPage() {
     if (me) {
       if (!(await ensurePhoneBound(me))) return;
       if (!(await ensureVipAccess(workflow, me))) return;
-      if (!(await ensureEnoughPoints(workflow, me))) return;
+      if (!(await ensureEnoughPoints(me))) return;
     }
     if (fields.some((field, index) => isFieldUploading(field, index))) { toast('附件上传中，请稍候…', 'warning'); return; }
     const missing = fields.find((field, index) => field.required && !fieldHasValue(field, index));
