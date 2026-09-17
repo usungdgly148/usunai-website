@@ -22,7 +22,7 @@ const API_HOST = 'https://api.weixin.qq.com';
  *     —— 都属于「这次令牌不好使」，调用方应引导用户**重新点一次按钮**（HTTP 400）。
  *   · `WECHAT_PHONE_UNAVAILABLE` —— 能力未开通 / 凭证缺失 / 微信侧抖动，调用方应**退化到短信**（HTTP 503）。
  */
-export async function exchangeWechatPhoneCode(code, { fetchImpl = fetch } = {}) {
+export async function exchangeWechatPhoneCode(code, { fetchImpl = fetch, getToken = getAccessToken } = {}) {
   const dynamicCode = String(code || '').trim();
   if (!dynamicCode) {
     const error = new Error('缺少微信手机号动态令牌');
@@ -31,7 +31,7 @@ export async function exchangeWechatPhoneCode(code, { fetchImpl = fetch } = {}) 
   }
 
   const request = async (forceRefresh) => {
-    const accessToken = await getAccessToken(forceRefresh);
+    const accessToken = await getToken(forceRefresh);
     const response = await fetchImpl(
       `${API_HOST}/wxa/business/getuserphonenumber?access_token=${encodeURIComponent(accessToken)}`,
       {
@@ -55,16 +55,26 @@ export async function exchangeWechatPhoneCode(code, { fetchImpl = fetch } = {}) 
     ({ response, data } = await request(true));
   }
 
-  if (!response.ok && !data) {
-    const error = new Error(`微信手机号接口不可用（HTTP ${response.status}）`);
+  // 不解析出 JSON 一律视为「这次没拿到可信答复」：网关宕机时会回 HTML、连接被掐会回空串。
+  // ⚠️ 这里**不能**用 `!response.ok && !data` —— 那样 HTTP 200 配一段 HTML 会一路走到下面，
+  // 被当成「微信返回了空号码」而报成 WECHAT_PHONE_INVALID_NUMBER（400），
+  // 于是用户被引导去反复点按钮，而不是退回短信；还会白白消耗一次计费调用。
+  if (!data) {
+    const error = new Error(`微信手机号接口返回异常（HTTP ${response.status}）`);
     error.code = 'WECHAT_PHONE_UNAVAILABLE';
     throw error;
   }
   const finalCode = Number(data?.errcode) || 0;
   if (finalCode !== 0) {
-    // -1 是微信侧系统繁忙，属「暂时不可用」，让客户端退化到短信而不是让用户反复点。
+    // 这几种都是「暂时用不了」而不是「你这次令牌不好使」，必须让客户端退化到短信：
+    //   -1    微信侧系统繁忙
+    //   48001 接口未授权 —— 也就是「手机号快速验证组件还没在 MP 后台申请开通」。
+    //         这正是能力刚上线时的常态，若归到 400，用户看到的会是微信那句英文 errmsg
+    //         （api unauthorized hint…），既看不懂也不知道下一步该干什么。
+    //   45011 调用太频繁（触发频率限制）
+    const unavailable = finalCode === -1 || finalCode === 48001 || finalCode === 45011;
     const error = new Error(data?.errmsg || `换取手机号失败（errcode ${finalCode}）`);
-    error.code = finalCode === -1 ? 'WECHAT_PHONE_UNAVAILABLE' : 'WECHAT_PHONE_CODE_INVALID';
+    error.code = unavailable ? 'WECHAT_PHONE_UNAVAILABLE' : 'WECHAT_PHONE_CODE_INVALID';
     error.detail = { errcode: finalCode };
     throw error;
   }
