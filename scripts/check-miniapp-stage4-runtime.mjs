@@ -131,8 +131,12 @@ assert.match(vipGate, /confirmText: '去升级'/, '弹窗必须给「去升级�
 assert.match(vipGate, /Taro\.navigateTo\(\{ url: RECHARGE_PAGE \}\)/, '确认后必须跳充值页');
 assert.match(vipGate, /item\.vip !== true/, '非 VIP 专享内容必须直接放行，不要多发一次请求');
 
-assert.match(chat, /if \(!\(await ensureVipAccess\(agent\)\)\) return;/, 'chat 发送前必须过 VIP 门禁');
-assert.match(workflow, /if \(!\(await ensureVipAccess\(workflow\)\)\) return;/, 'workflow 提交前必须过 VIP 门禁');
+// ⚠️ 签名带上了档案（`ensureVipAccess(item, me)`）：调用页要连过 手机号→套餐→算力 三道预检，
+// 档案只该取一次，逐道各取一次会白跑两个来回。完整的三道顺序断言在 check-miniapp-points-gate.mjs。
+// ⚠️ 两处的收尾关键字不同：chat 的 passGates 返回布尔值（`return false;`），
+// workflow 的 submit 是 async void（`return;`）—— 别把两条正则写成同一个。
+assert.match(chat, /if \(!\(await ensureVipAccess\(agent, me\)\)\) return false;/, 'chat 发送前必须过 VIP 门禁');
+assert.match(workflow, /if \(!\(await ensureVipAccess\(workflow, me\)\)\) return;/, 'workflow 提交前必须过 VIP 门禁');
 
 // 试用限购：卡片「已购买」态 + 重复购买的弹窗（不是 toast）
 assert.match(recharge, /const trialUsed = data\?\.profile\?\.trialPurchased === true;/, '充值页必须读服务端 trialPurchased');
