@@ -387,6 +387,19 @@ export async function uploadRuntimeFile(payload: {
   )).data;
 }
 
+/**
+ * 上传对话的文档附件（word / excel / ppt / pdf / txt）。
+ *
+ * 与 uploadRuntimeFile 的分工：那条把图片送去 Coze 换 file_id、或在 DeepSeek 平台原地回 data URL；
+ * 这条走的是**服务端解析路线** —— 字节落到本站 Blob，对话时由服务端抽成纯文本注入 prompt。
+ * 所以它不依赖目标智能体的平台类型与授权配置，全部智能体都能用。
+ */
+export async function uploadDocFile(payload: { name: string; dataUrl: string; mimeType?: string }) {
+  return (await apiRequest<{ ok: boolean; key: string; url: string; name: string; ext: string; size: number }>(
+    '/api/doc/upload', { method: 'POST', data: payload },
+  )).data;
+}
+
 export async function saveRuntimeHistory(record: Record<string, unknown>) {
   return (await apiRequest<{ id: string }>('/api/miniapp/v1/history', { method: 'POST', data: { record } })).data;
 }

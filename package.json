@@ -34,6 +34,7 @@
     "check:miniapp-stage7": "node scripts/check-miniapp-stage7.mjs",
     "check:miniapp-share": "node scripts/check-miniapp-share.mjs",
     "check:wechat-web-merge": "node scripts/check-wechat-web-merge.mjs",
+    "check:chat-doc-inject": "node scripts/check-chat-doc-inject.mjs",
     "build:miniapp": "npm run build:weapp --prefix miniapp",
     "build:miniapp:development": "node scripts/build-miniapp-release.mjs development",
     "build:miniapp:experience": "node scripts/build-miniapp-release.mjs experience",
@@ -41,6 +42,6 @@
     "candidate:build": "node scripts/build-candidate.mjs",
     "candidate:verify": "node scripts/verify-candidate.mjs",
     "deploy:web": "node scripts/deploy-web.mjs",
-    "verify": "npm run check:secrets && npm run check:baseline && npm run check:stage-a && npm run check:stage-b && npm run check:stage-c && npm run check:stage-d && npm run check:stage-e && npm run check:stage-g && npm run check:session-isolation && npm run check:billing-settlement && npm run check:plan-validity && npm run check:plan-access && npm run check:recharge-reconcile && npm run check:coze-workflow-files && npm run check:asset-category-routing && npm run check:miniapp-stage1 && npm run check:miniapp-stage2 && npm run check:miniapp-stale-session && npm run check:miniapp-bind-phone && npm run check:miniapp-wechat-phone && npm run check:miniapp-phone-gate && npm run check:miniapp-points-gate && npm run check:miniapp-stage3 && npm run check:miniapp-stage4 && npm run check:miniapp-stage5 && npm run check:miniapp-stage7 && npm run check:miniapp-share && npm run check:wechat-web-merge"
+    "verify": "npm run check:secrets && npm run check:baseline && npm run check:stage-a && npm run check:stage-b && npm run check:stage-c && npm run check:stage-d && npm run check:stage-e && npm run check:stage-g && npm run check:session-isolation && npm run check:billing-settlement && npm run check:plan-validity && npm run check:plan-access && npm run check:recharge-reconcile && npm run check:coze-workflow-files && npm run check:asset-category-routing && npm run check:miniapp-stage1 && npm run check:miniapp-stage2 && npm run check:miniapp-stale-session && npm run check:miniapp-bind-phone && npm run check:miniapp-wechat-phone && npm run check:miniapp-phone-gate && npm run check:miniapp-points-gate && npm run check:miniapp-stage3 && npm run check:miniapp-stage4 && npm run check:miniapp-stage5 && npm run check:miniapp-stage7 && npm run check:miniapp-share && npm run check:wechat-web-merge && npm run check:chat-doc-inject"
   }
 }

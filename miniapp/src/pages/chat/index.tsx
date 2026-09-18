@@ -4,7 +4,7 @@ import { Button, Image, ScrollView, Text, View } from '@tarojs/components';
 import { PageState } from '../../components/page-state';
 import { EntityInfoCard, SideDrawer, timeAgo } from '../../components/inner-ui';
 import { TdIcon } from '../../components/td-icon';
-import { fetchAllRecords, getHistoryDetail, getMe, getPublicContent, saveRuntimeAsset, saveRuntimeHistory, streamAgentChat, uploadRuntimeFile } from '../../services/api';
+import { fetchAllRecords, getHistoryDetail, getMe, getPublicContent, saveRuntimeAsset, saveRuntimeHistory, streamAgentChat, uploadDocFile, uploadRuntimeFile } from '../../services/api';
 import { collectMediaUrls, fileToDataUrl, runtimeId } from '../../services/runtime';
 import { confirmDialog, hideFeedbackToast, loadingToast, toast } from '../../utils/feedback';
 import { resolveEntityAvatar, resolveUserAvatar, toMiniappUrl } from '../../utils/entity-visual';
@@ -16,7 +16,9 @@ import type { ContentItem } from '../../types';
 import { useThemePage } from '../../hooks/use-theme-page';
 import { shareTargets } from '../../utils/share';
 
-type ChatMessage = { id: string; role: 'user' | 'assistant'; text: string; reasoning?: string; images?: string[]; createdAt?: string };
+/** 用户消息里的文档附件引用（服务端按 url 读回字节抽文本，前端只负责把字节传上去） */
+type ChatDocRef = { name: string; url: string };
+type ChatMessage = { id: string; role: 'user' | 'assistant'; text: string; reasoning?: string; images?: string[]; docs?: ChatDocRef[]; createdAt?: string };
 type HistoryRecord = Record<string, unknown> & { id?: string; title?: string; createdAt?: string; agentId?: string; messages?: Array<Record<string, unknown>> };
 /** t-chat-sender / attachments 的文件结构（原样透传给官方组件，附带 uid 便于回删时定位） */
 type AttachmentFile = { uid?: string; url?: string; name?: string; size?: number; fileType?: string };
@@ -45,6 +47,14 @@ type UploadDraft = {
 const ASSET_TYPE_NAMES: Record<string, string> = { copy: '文案', image: '图片', video: '视频', audio: '音频', article: '文章' };
 const sessionKey = (agentId?: string) => `usunai_miniapp_chat_session_${agentId || 'unknown'}`;
 const MAX_IMAGES = 4;
+/** 每次对话最多带 3 个文档（与服务端 MAX_DOC_ATTACHMENTS 对齐；解析是同步 CPU 活，多了会拖慢首 token） */
+const MAX_DOCS = 3;
+/**
+ * 可从微信聊天里选的文档扩展名。
+ * ⚠️ 必须与服务端 doc-extract.mjs 的 SUPPORTED_DOC_EXTS 逐字一致 —— 这里多放一个（例如旧版二进制 .doc），
+ * 用户选完就会被服务端挡回来，等于给用户挖坑。
+ */
+const DOC_EXTENSIONS = ['docx', 'xlsx', 'pptx', 'pdf', 'txt'];
 /**
  * 官方 t-chat-sender 的预设区：只保留官方发送按钮（右下角）。
  * 加号不用官方内置的 upload 预设——它只能单张取图，且弹层从卡片底部展开；
@@ -129,6 +139,10 @@ export default function ChatPage() {
   const [input, setInput] = useState('');
   /** 待发送图片草稿（含上传状态，驱动官方 t-attachments 的加载态） */
   const [drafts, setDrafts] = useState<UploadDraft[]>([]);
+  // 图片与文档共用这一个草稿列表（t-attachments 本来就支持文件项），
+  // 但配额、上传通道、提交字段都不同，所以按 fileType 拆成两批，各自判断各自的数量。
+  const imageDrafts = drafts.filter((item) => item.fileType !== 'file');
+  const docDrafts = drafts.filter((item) => item.fileType === 'file');
   const [uploading, setUploading] = useState(false);
   /** 输入框聚焦（编辑态）：蓝色描边 + 淡光晕的视觉反馈 */
   const [focused, setFocused] = useState(false);
@@ -177,19 +191,15 @@ export default function ChatPage() {
   useEffect(() => subscribeKeyboardOffset(setKeyboardHeight), []);
 
   /**
-   * 加号上传：官方内置弹层只能单张取图，这里自建「拍摄 / 从相册选择」并支持一次多选。
+   * 图片上传：取源（拍摄 / 从相册选择）由加号的 ActionSheet 统一决定，这里只负责取图与逐个上传。
+   * 之所以不再自己弹框 —— 点「从微信聊天选择文件」时若被图片选源先拦一道，用户会以为选错了入口。
    * 加载态：每张图先以 pending 草稿入列（官方 attachments 渲染转圈），逐张上传完成后切 success，
    * 失败切 error + errorMessage，用户能逐张看到进度/失败原因并单独删除重试。
    */
-  const chooseImage = async () => {
+  const chooseImage = async (sourceType: Array<'album' | 'camera'> = ['album', 'camera']) => {
     if (!agent || !agent.supportsImages || uploading) return;
-    const remaining = MAX_IMAGES - drafts.length;
+    const remaining = MAX_IMAGES - imageDrafts.length;
     if (remaining <= 0) { toast(`最多上传 ${MAX_IMAGES} 张图片`, 'warning'); return; }
-    let sourceType: Array<'album' | 'camera'> = ['album', 'camera'];
-    try {
-      const sheet = await Taro.showActionSheet({ itemList: ['拍摄', '从相册选择'] });
-      sourceType = sheet.tapIndex === 0 ? ['camera'] : ['album'];
-    } catch { return; }
     let tempFiles: Array<{ tempFilePath: string; size?: number }> = [];
     try {
       const selected = await Taro.chooseMedia({ count: remaining, mediaType: ['image'], sourceType });
@@ -242,6 +252,83 @@ export default function ChatPage() {
     } finally { setUploading(false); }
   };
 
+  /**
+   * 文档上传：从微信聊天会话里选文件（word / excel / ppt / pdf / txt），逐个传到本站 Blob。
+   *
+   * 走的是**服务端解析路线** —— 字节落到本站后，对话时由服务端抽成纯文本注入 prompt。
+   * 因此不依赖智能体的平台类型，Coze 与 DeepSeek 都能用（Coze 新版 stream_run 的 prompt 只认公网 URL、
+   * 拿不到 file_id；DeepSeek 对话 API 根本不支持文件）。
+   * ⚠️ 不能复用 uploadRuntimeFile：那条是给图片用的（Coze 换 file_id / DeepSeek 原地回 data URL），
+   * 回给对话的字段形态与这里完全不同。
+   */
+  const chooseDocument = async () => {
+    if (!agent || uploading) return;
+    const remaining = MAX_DOCS - docDrafts.length;
+    if (remaining <= 0) { toast(`最多上传 ${MAX_DOCS} 个文件`, 'warning'); return; }
+    let tempFiles: Array<{ path?: string; name?: string; size?: number }> = [];
+    try {
+      const selected = await Taro.chooseMessageFile({ count: remaining, type: 'file', extension: DOC_EXTENSIONS });
+      tempFiles = (selected.tempFiles || []) as unknown as typeof tempFiles;
+    } catch (reason) {
+      const errMsg = String((reason as { errMsg?: string } | undefined)?.errMsg || '');
+      if (!/cancel/i.test(errMsg)) toast('选择文件失败', 'error');
+      return;
+    }
+    const queued: UploadDraft[] = tempFiles
+      .filter((file) => file && file.path)
+      .map((file) => ({
+        uid: runtimeId('upload'),
+        url: String(file.path),
+        name: String(file.name || 'document'),
+        size: Number(file.size) || 0,
+        fileType: 'file',
+        status: 'pending',
+        progress: 0,
+      }));
+    if (!queued.length) return;
+    setDrafts((current) => [...current, ...queued]);
+    setUploading(true);
+    let failures = 0;
+    try {
+      for (const draft of queued) {
+        try {
+          const dataUrl = await fileToDataUrl(draft.url);
+          setDrafts((current) => current.map((item) => (item.uid === draft.uid ? { ...item, progress: 50 } : item)));
+          const uploaded = await uploadDocFile({ name: draft.name, dataUrl, mimeType: 'application/octet-stream' });
+          if (!uploaded?.url) throw new Error('上传失败，请重试');
+          setDrafts((current) => current.map((item) => (item.uid === draft.uid
+            ? { ...item, status: 'success', progress: 100, remote: uploaded.url }
+            : item)));
+        } catch (reason) {
+          failures += 1;
+          const message = reason instanceof Error ? reason.message : '文件上传失败';
+          setDrafts((current) => current.map((item) => (item.uid === draft.uid
+            ? { ...item, status: 'error', errorMessage: message }
+            : item)));
+        }
+      }
+      if (failures) toast(`${failures} 个文件上传失败，请删除后重试`, 'error');
+    } finally { setUploading(false); }
+  };
+
+  /**
+   * 加号的统一入口：先问「要文件还是要图片」，再分发。
+   * 图片项只在 supportsImages 时出现 —— Coze 平台没有可用的图片上传通道（服务端 uploads 只回 fileId，
+   * 而对话 attachments 的图片走的是 data URL / blob 地址），硬给一个入口只会让用户选完就失败。
+   */
+  const openAddSheet = async () => {
+    if (!agent || uploading) return;
+    const withImage = Boolean(agent.supportsImages);
+    const itemList = withImage ? ['从微信聊天选择文件', '拍摄', '从相册选择'] : ['从微信聊天选择文件'];
+    let tapIndex = 0;
+    try {
+      const sheet = await Taro.showActionSheet({ itemList });
+      tapIndex = Number(sheet.tapIndex) || 0;
+    } catch { return; }
+    if (!withImage || tapIndex === 0) { await chooseDocument(); return; }
+    await chooseImage(tapIndex === 1 ? ['camera'] : ['album']);
+  };
+
   /** 官方 t-attachments 的删除：只回传被删项，优先按 uid 定位，退回按 url 匹配 */
   const removeImage = (event: { detail?: { file?: AttachmentFile } }) => {
     const file = event?.detail?.file;
@@ -265,7 +352,11 @@ export default function ChatPage() {
         billingMessage: userMessage.text,
         history: baseMessages.map((item) => ({ role: item.role, content: item.text })),
         billingHistory: baseMessages.map((item) => ({ role: item.role, content: item.text })),
-        attachments: userMessage.images?.map((url) => ({ kind: 'image', url, name: 'image.jpg', type: 'image/jpeg' })) || [],
+        attachments: [
+          ...(userMessage.images || []).map((url) => ({ kind: 'image', url, name: 'image.jpg', type: 'image/jpeg' })),
+          // 文档走 kind='file'：服务端据此读回字节、抽成文本再注入 prompt，前端不解析也解析不了
+          ...(userMessage.docs || []).map((doc) => ({ kind: 'file', url: doc.url, name: doc.name })),
+        ],
       }, ({ event, data }) => {
         const packet = data as { type?: string; content?: { answer?: string; reasoning?: string; error?: string }; error?: string };
         if (event === 'error' || packet.type === 'error') throw new Error(packet.content?.error || packet.error || '智能体调用失败');
@@ -328,13 +419,15 @@ export default function ChatPage() {
   const send = (override?: string) => {
     const text = String(override ?? input).trim();
     if (!agent || sending) return;
-    if (uploading) { toast('图片上传中，请稍候…', 'warning'); return; }
-    const readyImages = drafts.filter((item) => item.status === 'success' && item.remote).map((item) => item.remote as string);
-    if (!text && !readyImages.length) {
-      if (drafts.some((item) => item.status === 'error')) toast('有图片上传失败，请删除后重试', 'warning');
+    if (uploading) { toast('附件上传中，请稍候…', 'warning'); return; }
+    const ready = drafts.filter((item) => item.status === 'success' && item.remote);
+    const readyImages = ready.filter((item) => item.fileType !== 'file').map((item) => item.remote as string);
+    const readyDocs = ready.filter((item) => item.fileType === 'file').map((item) => ({ name: item.name, url: item.remote as string }));
+    if (!text && !ready.length) {
+      if (drafts.some((item) => item.status === 'error')) toast('有附件上传失败，请删除后重试', 'warning');
       return;
     }
-    const userMessage = { id: runtimeId('msg'), role: 'user' as const, text, images: readyImages, createdAt: new Date().toISOString() };
+    const userMessage = { id: runtimeId('msg'), role: 'user' as const, text, images: readyImages, docs: readyDocs, createdAt: new Date().toISOString() };
     // 门禁跑在 runTurn **之前**：runTurn 一进去就 setInput('') 把输入清掉，
     // 拦不住就等于是「用户点了发送、输入框空了、什么都没发生」。
     void (async () => {
@@ -527,8 +620,10 @@ export default function ChatPage() {
    * 注意 agent.icon 是 lucide 图标名而不是图片地址，不能直接丢给 <Image>。
    */
   const agentAvatar = useMemo(() => resolveEntityAvatar(agent, 'agent'), [agent]);
-  /** 官方发送按钮在「有图无字」时是 disabled，这里补一个兜底入口（上传中不出现，避免和加载态打架） */
-  const imageOnlyReady = drafts.some((item) => item.status === 'success' && item.remote) && !input.trim() && !sending && !uploading;
+  /** 官方发送按钮在「有附件无字」时是 disabled，这里补一个兜底入口（上传中不出现，避免和加载态打架） */
+  const attachmentOnlyReady = drafts.some((item) => item.status === 'success' && item.remote) && !input.trim() && !sending && !uploading;
+  /** 兜底按钮的文案：这批草稿里有已就绪的文档就叫「发送文件」 */
+  const attachmentOnlyLabel = docDrafts.some((item) => item.status === 'success' && item.remote) ? '发送文件' : '发送图片';
   /** 有草稿正在上传：加号置忙，避免重复触发系统选择器 */
   const uploadingAny = uploading || drafts.some((item) => item.status === 'pending');
   /** 键盘弹起时页面收窄到键盘上方（内联样式里的 px 会被微信按逻辑像素处理，不需转 rpx） */
@@ -647,19 +742,21 @@ export default function ChatPage() {
           onBlur={() => setFocused(false)}
           onFileDelete={removeImage}
         />
-        {agent.supportsImages && <View
+        {/* 加号对所有智能体都显示：文件走服务端解析路线，不依赖平台能力；
+            图片项是否出现由 openAddSheet 按 supportsImages 决定 */}
+        <View
           className={`composer-plus${uploadingAny ? ' composer-plus-busy' : ''}`}
           hoverClass='composer-plus-hover'
-          aria-label='上传图片'
-          onClick={chooseImage}
+          aria-label='添加附件'
+          onClick={openAddSheet}
         >
           <TdIcon name='add' className='composer-plus-icon' />
-        </View>}
-        {imageOnlyReady && <View
+        </View>
+        {attachmentOnlyReady && <View
           className='composer-image-send'
           hoverClass='composer-plus-hover'
           onClick={() => send()}
-        >发送图片</View>}
+        >{attachmentOnlyLabel}</View>}
       </View>
       <Text className='composer-disclaimer'>内容由AI生成，仅供参考</Text>
 

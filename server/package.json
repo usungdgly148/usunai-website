@@ -5,11 +5,13 @@
   "private": true,
   "scripts": {
     "start": "node index.mjs",
-    "check": "node --check index.mjs && node --check billing.js && node --check kv-local.js && node --check rag.mjs && node --check miniapp-api.mjs && node --check miniapp-auth.mjs && node --check miniapp-runtime.mjs && node --check miniapp-layout.mjs"
+    "check": "node --check index.mjs && node --check billing.js && node --check kv-local.js && node --check rag.mjs && node --check miniapp-api.mjs && node --check miniapp-auth.mjs && node --check miniapp-runtime.mjs && node --check miniapp-layout.mjs && node --check doc-extract.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
+    "jszip": "3.10.2",
     "nodemailer": "^9.0.4",
+    "pdf-parse": "2.4.5",
     "sharp": "0.35.3"
   }
 }

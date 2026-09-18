@@ -308,7 +308,14 @@ function Composer({ input, setInput, onSubmit, streaming, attachments, setAttach
           <button type="button" onClick={() => fileRef.current?.click()} className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition shrink-0" title="添加附件或图片">
             <Plus size={20} />
           </button>
-          <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }} />
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            accept="image/*,.docx,.xlsx,.pptx,.pdf,.txt"
+            className="hidden"
+            onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }}
+          />
           <AutoResizeTextarea
             value={input}
             onChange={setInput}
@@ -470,15 +477,20 @@ export default function Chat() {
       }));
     const attImages = atts.filter(a => a.kind === 'image');
     const attFiles = atts.filter(a => a.kind === 'file');
-    if (agent.platform === 'deepseek-native') {
-      if (attFiles.length) {
-        window.alert('DeepSeek 原生智能体当前支持上传 JPEG、PNG、GIF、WebP 图片，暂不支持其他附件。');
-        return;
-      }
-      if (attImages.length > 4) {
-        window.alert('DeepSeek 原生智能体每次最多上传 4 张图片。');
-        return;
-      }
+    // DeepSeek 平台以前只吃图片，收到文件附件直接在此拦截；现在文档由服务端解析成文本注入 prompt，
+    // 所有平台一视同仁，所以放行 —— 但白名单要跟服务端 doc-extract.mjs 对齐，前端先挡一道给即时反馈。
+    const badDoc = attFiles.find(a => !/\.(docx|xlsx|pptx|pdf|txt)$/i.test(String(a.name || '')));
+    if (badDoc) {
+      window.alert(`暂不支持「${badDoc.name}」这种格式，请上传 docx / xlsx / pptx / pdf / txt 文件。`);
+      return;
+    }
+    if (attFiles.length > 3) {
+      window.alert('每次最多上传 3 个文档。');
+      return;
+    }
+    if (agent.platform === 'deepseek-native' && attImages.length > 4) {
+      window.alert('DeepSeek 原生智能体每次最多上传 4 张图片。');
+      return;
     }
     const system = agent.platform === 'deepseek-native'
       ? String(agent.instructions || '')
@@ -512,12 +524,14 @@ export default function Chat() {
       return;
     }
 
-    // 组装附件引用：图片以 markdown 内联、文件以链接形式追加到发给智能体的文本里
+    // 组装附件引用：图片仍以 markdown 内联（Coze 平台沿用既有行为）；
+    // 文件不再拼那条假链接 —— `/api/blob/serve?key=…` 模型根本访问不到，等于没传，
+    // 现在改由服务端读回字节、抽成文本注入 prompt。
     const displayImages = attImages.map(a => a.url);
     const displayFiles = attFiles.map(a => ({ name: a.name, url: a.url }));
     let messageText = text;
-    if (atts.length && agent.platform !== 'deepseek-native') {
-      const refs = atts.map(a => a.kind === 'image' ? `![图片](${a.url})` : `[附件](${a.url})`).join('\n');
+    if (attImages.length && agent.platform !== 'deepseek-native') {
+      const refs = attImages.map(a => `![图片](${a.url})`).join('\n');
       messageText = (text ? text + '\n' : '') + refs;
     }
 
@@ -571,7 +585,8 @@ export default function Chat() {
       await chatWithAgent({
         agentId: agent.id,
         message: messageText,
-        attachments: agent.platform === 'deepseek-native' ? attImages : undefined,
+        // 图片与文档都带：图片沿用原有语义，文档（kind='file'）由服务端读回字节、抽成文本注入 prompt
+        attachments: [...attImages, ...attFiles],
         sessionId,
         cfg: {
           platform: agent.platform,

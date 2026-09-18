@@ -35,6 +35,15 @@ import { exchangeWechatPhoneCode } from './wechat-phone.mjs';
 import { handleMiniappAuth, identityStorageKeys } from './miniapp-auth.mjs';
 import { handleMiniappRuntime } from './miniapp-runtime.mjs';
 import { handleMiniappLayout } from './miniapp-layout.mjs';
+import {
+  DOC_SIZE_LIMIT,
+  SUPPORTED_DOC_EXTS,
+  buildDocPromptBlock,
+  docExtOf,
+  docFormatLabel,
+  extractDocumentText,
+  isSupportedDoc,
+} from './doc-extract.mjs';
 import { attachMiniappRequestMetric, handleMiniappObservability } from './miniapp-observability.mjs';
 import {
   configureKnowledgeService,
@@ -1031,6 +1040,76 @@ function localUploadPathFromUrl(rawUrl) {
   const filePath = path.resolve(DATA_DIR, key);
   if (!filePath.startsWith(uploadRoot + path.sep)) return null;
   return { key, filePath, storageUrl: `/api/blob/serve?key=${encodeURIComponent(key)}` };
+}
+
+/** 单次对话最多解析几个文档附件：解析要读文件 + 解压 + 抽文本，是同步 CPU 活，必须限流。 */
+const MAX_DOC_ATTACHMENTS = 3;
+
+/**
+ * 把消息里的文档附件解析成可注入 prompt 的文本块（「路线 A」）。
+ *
+ * 为什么不走上游原生文件能力：
+ *  · Coze 新版 stream_run 的 prompt 只认**公网 URL** —— 官方明确「AI 编程项目中不兼容低代码 API
+ *    文档中的上传文件等 API」，拿不到 file_id；
+ *  · DeepSeek 对话 API 根本不支持文件，而线上智能体里 DeepSeek 占多数。
+ * ⇒ 服务端把文档解析成文本拼进 prompt，才对**全部平台**一次性生效。
+ *
+ * 返回值：
+ *   docBlock    — 拼好的注入块（没有文档时为空串）
+ *   attachments — 剥离文档后的其余附件（图片原样交给各平台原有逻辑）
+ *   files       — 本次解析出的文件元信息（用于日志与回执）
+ * 解析失败一律抛带 statusCode 的 Error，由调用方在**写 SSE 头之前**回 JSON 错误。
+ */
+async function resolveDocAttachments(attachments) {
+  const list = Array.isArray(attachments) ? attachments.filter((item) => item && typeof item === 'object') : [];
+  const docs = list.filter((item) => String(item.kind || '') === 'file');
+  const rest = list.filter((item) => String(item.kind || '') !== 'file');
+  if (!docs.length) return { docBlock: '', attachments: rest, files: [] };
+  if (docs.length > MAX_DOC_ATTACHMENTS) {
+    throw Object.assign(new Error(`每次最多上传 ${MAX_DOC_ATTACHMENTS} 个文档`), { statusCode: 400 });
+  }
+  const readable = SUPPORTED_DOC_EXTS.map((ext) => docFormatLabel(ext)).join(' / ');
+  const blocks = [];
+  const files = [];
+  for (const [index, item] of docs.entries()) {
+    const rawUrl = String(item.url || '');
+    // 附件名优先取前端传的；取不到就退回上传键里的文件名（形如 uploads/1699-abc-合同.docx）。
+    // ⚠️ 必须从 **key 参数**里取：文件名在查询串里（`?key=uploads/xxx.docx`），
+    //    若从 pathname 取（先 split('?')[0] 再 split('/').pop()）拿到的永远是 "serve"，扩展名尽失。
+    let fallbackName = '';
+    try {
+      const keyParam = new URL(rawUrl, 'https://usunai.local').searchParams.get('key') || '';
+      fallbackName = keyParam.split('/').pop() || '';
+    } catch { fallbackName = ''; }
+    const name = String(item.name || '').trim() || fallbackName;
+    const ext = docExtOf(name, String(item.mimeType || ''));
+    if (!isSupportedDoc(name, item.mimeType)) {
+      throw Object.assign(new Error(`暂不支持${ext ? ` .${ext} ` : '该'}格式的附件，请上传 ${readable} 文件`), { statusCode: 400 });
+    }
+    let buffer;
+    const dataMatch = rawUrl.match(/^data:([^;,]*);base64,/i);
+    if (dataMatch) {
+      // Blob 通道不可用时前端的 base64 兜底（与 DeepSeek 图片走同一条降级路径）
+      buffer = Buffer.from(rawUrl.slice(dataMatch[0].length), 'base64');
+    } else {
+      const local = localUploadPathFromUrl(rawUrl);
+      if (!local || !fs.existsSync(local.filePath)) {
+        throw Object.assign(new Error(`附件「${name}」已失效，请重新上传`), { statusCode: 400 });
+      }
+      buffer = fs.readFileSync(local.filePath);
+    }
+    let parsed;
+    try {
+      parsed = await extractDocumentText(buffer, { name, mimeType: String(item.mimeType || '') });
+    } catch (error) {
+      throw Object.assign(new Error(`附件「${name}」解析失败：${String(error?.message || error)}`), {
+        statusCode: String(error?.code || '') === 'DOC_TOO_LARGE' ? 413 : 400,
+      });
+    }
+    blocks.push(buildDocPromptBlock({ fileName: name, ext: parsed.ext, text: parsed.text, truncated: parsed.truncated }, index));
+    files.push({ name, ext: parsed.ext, chars: parsed.chars, truncated: parsed.truncated });
+  }
+  return { docBlock: blocks.join('\n\n'), attachments: rest, files };
 }
 
 function deepseekImageFromBuffer(buffer, attachment, storageRef = null) {
@@ -2502,6 +2581,27 @@ const server = http.createServer(async (req, res) => {
       // 放在算力校验之后，让「没算力」先被提示出来，避免用户以为升级套餐就能解决算力问题。
       if (cfg.vip === true && !(await hasVipContentAccess(session.userId))) {
         rejectVipRequired(res, cfg.name);
+        return;
+      }
+      // 「路线 A」：文档附件由服务端解析成文本注入 prompt（对 DeepSeek / Coze 新旧版一次性生效）。
+      // 必须放在这里 —— 此刻还没写 SSE 头，解析失败还能回 JSON 让前端弹明确提示；
+      // 若下沉到各平台分支，不但要写三遍，DeepSeek 分支还会因为收到 kind='file' 先报「仅支持图片」。
+      try {
+        const resolved = await resolveDocAttachments(body.attachments);
+        body.attachments = resolved.attachments;
+        if (resolved.docBlock) {
+          body.message = `${resolved.docBlock}\n\n${String(body.message || '').trim()}`.trim();
+          // 计费口径必须跟真实 prompt 对齐：小程序会传 billingMessage（刻意剔除附件 markdown 的纯文字），
+          // 这里只在它前面补文档块、不整体覆盖，才能既算进文档 token、又保住「不算图片 markdown」的原意。
+          if (typeof body.billingMessage === 'string' && body.billingMessage.trim()) {
+            body.billingMessage = `${resolved.docBlock}\n\n${body.billingMessage.trim()}`;
+          }
+          console.log(`[chat] 文档注入 agentId=${body.agentId} files=${resolved.files.map((f) => `${f.name}(${f.ext},${f.chars}字${f.truncated ? ',已截断' : ''})`).join(' | ')}`);
+        }
+      } catch (error) {
+        res.statusCode = Number(error?.statusCode) || 400;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: String(error?.message || error) }));
         return;
       }
       const platform = cfg.platform || 'coze-new';
@@ -4119,6 +4219,62 @@ const server = http.createServer(async (req, res) => {
         ok: !!result.ok,
         total: result.total || 0,
         breakdown: result.breakdown || {},
+      }));
+      return;
+    }
+
+    // ============ 文档上传（对话附件走「服务端解析成文本」路线，字节必须先落到本站）============
+    // 与 /api/blob/upload 的分工：那条是浏览器直传（PUT 原始字节，不经过 Node 解析大 body）；
+    // 这条吃 data URL，是给**小程序**用的 —— 小程序 runtime 只能发 JSON，走不了 PUT。
+    // ⚠️ key 的形态必须能被 localUploadPathFromUrl() 认出（uploads/ + [A-Za-z0-9._-]），否则对话时读不回字节。
+    if (p === '/api/doc/upload' && req.method === 'POST') {
+      const session = requireUser(req, res, '未登录，无法上传文件');
+      if (!session) return;
+      const body = await readBody(req, 35 * 1024 * 1024);
+      res.setHeader('Content-Type', 'application/json');
+      const name = String(body.name || '').trim();
+      if (!isSupportedDoc(name, body.mimeType)) {
+        const readable = SUPPORTED_DOC_EXTS.map((ext) => docFormatLabel(ext)).join(' / ');
+        res.statusCode = 400;
+        res.end(JSON.stringify({ ok: false, error: `暂不支持该格式的附件，请上传 ${readable} 文件` }));
+        return;
+      }
+      const match = String(body.dataUrl || '').match(/^data:([^;,]*);base64,([a-z0-9+/=\r\n]*)$/i);
+      if (!match) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ ok: false, error: '文件数据格式不正确，请使用 base64 data URL' }));
+        return;
+      }
+      const buffer = Buffer.from(match[2], 'base64');
+      if (!buffer.length) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ ok: false, error: '文件内容为空' }));
+        return;
+      }
+      if (buffer.length > DOC_SIZE_LIMIT) {
+        res.statusCode = 413;
+        res.end(JSON.stringify({ ok: false, error: `文件过大（上限 ${Math.round(DOC_SIZE_LIMIT / 1024 / 1024)}MB）` }));
+        return;
+      }
+      // 中文名会被压成下划线，但 slice(-60) 保住了尾部的 .docx —— 扩展名不能丢，解析靠它分流。
+      const safeName = name.replace(/[^\w.\-]+/g, '_').slice(-60);
+      const key = `uploads/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
+      const fp = path.resolve(DATA_DIR, key);
+      try {
+        fs.mkdirSync(path.dirname(fp), { recursive: true });
+        fs.writeFileSync(fp, buffer);
+      } catch {
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, error: '文件写入失败，请稍后重试' }));
+        return;
+      }
+      res.end(JSON.stringify({
+        ok: true,
+        key,
+        url: `/api/blob/serve?key=${encodeURIComponent(key)}`,
+        name,
+        ext: docExtOf(name, body.mimeType),
+        size: buffer.length,
       }));
       return;
     }
