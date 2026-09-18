@@ -9,6 +9,7 @@ import {
 import { Card, AdminIconPicker, TutorialSettings, renderIcon, Toggle, PrimaryButton, SecondaryButton, Modal } from '../adminUI.jsx';
 import { listCozeWorkspaces, listCozeWorkflows, getCozeWorkflowInfo, runWorkflow } from '../cozeApi.js';
 import { ASSET_CATEGORY_OPTIONS } from '../assetUtils.js';
+import { gradientCss } from '../cardGradient.js';
 
 const COLOR_OPTIONS = ['bg-blue-600', 'bg-rose-600', 'bg-emerald-600', 'bg-amber-600', 'bg-violet-600', 'bg-slate-700', 'bg-cyan-600', 'bg-teal-600'];
 
@@ -878,7 +879,8 @@ export default function AdminWorkflowEdit({ isNew: isNewProp }) {
               <input type="number" min="0" max="360" value={form.gradientAngle} onChange={e => set({ gradientAngle: Math.max(0, Math.min(360, Number(e.target.value) || 0)) })} className={`${inputCls} w-16 text-center`} />
               <span className="text-slate-400 text-xs">°</span>
             </div>
-            <div className="h-12 rounded-lg border border-slate-200 mt-2" style={{ background: `linear-gradient(${Number(form.gradientAngle) || 30}deg, ${form.gradientFrom}, ${form.gradientTo})` }} />
+            {/* 预览与线上卡片同一套算法（cardGradient.js）：旧写法的 `|| 30` 会把 0° 显示成 30°。 */}
+            <div className="h-12 rounded-lg border border-slate-200 mt-2" style={{ background: gradientCss(form, form.gradientFrom, form.gradientTo) }} />
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="排序"><input type="number" value={form.sortOrder} onChange={e => set({ sortOrder: Number(e.target.value) })} className={inputCls} /></Field>

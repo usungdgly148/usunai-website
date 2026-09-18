@@ -9,6 +9,7 @@ import OpeningEditor from '../components/OpeningEditor.jsx';
 import { OfficialMarkdown } from '../officialMarkdown.jsx';
 import { listKnowledgeBases } from '../knowledgeApi.js';
 import { ASSET_CATEGORY_OPTIONS } from '../assetUtils.js';
+import { gradientCss } from '../cardGradient.js';
 
 const COLOR_OPTIONS = ['bg-blue-600', 'bg-rose-600', 'bg-emerald-600', 'bg-amber-600', 'bg-violet-600', 'bg-slate-700', 'bg-cyan-600', 'bg-teal-600'];
 
@@ -476,7 +477,9 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
           </Field>
           <div>
             <div className="text-xs text-slate-400 mb-1.5">渐变预览</div>
-            <div className="h-12 rounded-lg border border-slate-200" style={{ background: `linear-gradient(${Number(form.gradientAngle) || 30}deg, ${form.gradientFrom}, ${form.gradientTo})` }} />
+            {/* 预览必须与线上卡片同一套算法（cardGradient.js），否则管理员看到的是假象：
+                旧写法用 `… || 30` 取角度，会把 0° 显示成 30°。 */}
+            <div className="h-12 rounded-lg border border-slate-200" style={{ background: gradientCss(form, form.gradientFrom, form.gradientTo) }} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Field label="排序权重">

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { gradientCss, hasCustomGradient } from './cardGradient.js';
 
 const ICON_MAP = {
   Home, FileText, Video, BookOpen, Radio, Image, Clapperboard, MessageCircle, Search, Briefcase, ShoppingBag,
@@ -1152,12 +1153,21 @@ const CATEGORY_THEME = {
 export function AgentCard({ item, to, featured = false, className = '' }) {
   const Icon = ICON_MAP[item.icon] || Grid3X3;
   const preset = GRADIENT_PRESETS[item.iconColor] || { from: '#F8FAFC', to: '#FFFFFF' };
-  const gradientFrom = item.gradientFrom || preset.from;
-  const gradientTo = item.gradientTo || preset.to;
-  const gradientAngle = Number(item.gradientAngle) || 30;
   const theme = CATEGORY_THEME[item.category] || null;
-  const isDark = !!theme?.dark;
-  const headerBg = theme ? theme.header : `linear-gradient(${gradientAngle}deg, ${gradientFrom}, ${gradientTo})`;
+  /*
+   * 自定义渐变优先于分类主题：后台「卡片渐变起始色/结束色/角度」是给这张卡单独配的，
+   * 只要配过就必须生效；分类主题只在没配自定义时兜底。
+   *
+   * ⚠️ 旧实现是「theme ? theme.header : 自定义」——分类主题把后台上配好的颜色和角度整段吃掉，
+   *    线上 19 张 short-video / private / geo 的卡片因此永远渲染成主题里硬编码的 135°。
+   *    小程序端（content-card.tsx）一直是「自定义优先」，本次把网页端对齐到同一语义。
+   * ⚠️ 角度一律走 gradientCss（唯一实现）—— 不要再写 `Number(x) || 30`，那会把 0° 换成 30°。
+   */
+  const useTheme = hasCustomGradient(item) ? null : theme;
+  // 深色判定必须跟着「真正生效的那层背景」走：private 主题是深色底，
+  // 若自定义渐变（多半是浅色）赢了却仍按深色渲染，白色徽标/图标落到浅底上会看不清。
+  const isDark = !!useTheme?.dark;
+  const headerBg = useTheme ? useTheme.header : gradientCss(item, preset.from, preset.to);
 
   const kindBadge = (
     <span className={`absolute top-3 left-3 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium backdrop-blur-sm ${isDark ? 'bg-white/15 text-white' : 'bg-white/70 text-slate-600'}`}>
