@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
-import { Send, Square, Bot, Sparkles, ChevronRight, ChevronDown, Copy, RefreshCw, PlusSquare, Plus, Zap } from 'lucide-react';
+import { Send, Square, Bot, Sparkles, ChevronRight, ChevronDown, Copy, RefreshCw, PlusSquare, Plus, Paperclip, Zap } from 'lucide-react';
 import { useStore, getUserPlanStatus } from '../store.jsx';
 import { chatWithAgent } from '../cozeApi.js';
 import { tryUploadToBlob } from '../blobUpload.js';

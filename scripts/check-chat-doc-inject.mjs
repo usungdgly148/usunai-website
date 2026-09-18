@@ -258,6 +258,33 @@ await check('超长文档被截断且显式告知模型（否则它会以为文�
 
 /* --------------------------------- 收尾 --------------------------------- */
 
+/* ------------------- 端点响应契约（2026-09-18 线上真实事故） ------------------- */
+
+// 事故：`/api/doc/upload` 原来平铺返回 `{ok, key, url, …}`，而小程序 `apiRequest` 取的是 `.data`
+// ⇒ `uploaded.url` 恒为 undefined ⇒ 客户端报「上传失败」，但服务端其实已经 200 写盘成功。
+// nginx 访问日志里一排 200、客户端却提示失败，排查方向一度被带偏到「请求没到服务端」。
+// 这里对**源码文本**断言，防止有人再把它改回平铺形态。
+const docUploadBlock = source.slice(
+  source.indexOf("p === '/api/doc/upload'"),
+  source.indexOf("'/api/blob/upload-url'"),
+);
+
+await check('上传端点用 successEnvelope 包裹返回值（小程序取的是 .data）', () => {
+  assert.ok(docUploadBlock.length > 200, '抽取 /api/doc/upload 处理块失败 —— 路由被改名或挪走了，请同步本脚本');
+  assert.ok(docUploadBlock.includes('successEnvelope('), '成功分支必须用 successEnvelope 包成 {ok, data, meta}');
+});
+
+await check('上传端点没有残留的平铺 {ok, …} 返回', () => {
+  const flat = docUploadBlock.match(/JSON\.stringify\(\{\s*ok:/g) || [];
+  assert.equal(flat.length, 0, `仍有 ${flat.length} 处平铺 JSON.stringify({ ok: … }) —— .data 会是 undefined`);
+});
+
+await check('上传端点的错误分支用 errorEnvelope（客户端读的是 error.message）', () => {
+  const flatError = docUploadBlock.match(/error:\s*['"`]/g) || [];
+  assert.equal(flatError.length, 0, `仍有 ${flatError.length} 处把 error 写成字符串；rawRequest 读的是 error.message，用户会看不到具体原因`);
+  assert.ok(docUploadBlock.includes('errorEnvelope('), '错误分支必须用 errorEnvelope 产出 {code, message}');
+});
+
 try { fs.rmSync(workDir, { recursive: true, force: true }); } catch { /* 临时目录清理失败不影响结论 */ }
 
 console.log(`\n合计：${pass} PASS / ${fail} FAIL${skipped ? ` / ${skipped} SKIP` : ''}`);

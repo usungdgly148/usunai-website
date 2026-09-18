@@ -25,7 +25,7 @@ import {
   loadVirtualPayConfig,
   virtualPayConfigured,
 } from './wechat-virtual-pay.mjs';
-import { handleMiniappApi, reconcilePendingVirtualOrders } from './miniapp-api.mjs';
+import { errorEnvelope, handleMiniappApi, reconcilePendingVirtualOrders, requestIdFor, successEnvelope } from './miniapp-api.mjs';
 import {
   SHARE_CONFIG_KV_KEY,
   shareSettingsConfigured,
@@ -4230,30 +4230,31 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/doc/upload' && req.method === 'POST') {
       const session = requireUser(req, res, '未登录，无法上传文件');
       if (!session) return;
+      const rid = requestIdFor(req);
       const body = await readBody(req, 35 * 1024 * 1024);
       res.setHeader('Content-Type', 'application/json');
       const name = String(body.name || '').trim();
       if (!isSupportedDoc(name, body.mimeType)) {
         const readable = SUPPORTED_DOC_EXTS.map((ext) => docFormatLabel(ext)).join(' / ');
         res.statusCode = 400;
-        res.end(JSON.stringify({ ok: false, error: `暂不支持该格式的附件，请上传 ${readable} 文件` }));
+        res.end(JSON.stringify(errorEnvelope('DOC_UNSUPPORTED', `暂不支持该格式的附件，请上传 ${readable} 文件`, rid)));
         return;
       }
       const match = String(body.dataUrl || '').match(/^data:([^;,]*);base64,([a-z0-9+/=\r\n]*)$/i);
       if (!match) {
         res.statusCode = 400;
-        res.end(JSON.stringify({ ok: false, error: '文件数据格式不正确，请使用 base64 data URL' }));
+        res.end(JSON.stringify(errorEnvelope('DOC_DATA_INVALID', '文件数据格式不正确，请使用 base64 data URL', rid)));
         return;
       }
       const buffer = Buffer.from(match[2], 'base64');
       if (!buffer.length) {
         res.statusCode = 400;
-        res.end(JSON.stringify({ ok: false, error: '文件内容为空' }));
+        res.end(JSON.stringify(errorEnvelope('DOC_EMPTY', '文件内容为空', rid)));
         return;
       }
       if (buffer.length > DOC_SIZE_LIMIT) {
         res.statusCode = 413;
-        res.end(JSON.stringify({ ok: false, error: `文件过大（上限 ${Math.round(DOC_SIZE_LIMIT / 1024 / 1024)}MB）` }));
+        res.end(JSON.stringify(errorEnvelope('DOC_TOO_LARGE', `文件过大（上限 ${Math.round(DOC_SIZE_LIMIT / 1024 / 1024)}MB）`, rid)));
         return;
       }
       // 中文名会被压成下划线，但 slice(-60) 保住了尾部的 .docx —— 扩展名不能丢，解析靠它分流。
@@ -4265,17 +4266,19 @@ const server = http.createServer(async (req, res) => {
         fs.writeFileSync(fp, buffer);
       } catch {
         res.statusCode = 500;
-        res.end(JSON.stringify({ ok: false, error: '文件写入失败，请稍后重试' }));
+        res.end(JSON.stringify(errorEnvelope('DOC_WRITE_FAILED', '文件写入失败，请稍后重试', rid)));
         return;
       }
-      res.end(JSON.stringify({
-        ok: true,
+      // ⚠️ 必须包成 successEnvelope（`{ok, data, meta}`）：小程序 `apiRequest` 取的是 `.data`，
+      //    平铺返回会让 `uploaded.url` 恒为 undefined → 客户端报「上传失败」，而服务端其实已经 200 写盘成功
+      //    （2026-09-18 线上真踩到：nginx 访问日志里一批 200，客户端却提示失败，方向一度跑偏到「服务端没收到」）。
+      res.end(JSON.stringify(successEnvelope({
         key,
         url: `/api/blob/serve?key=${encodeURIComponent(key)}`,
         name,
         ext: docExtOf(name, body.mimeType),
         size: buffer.length,
-      }));
+      }, rid)));
       return;
     }
 
