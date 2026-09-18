@@ -12,8 +12,8 @@ export function AssetRow({ item, onView, onDelete }: {
   onDelete?: (item: Record<string, unknown>) => void;
 }) {
   const title = String(item.name ?? item.title ?? item.taskName ?? item.displayName ?? '') || '未命名任务';
-  // 网页端副标题展示 sourceName（来源智能体/工作流名）
-  const subtitle = String(item.sourceName ?? item.alias ?? item.subtitle ?? item.description ?? '');
+  // 副标题（sourceName）已移除：它恒为 title 的「相同内容或前缀」——
+  // 任务记录里两者完全相等、资源记录里 name 是「来源名 · 类型」，两行必然重复（与网页端「我的资产」表格保持一致）。
   const type = formatAssetType(item);
   const status = String(item.status ?? item.state ?? '') || '成功';
   const time = formatTime(item.createdAt ?? item.completedAt ?? item.updatedAt ?? item.time);
@@ -24,10 +24,9 @@ export function AssetRow({ item, onView, onDelete }: {
   const handleDelete = () => { if (onDelete) onDelete(item); };
 
   return <View className='mini-asset-row'>
-    {/* 任务名称：主标题 + 副标题 */}
+    {/* 任务名称：只渲染一次 */}
     <View className='mini-asset-cell mini-asset-cell-name'>
       <Text className='mini-asset-name'>{title}</Text>
-      {subtitle ? <Text className='mini-asset-name-sub'>{subtitle}</Text> : null}
     </View>
     {/* 类型 */}
     <View className='mini-asset-cell mini-asset-cell-type'>

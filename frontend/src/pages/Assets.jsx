@@ -639,8 +639,9 @@ export default function Assets() {
                   {pagedAssets.map((a) => (
                     <tr key={a.id} className="border-t border-slate-100 hover:bg-slate-50">
                       <td className="px-4 py-4">
+                        {/* 只展示一次任务名：原来下面那行 sourceName 恒为 name 的「相同内容或前缀」——
+                            任务记录里两者完全相等、资源记录里 name 是「来源名 · 类型」，两行必然重复。 */}
                         <div className="font-medium text-slate-900">{a.name}</div>
-                        <div className="text-xs text-slate-400 mt-0.5 font-mono truncate max-w-[200px]">{a.sourceName}</div>
                       </td>
                       <td className="px-4 py-4 text-slate-600">{SOURCE_TYPE_NAMES[a.sourceType] || a.sourceType}</td>
                       <td className="px-4 py-4">
