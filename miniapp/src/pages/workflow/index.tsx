@@ -283,13 +283,29 @@ function WorkflowPage() {
     } catch (reason) { setError(reason instanceof Error ? reason.message : '任务状态查询失败'); }
   };
 
+  /**
+   * 字段类型文本：把所有可能承载类型信息的字段拼成一段小写文本，四个判定函数共用。
+   * ⚠️ 必须包含 `items.type` / `items.data_type`：数组型参数（如 Coze 的 Array<Image>）**只把元素类型写在 items 里**，
+   * 漏读会让附件字段被渲染成普通输入框、让图片字段退化到「只能从微信聊天选文件」。
+   * 取材范围对齐服务端 `isCozeWorkflowFileField`（server/index.mjs）。
+   */
+  const fieldTypeText = (field: FormField) => {
+    const items = field.items && typeof field.items === 'object' ? field.items : undefined;
+    return [field.type, field.inputType, field.style, field.itemType, items?.type, items?.data_type]
+      .map((part) => String(part || ''))
+      .join(' ')
+      .toLowerCase();
+  };
+
   const isFileField = (field: FormField) => {
-    const raw = `${field.type || ''} ${field.inputType || ''} ${field.style || ''} ${field.itemType || ''}`.toLowerCase();
+    const raw = fieldTypeText(field);
     return /file|image/.test(raw) && !/boolean|number|date/.test(raw);
   };
-  const isImageField = (field: FormField) => /image/.test(`${field.type || ''} ${field.inputType || ''} ${field.itemType || ''}`.toLowerCase());
-  const isVideoField = (field: FormField) => /video/.test(`${field.type || ''} ${field.inputType || ''} ${field.itemType || ''} ${field.style || ''}`.toLowerCase());
-  const isMultiField = (field: FormField) => /array|multiple/i.test(`${field.type || ''} ${field.inputType || ''} ${field.itemType || ''}`);
+  const isImageField = (field: FormField) => /image/.test(fieldTypeText(field));
+  const isVideoField = (field: FormField) => /video/.test(fieldTypeText(field));
+  const isMultiField = (field: FormField) => /array|multiple/i.test(fieldTypeText(field));
+  /** 纯图片字段（image + video 混合字段不算）：虚线框样式与显式选源都只对它生效 */
+  const isImageOnlyField = (field: FormField) => isImageField(field) && !isVideoField(field);
 
   /** 某字段的附件草稿列表 */
   const fieldUploads = (field: FormField, index: number): UploadDraft[] => uploads[fieldKey(field, index)] || [];
@@ -324,6 +340,17 @@ function WorkflowPage() {
     const mediaTypes: Array<'video' | 'image'> = [];
     if (isVideoField(field)) mediaTypes.push('video');
     if (isImageField(field)) mediaTypes.push('image');
+    /**
+     * 纯图片字段先显式选源（与对话页同一套交互）：系统选择器里「拍照」入口不够显眼，
+     * 先问一次再进相机 / 相册。取消 ActionSheet 会 reject —— 这里直接返回，不弹错误提示。
+     */
+    let sourceType: Array<'album' | 'camera'> = ['album', 'camera'];
+    if (isImageOnlyField(field)) {
+      try {
+        const sheet = await Taro.showActionSheet({ itemList: ['拍摄', '从相册选择'] });
+        sourceType = sheet.tapIndex === 0 ? ['camera'] : ['album'];
+      } catch { return; }
+    }
 
     let collected: Array<{ path: string; mime: string; name: string; size: number }> = [];
     try {
@@ -331,7 +358,7 @@ function WorkflowPage() {
         const selected = await Taro.chooseMedia({
           count: multi ? remaining : 1,
           mediaType: mediaTypes,
-          sourceType: ['album', 'camera'],
+          sourceType,
           sizeType: ['compressed'],
         });
         collected = selected.tempFiles.map((file, fileIndex) => {
@@ -713,11 +740,20 @@ function WorkflowPage() {
             onRemove={(event: { detail?: { item?: { uid?: string }; index?: number } }) => removeUpload(field, index, event)}
           />
         </View>
-        <Button className='file-button' disabled={isFieldUploading(field, index)} onClick={() => chooseFile(field, index)}>
-          {isFieldUploading(field, index) ? '上传中…'
-            : fieldUploads(field, index).length ? '已上传，点击继续选择'
-              : (isImageField(field) || isVideoField(field)) ? '从相册选择上传' : '选择并上传文件'}
-        </Button>
+        {isImageOnlyField(field)
+          ? /* 纯图片字段：虚线框 + 居中大加号 + 提示语（点击走 chooseFile，相册 / 拍照由 ActionSheet 决定） */
+          <View
+            className={`image-picker${isFieldUploading(field, index) ? ' image-picker-busy' : ''}`}
+            onClick={() => chooseFile(field, index)}
+          >
+            <TdIcon name='add' className='image-picker-plus' />
+            <Text className='image-picker-text'>{isFieldUploading(field, index) ? '上传中…' : '点击选择上传图片或拍照'}</Text>
+          </View>
+          : <Button className='file-button' disabled={isFieldUploading(field, index)} onClick={() => chooseFile(field, index)}>
+            {isFieldUploading(field, index) ? '上传中…'
+              : fieldUploads(field, index).length ? '已上传，点击继续选择'
+                : (isImageField(field) || isVideoField(field)) ? '从相册选择上传' : '选择并上传文件'}
+          </Button>}
         {!!fieldUploads(field, index).length && <Text className='file-count-note'>
           已上传 {fieldReadyValues(field, index).length} / {fieldUploads(field, index).length} 个文件
           {fieldUploads(field, index).some((entry) => entry.status === 'error') ? '（失败的可单独删除后重试）' : ''}

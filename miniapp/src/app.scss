@@ -228,6 +228,20 @@ button::after { border: 0; }
 }
 .picker-value { display: flex; align-items: center; color: var(--mini-text-2); }
 .file-button { margin: 0; border: 1px dashed var(--mini-line-strong); border-radius: 16px; background: var(--mini-primary-pale); color: var(--mini-text-2); font-size: 26px; }
+/* 图片字段上传区：虚线框 + 居中大加号 + 提示语（替代原来的胶囊按钮；点击等同 chooseFile，相册 / 拍照二选一） */
+.image-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  border: 1px dashed var(--mini-line-strong);
+  border-radius: 16px;
+  background: var(--mini-primary-pale);
+}
+.image-picker-busy { opacity: .6; }
+.image-picker-plus { display: block; color: var(--mini-primary); font-size: 72px; line-height: 1; }
+.image-picker-text { display: block; margin-top: 16px; color: var(--mini-text-2); font-size: 26px; }
 .runtime-submit { flex-shrink: 0; }
 .result-text { display: block; margin-top: 16px; color: var(--mini-text-2); font-size: 24px; line-height: 1.55; white-space: pre-wrap; }
 .media-thumb { width: 220px; height: 160px; border-radius: 14px; background: var(--mini-soft); }
