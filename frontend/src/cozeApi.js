@@ -368,7 +368,9 @@ export async function listCozeBots(cfg) {
 // 拉取中转站（OpenAI 兼容）的可用模型列表。密钥只在服务端使用，这里只回模型名。
 export async function fetchRelayModels(providerId) {
   try {
-    const res = await adminFetch(`/api/admin/relay/models?providerId=${encodeURIComponent(providerId)}`, { method: 'GET' });
+    // 每次都必须拿最新列表：显式 no-store 禁用浏览器缓存，并加时间戳破缓存。
+    // 主人在中转站那边增减模型后，重新点「拉取模型列表」应当立刻看到新结果。
+    const res = await adminFetch(`/api/admin/relay/models?providerId=${encodeURIComponent(providerId)}&_t=${Date.now()}`, { method: 'GET', cache: 'no-store' });
     return await res.json();
   } catch (e) {
     return { ok: false, error: '网络错误：' + String(e.message || e) };

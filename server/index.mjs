@@ -2667,7 +2667,11 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/admin/relay/models' && req.method === 'GET') {
       if (!requireAdmin(req, res)) return;
+      // 模型列表必须每次实时拉：显式声明不缓存，避免浏览器/CDN 把上次的结果喂回来
+      // （主人在中转站增减模型后，重新「拉取模型列表」应当立刻看到新结果）。
       res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
       try {
         const providerId = String(u.searchParams.get('providerId') || '').trim();
         if (!providerId) throw new Error('请先选择中转站授权凭证');

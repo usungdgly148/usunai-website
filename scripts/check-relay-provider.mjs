@@ -19,6 +19,7 @@ const miniappRuntimeSrc = read('server/miniapp-runtime.mjs');
 const chatSrc = read('frontend/src/pages/Chat.jsx');
 const agentEditSrc = read('frontend/src/pages/AdminAgentEdit.jsx');
 const authProvidersSrc = read('frontend/src/pages/AdminAuthProviders.jsx');
+const cozeApiSrc = read('frontend/src/cozeApi.js');
 
 let pass = 0;
 const failures = [];
@@ -124,7 +125,23 @@ check('网页端 Chat.jsx 走 isNativePlatform', chatSrc.includes('const isNativ
 check('网页端平台集合与小程序端一致', chatSrc.includes("['deepseek-native', 'relay-native']"));
 check('后台智能体平台选项含中转站', agentEditSrc.includes("key: 'relay-native'"));
 check('后台智能体按中转站凭证过滤', agentEditSrc.includes("p.type === 'relay' && p.status !== 'disabled'"));
-check('后台模型可手填也可下拉（datalist）', agentEditSrc.includes('list="relay-model-options"') && agentEditSrc.includes('<datalist id="relay-model-options">'));
+// ⚠️ 曾经用原生 `<input list>` + `<datalist>`：浏览器会**按输入框当前内容过滤候选**，
+//    输入框里已有完整模型名时下拉里就只剩它自己（实测拉到 4 个只看得见 1 个）。
+//    改为自绘面板 + 独立搜索框，面板内容不受输入框影响。以下四条钉住这个行为。
+// 断言只看**真正的 JSX 用法**，不看注释里对历史的说明文字。
+check('后台模型改用自绘面板（不再用原生 datalist）', !agentEditSrc.includes('list="relay-model-options"') && !/<datalist\s+id=/.test(agentEditSrc) && agentEditSrc.includes('relayPickerOpen && ('));
+check('面板有独立搜索框（过滤只按搜索框，不看输入框）', agentEditSrc.includes('relayModelFilter') && /relayModelFiltered\s*=\s*relayModelFilter\.trim\(\)/.test(agentEditSrc));
+check('拉取成功后自动展开面板', /setRelayPickerOpen\(list\.length > 0\)/.test(agentEditSrc));
+check('每次点击都重新拉取（loadRelayModels 无「已有列表就跳过」短路）', (() => {
+  // 注意：loadRelayModels 是箭头函数，sliceFunction 只认 `function name(` 形式，这里按起止锚点切。
+  const i = agentEditSrc.indexOf('const loadRelayModels = async () => {');
+  const j = agentEditSrc.indexOf('const relayModelFiltered =');
+  if (i < 0 || j <= i) return false;
+  const body = agentEditSrc.slice(i, j);
+  return body.includes('await fetchRelayModels(form.authProviderId)') && !/relayModels\.length\s*>\s*0\s*\)\s*return/.test(body);
+})());
+check('前端拉取显式禁用缓存 + 时间戳破缓存', cozeApiSrc.includes("cache: 'no-store'") && /_t=\$\{Date\.now\(\)\}/.test(cozeApiSrc));
+check('服务端模型列表端点声明 no-store', /Cache-Control',\s*'no-store/.test(modelsRoute));
 check('后台授权页新增中转站类型', authProvidersSrc.includes("relay: '外部大模型中转站'"));
 check('中转站的 Base URL 可编辑（只有 DeepSeek 才只读）', authProvidersSrc.includes("readOnly={form.type === 'deepseek'}"));
 

@@ -98,6 +98,13 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
   // 中转站模型列表：只用于给「模型」输入框做下拉建议，最终值仍以输入框为准（允许手填）。
   const [relayModels, setRelayModels] = useState([]);
   const [relayModelMsg, setRelayModelMsg] = useState(null); // {ok, msg}
+  const [relayLoading, setRelayLoading] = useState(false);
+  // 模型选择面板：**故意不用原生 `<input list>` + `<datalist>`** ——
+  // 浏览器会按输入框的当前内容过滤候选，输入框里已经有完整模型名时，下拉里就只剩它自己
+  // （2026-10-16 实测：已拉到 4 个模型，界面上只看得见 1 个）。
+  // 改成自绘面板 + 独立搜索框，面板内容不受输入框影响，模型再多也能翻。
+  const [relayPickerOpen, setRelayPickerOpen] = useState(false);
+  const [relayModelFilter, setRelayModelFilter] = useState('');
   const set = (patch) => setForm(prev => ({ ...prev, ...patch }));
 
   useEffect(() => {
@@ -213,19 +220,37 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
   };
 
   // 从中转站拉取可用模型。密钥只在服务端使用，浏览器只拿到模型名。
+  // ⚠️ 每次点击都**无条件重新请求**（服务端每次都是实时 GET /models，本身不缓存），
+  //    这样主人在中转站那边增减模型后，重新拉取就能立刻看到最新列表。
   const loadRelayModels = async () => {
     if (!form.authProviderId) { setRelayModelMsg({ ok: false, msg: '请先选择中转站授权凭证' }); return; }
-    setRelayModelMsg({ ok: true, msg: '正在拉取模型列表…' });
+    if (relayLoading) return;
+    setRelayLoading(true);
+    setRelayModelMsg({ ok: true, msg: '正在从中转站拉取最新模型列表…' });
     const r = await fetchRelayModels(form.authProviderId);
+    setRelayLoading(false);
     if (!r || r.ok === false) {
       setRelayModels([]);
-      setRelayModelMsg({ ok: false, msg: '拉取失败：' + ((r && r.error) || '未知错误') + '（也可以直接在下方手填模型名）' });
+      setRelayPickerOpen(false);
+      setRelayModelMsg({ ok: false, msg: '拉取失败：' + ((r && r.error) || '未知错误') + '（也可以直接在输入框手填模型名）' });
       return;
     }
     const list = Array.isArray(r.models) ? r.models : [];
     setRelayModels(list);
-    setRelayModelMsg({ ok: true, msg: `已拉取 ${list.length} 个模型，下方输入框可直接选择。` });
+    setRelayModelFilter('');
+    setRelayPickerOpen(list.length > 0);
+    setRelayModelMsg({
+      ok: true,
+      msg: list.length
+        ? `已从中转站拉到最新列表：共 ${list.length} 个模型，从下方列表里点选，或直接手填。`
+        : '中转站返回的模型列表为空，请直接在输入框手填模型名。',
+    });
   };
+
+  // 面板里的即时过滤：只按搜索框过滤，**与输入框里填了什么无关**。
+  const relayModelFiltered = relayModelFilter.trim()
+    ? relayModels.filter(m => m.toLowerCase().includes(relayModelFilter.trim().toLowerCase()))
+    : relayModels;
 
   // 脱敏占位：'***' 表示服务端已有 Token，不回写；否则本地只存占位，真实 Token 落在后端
   const maskOf = (raw) => (raw === '***' ? '***' : (raw && raw.trim() ? '***' : (serverHasToken ? '***' : '')));
@@ -712,11 +737,42 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
                 {!authProviders.some(p => p.type === 'relay' && p.status !== 'disabled') && (
                   <p className="text-xs text-amber-600">还没有可用的中转站凭证：请先到「AI 授权管理 → 新增授权」，选择「外部大模型中转站」并填写 Base URL 与 API Key。</p>
                 )}
-                <Field label="模型" hint="可先拉取模型列表再下拉选择，也可以直接手动输入模型名。">
+                <Field label="模型" hint="先点「拉取模型列表」从模型中转站取最新列表，再从面板里点选；也可以直接手动输入模型名。">
                   <div className="flex gap-2">
-                    <input list="relay-model-options" value={form.model} onChange={e => set({ model: e.target.value })} className={inputCls} placeholder="例如 gpt-4o / gemini-2.5-pro" />
-                    <datalist id="relay-model-options">{relayModels.map(m => <option key={m} value={m} />)}</datalist>
-                    <button type="button" onClick={loadRelayModels} className="shrink-0 px-3 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">拉取模型列表</button>
+                    <div className="relative flex-1">
+                      <input value={form.model} onChange={e => set({ model: e.target.value })} className={inputCls} placeholder="例如 gpt-4o / gemini-2.5-pro" />
+                      {relayPickerOpen && (
+                        <>
+                          <div className="fixed inset-0 z-30" onClick={() => setRelayPickerOpen(false)} />
+                          <div className="absolute left-0 right-0 z-40 mt-1 rounded-lg border border-slate-200 bg-white shadow-lg">
+                            <div className="border-b border-slate-100 p-2">
+                              <input autoFocus value={relayModelFilter} onChange={e => setRelayModelFilter(e.target.value)} className={inputCls} placeholder={`在 ${relayModels.length} 个模型里搜索…`} />
+                            </div>
+                            <div className="max-h-64 overflow-y-auto py-1">
+                              {relayModelFiltered.length === 0 && (
+                                <p className="px-3 py-2 text-xs text-slate-400">没有匹配的模型，可直接在左侧输入框手填。</p>
+                              )}
+                              {relayModelFiltered.map(m => (
+                                <button
+                                  key={m}
+                                  type="button"
+                                  onClick={() => { set({ model: m }); setRelayPickerOpen(false); }}
+                                  className={`block w-full truncate px-3 py-1.5 text-left text-sm hover:bg-slate-50 ${m === form.model ? 'font-medium text-blue-600' : 'text-slate-700'}`}
+                                >{m}</button>
+                              ))}
+                            </div>
+                            <div className="flex items-center justify-between border-t border-slate-100 px-3 py-2">
+                              <span className="text-xs text-slate-400">共 {relayModels.length} 个 · 当前显示 {relayModelFiltered.length} 个</span>
+                              <button type="button" onClick={() => setRelayPickerOpen(false)} className="text-xs text-slate-500 hover:text-slate-700">关闭</button>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <button type="button" onClick={loadRelayModels} disabled={relayLoading} className="relative z-40 shrink-0 px-3 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50">{relayLoading ? '拉取中…' : '拉取模型列表'}</button>
+                    {relayModels.length > 0 && (
+                      <button type="button" onClick={() => setRelayPickerOpen(v => !v)} className="relative z-40 shrink-0 px-3 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">{relayPickerOpen ? '收起列表' : `展开列表 (${relayModels.length})`}</button>
+                    )}
                   </div>
                 </Field>
                 {relayModelMsg && <p className={`text-xs ${relayModelMsg.ok ? 'text-slate-500' : 'text-rose-500'}`}>{relayModelMsg.msg}</p>}
