@@ -83,12 +83,6 @@ const DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
 const RELAY_PROVIDER_TYPE = 'relay';
 // 仅用于后台「新增授权」时的表单预填值，真实地址以凭证里保存的为准。
 const RELAY_DEFAULT_BASE_URL = 'https://api.easy88ai.com/v1';
-// 凭证类型的中文名，只用于报错文案与后台展示，避免各处散落三元表达式。
-const PROVIDER_TYPE_LABELS = {
-  deepseek: 'DeepSeek',
-  [RELAY_PROVIDER_TYPE]: '中转站',
-  [BAILIAN_EMBEDDING_TYPE]: '百炼向量',
-};
 const DEEPSEEK_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 const MAX_DEEPSEEK_IMAGES = 4;
 const MAX_DEEPSEEK_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -101,6 +95,17 @@ function normalizeDeepseekModel(model) {
 const BAILIAN_EMBEDDING_TYPE = 'bailian-embedding';
 const BAILIAN_EMBEDDING_MODEL = 'qwen3.7-text-embedding';
 const BAILIAN_EMBEDDING_DIMENSIONS = 1024;
+// 凭证类型的中文名，只用于报错文案与后台展示，避免各处散落三元表达式。
+// ⚠️ 位置有讲究，别往上挪：对象的**计算属性名在创建时就求值**，所以本常量必须声明在
+//    BAILIAN_EMBEDDING_TYPE / RELAY_PROVIDER_TYPE 之后。挪到前面会触发 TDZ ——
+//    `ReferenceError: Cannot access 'BAILIAN_EMBEDDING_TYPE' before initialization`。
+//    这类错误语法完全合法，`node --check` 和所有源码级检查都发现不了，
+//    只有真正把进程拉起来才会炸（2026-10-16 部署时因此把线上服务打挂过一次）。
+const PROVIDER_TYPE_LABELS = {
+  deepseek: 'DeepSeek',
+  [RELAY_PROVIDER_TYPE]: '中转站',
+  [BAILIAN_EMBEDDING_TYPE]: '百炼向量',
+};
 // 中转站 Base URL 归一化：去尾部斜杠、强制 HTTPS、必须是合法 URL。
 // ⚠️ 这里**不做「自动补 /v1」的猜测**，请求路径统一交给 relayEndpointUrl 决定。
 function normalizeRelayBaseUrl(value) {
