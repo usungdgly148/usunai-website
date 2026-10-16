@@ -4,12 +4,13 @@ import path from 'node:path';
 const root = path.resolve(import.meta.dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const checks = [
-  ['server/index.mjs', ['deepseek-native', '/api/deepseek/test', "event: message", 'kvRecordNativeUsage', "const DEEPSEEK_VISION_MODEL = 'deepseek-flash'", 'type: \'image_url\'', 'normalizeCurrentDeepseekImages']],
+  // 原生模型平台（DeepSeek / 外部中转站）走同一个服务端分支，判断收口在 native-platforms.mjs。
+  ['server/index.mjs', ['isNativePlatform(platform)', '/api/deepseek/test', "event: message", 'kvRecordNativeUsage', "const DEEPSEEK_VISION_MODEL = 'deepseek-flash'", 'type: \'image_url\'', 'normalizeCurrentDeepseekImages']],
   ['server/rag.mjs', ['qwen3.7-text-embedding', 'EMBEDDING_DIMENSIONS = 1024', '/api/admin/knowledge-bases', 'const uploadMatch']],
   ['frontend/src/pages/AdminAuthProviders.jsx', ['bailian-embedding', 'DeepSeek 原生模型', 'adminFetch']],
   ['frontend/src/pages/AdminKnowledgeBases.jsx', ['创建并上传文档', 'replaceKnowledgeDocument', 'deleteKnowledgeBase']],
   ['frontend/src/pages/AdminAgentEdit.jsx', ['deepseek-native', 'System Prompt', 'knowledgeBaseIds', 'ragThreshold']],
-  ['frontend/src/pages/Chat.jsx', ['onReasoning', 'serverUsage', "agent.platform !== 'deepseek-native'", '查看思考过程', "attachments: agent.platform === 'deepseek-native'", '每次最多上传 4 张图片']],
+  ['frontend/src/pages/Chat.jsx', ['onReasoning', 'serverUsage', '!isNativePlatform(agent.platform)', '查看思考过程', 'attachments: [...attImages, ...attFiles]', '每次最多上传 4 张图片']],
   ['frontend/src/cozeApi.js', ['body.attachments', 'mimeType: item.mimeType']],
 ];
 

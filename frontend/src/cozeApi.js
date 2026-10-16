@@ -365,6 +365,16 @@ export async function listCozeBots(cfg) {
 // 获取单个 Bot 详情（开场白 / 建议问题）
 // cfg = { authProviderId, botId, mock? }
 // 返回 { ok, bot: { bot_id, bot_name, description, icon_url, opening_dialog, suggested_questions } }
+// 拉取中转站（OpenAI 兼容）的可用模型列表。密钥只在服务端使用，这里只回模型名。
+export async function fetchRelayModels(providerId) {
+  try {
+    const res = await adminFetch(`/api/admin/relay/models?providerId=${encodeURIComponent(providerId)}`, { method: 'GET' });
+    return await res.json();
+  } catch (e) {
+    return { ok: false, error: '网络错误：' + String(e.message || e) };
+  }
+}
+
 export async function getCozeBotDetail(cfg) {
   try {
     const res = await adminFetch('/api/coze/bot-detail', {

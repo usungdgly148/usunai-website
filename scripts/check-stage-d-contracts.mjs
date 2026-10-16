@@ -4,15 +4,21 @@ import path from 'node:path';
 const root = path.resolve(import.meta.dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const checks = [
+  // 平台常量已收口到 native-platforms.mjs（原生模型平台集合的唯一实现）。
+  ['server/native-platforms.mjs', [
+    "DEEPSEEK_PLATFORM = 'deepseek-native'",
+    "RELAY_PLATFORM = 'relay-native'",
+    'export function isNativePlatform(platform) {',
+  ]],
   ['server/index.mjs', [
-    "const DEEPSEEK_PLATFORM = 'deepseek-native'",
     "const DEEPSEEK_MODELS = new Set(['deepseek-flash', 'deepseek-v4-pro'])",
     // 旧模型名（V4 Flash / V4 Flash Vision Exp）必须仍能被归一化到在售模型名：
     // 存量 agents 里还有旧名，缺了这段会让后台「保存智能体」直接 500。
     "const DEEPSEEK_MODEL_ALIASES = {",
     "function normalizeDeepseekModel(model) {",
     "if (p === '/api/coze/chat')",
-    "if (platform === DEEPSEEK_PLATFORM)",
+    // DeepSeek 与外部中转站共用同一个原生模型分支。
+    "if (isNativePlatform(platform)) {",
     "apiKey: ''",
     "if (p === '/api/data/assets' && req.method === 'POST')",
     "if (p === '/api/admin/users/adjust-points' && req.method === 'POST')",

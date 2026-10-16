@@ -16,6 +16,12 @@ import { extractResultMedia, classifyAsset, resolveAssetCategory, ASSET_TYPE_NAM
 import { copyText } from '../clipboard.js';
 import { compressImage } from '../imageCompress.js';
 
+// 「原生模型」平台（服务端直连上游大模型）：DeepSeek 与外部大模型中转站共用同一套客户端语义 ——
+// 图片以附件形式交给服务端、token 里要算图片开销、算力由服务端结算（前端不预扣）、错误文案不同。
+// ⚠️ 服务端对应实现见 server/native-platforms.mjs，新增平台时两边都要加。
+const NATIVE_PLATFORMS = ['deepseek-native', 'relay-native'];
+const isNativePlatform = (platform) => NATIVE_PLATFORMS.includes(String(platform || ''));
+
 function AutoResizeTextarea({ value, onChange, placeholder, className, onKeyDown }) {
   const ref = useRef(null);
   const minHeight = typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches ? 36 : 88;
@@ -488,11 +494,11 @@ export default function Chat() {
       window.alert('每次最多上传 3 个文档。');
       return;
     }
-    if (agent.platform === 'deepseek-native' && attImages.length > 4) {
-      window.alert('DeepSeek 原生智能体每次最多上传 4 张图片。');
+    if (isNativePlatform(agent.platform) && attImages.length > 4) {
+      window.alert('该智能体每次最多上传 4 张图片。');
       return;
     }
-    const system = agent.platform === 'deepseek-native'
+    const system = isNativePlatform(agent.platform)
       ? String(agent.instructions || '')
       : [agent.instructions, agent.opening].filter(Boolean).join('\n');
     const historyMsgs = conversationBefore.map(m => ({ role: m.role, content: m.content }));
@@ -500,7 +506,7 @@ export default function Chat() {
     // —— 之前只是合计 504 token，主人误以为系统提示词没算进去（实际它占了 460+ token）
     const systemTokens = system ? estimateTokens(system) + BILLING.messageOverhead : 0;
     const historyTokens = historyMsgs.reduce((s, m) => s + (m.content ? estimateTokens(m.content) + BILLING.messageOverhead : 0), 0);
-    const userTokens = estimateTokens(text) + BILLING.messageOverhead + (agent.platform === 'deepseek-native' ? attImages.length * 384 : 0);
+    const userTokens = estimateTokens(text) + BILLING.messageOverhead + (isNativePlatform(agent.platform) ? attImages.length * 384 : 0);
     let prePoints = 1;
     try {
       const pre = await fetchEstimate({ system, history: historyMsgs, message: text, answer: '', priceRate: agent.priceRate });
@@ -514,7 +520,7 @@ export default function Chat() {
     if (!agent.platform) missing.push('平台');
     if (agent.platform === 'coze-new' && !agent.projectId) missing.push('Project ID');
     if (agent.platform === 'coze-old' && !agent.botId) missing.push('Bot ID');
-    if (agent.platform === 'deepseek-native' && !agent.authProviderId) missing.push('DeepSeek 授权凭证');
+    if (isNativePlatform(agent.platform) && !agent.authProviderId) missing.push('授权凭证');
     if (missing.length) {
       setMessages((prev) => [...prev, { role: 'user', content: text }]);
       setMessages((prev) => [...prev, {
@@ -530,7 +536,7 @@ export default function Chat() {
     const displayImages = attImages.map(a => a.url);
     const displayFiles = attFiles.map(a => ({ name: a.name, url: a.url }));
     let messageText = text;
-    if (attImages.length && agent.platform !== 'deepseek-native') {
+    if (attImages.length && !isNativePlatform(agent.platform)) {
       const refs = attImages.map(a => `![图片](${a.url})`).join('\n');
       messageText = (text ? text + '\n' : '') + refs;
     }
@@ -628,7 +634,7 @@ export default function Chat() {
         next[next.length - 1] = { ...next[next.length - 1], content: finalContent, reasoning: reasoningAcc || undefined, usage: usageWithBreakdown };
         return next;
       });
-      if (agent.platform !== 'deepseek-native') consume(est.points, `使用智能体：${agent.name}`, {
+      if (!isNativePlatform(agent.platform)) consume(est.points, `使用智能体：${agent.name}`, {
         inputTokens: est.inputTokens,
         outputTokens: est.outputTokens,
         totalTokens: est.totalTokens,
@@ -636,7 +642,7 @@ export default function Chat() {
         priceRate: agent.priceRate,
         bufferCoef: est.bufferCoef,
       });
-      if (agent.platform === 'deepseek-native' && Number.isFinite(Number(serverUsage?.balance))) {
+      if (isNativePlatform(agent.platform) && Number.isFinite(Number(serverUsage?.balance))) {
         setPoints(Number(serverUsage.balance));
       }
       const duration = startTimeRef.current ? (Date.now() - startTimeRef.current) / 1000 : 0;
@@ -690,8 +696,8 @@ export default function Chat() {
       showToast('已生成 · 可继续追问');
     } catch (e) {
       // 流式失败：替换占位 assistant 为错误提示，避免与占位重复
-      const errContent = agent.platform === 'deepseek-native'
-        ? '❌ 调用原生模型失败：' + (e.message || e) + '\n请检查 DeepSeek 授权凭证、模型配置和账户状态。'
+      const errContent = isNativePlatform(agent.platform)
+        ? '❌ 调用原生模型失败：' + (e.message || e) + '\n请检查「AI 授权管理」里的授权凭证、该智能体的模型配置和上游账户状态。'
         : '❌ 调用扣子失败：' + (e.message || e) + '\n请确认智能体的扣子配置（Base URL / API Token / Project ID）正确，且该项目已在扣子后台发布为 API 服务。';
       setMessages((prev) => {
         if (!prev.length) return prev;

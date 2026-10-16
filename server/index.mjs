@@ -45,6 +45,7 @@ import {
   isSupportedDoc,
 } from './doc-extract.mjs';
 import { attachMiniappRequestMetric, handleMiniappObservability } from './miniapp-observability.mjs';
+import { DEEPSEEK_PLATFORM, RELAY_PLATFORM, isNativePlatform } from './native-platforms.mjs';
 import {
   configureKnowledgeService,
   handleKnowledgeAdminRoute,
@@ -62,7 +63,7 @@ const DIST_DIR = path.join(ROOT, 'dist');
 const PORT = Number(process.env.PORT || 8787);
 const IMAGE_VARIANT_DIR = path.join(DATA_DIR, 'image-variants');
 const OPTIMIZABLE_IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp']);
-const DEEPSEEK_PLATFORM = 'deepseek-native';
+// DEEPSEEK_PLATFORM / RELAY_PLATFORM / isNativePlatform 见 ./native-platforms.mjs（原生模型平台集合的唯一实现）。
 // 2026-09-10 官方发布 DeepSeek V4.1 Flash：模型名改为 deepseek-flash（原生多模态），
 // 旧名 deepseek-v4-flash / deepseek-v4-flash-vision-exp 对应的模型已下线，官方仅出于兼容
 // 把这两个名字继续路由到 V4.1 Flash。白名单只保留在售的两个模型，旧名通过别名表统一归一化 ——
@@ -76,6 +77,18 @@ const DEEPSEEK_DEFAULT_MODEL = 'deepseek-flash';
 // deepseek-flash 原生多模态；deepseek-v4-pro 不支持图像理解 → 带图时统一走 flash。
 const DEEPSEEK_VISION_MODEL = 'deepseek-flash';
 const DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
+// 外部大模型中转站（OpenAI 兼容协议）。与 DeepSeek 凭证不同，Base URL 不再写死，
+// 而是由「AI 授权管理」里的 relay 凭证集中配置；API Key 同样只以 AES-256-GCM 密文落库。
+// OpenAI 兼容的 base_url 一般已含 /v1，所以请求路径按 relayEndpointUrl() 拼接。
+const RELAY_PROVIDER_TYPE = 'relay';
+// 仅用于后台「新增授权」时的表单预填值，真实地址以凭证里保存的为准。
+const RELAY_DEFAULT_BASE_URL = 'https://api.easy88ai.com/v1';
+// 凭证类型的中文名，只用于报错文案与后台展示，避免各处散落三元表达式。
+const PROVIDER_TYPE_LABELS = {
+  deepseek: 'DeepSeek',
+  [RELAY_PROVIDER_TYPE]: '中转站',
+  [BAILIAN_EMBEDDING_TYPE]: '百炼向量',
+};
 const DEEPSEEK_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 const MAX_DEEPSEEK_IMAGES = 4;
 const MAX_DEEPSEEK_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -88,6 +101,26 @@ function normalizeDeepseekModel(model) {
 const BAILIAN_EMBEDDING_TYPE = 'bailian-embedding';
 const BAILIAN_EMBEDDING_MODEL = 'qwen3.7-text-embedding';
 const BAILIAN_EMBEDDING_DIMENSIONS = 1024;
+// 中转站 Base URL 归一化：去尾部斜杠、强制 HTTPS、必须是合法 URL。
+// ⚠️ 这里**不做「自动补 /v1」的猜测**，请求路径统一交给 relayEndpointUrl 决定。
+function normalizeRelayBaseUrl(value) {
+  const raw = String(value == null ? '' : value).trim().replace(/\/+$/, '');
+  if (!raw) throw new Error('请填写中转站 Base URL');
+  if (!/^https:\/\//i.test(raw)) throw new Error('中转站 Base URL 必须使用 HTTPS');
+  let parsed;
+  try { parsed = new URL(raw); } catch { throw new Error('中转站 Base URL 格式不正确'); }
+  if (!parsed.hostname) throw new Error('中转站 Base URL 格式不正确');
+  return raw;
+}
+// 把 Base URL 与接口后缀拼成真正请求用的 hostname / port / path。
+//   https://api.easy88ai.com/v1 → /v1/chat/completions
+//   https://api.easy88ai.com    → /v1/chat/completions（裸域名按 OpenAI 惯例自动补 /v1）
+function relayEndpointUrl(baseUrl, suffix) {
+  const parsed = new URL(normalizeRelayBaseUrl(baseUrl));
+  const basePath = parsed.pathname.replace(/\/+$/, '');
+  const pathname = (basePath === '' || basePath === '/') ? `/v1${suffix}` : `${basePath}${suffix}`;
+  return { hostname: parsed.hostname, port: Number(parsed.port) || 443, path: pathname };
+}
 const BAILIAN_DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 
 // 上传原图仍会保留；前台展示时只返回压缩后的 WebP 副本。
@@ -850,21 +883,25 @@ function preserveCollectionSecrets(incoming, existing) {
 function prepareAuthProvidersForStorage(incoming, existing) {
   const merged = preserveCollectionSecrets(incoming, existing);
   const convert = (provider) => {
-    if (!provider || typeof provider !== 'object' || !['deepseek', BAILIAN_EMBEDDING_TYPE].includes(provider.type)) return provider;
+    if (!provider || typeof provider !== 'object' || !['deepseek', BAILIAN_EMBEDDING_TYPE, RELAY_PROVIDER_TYPE].includes(provider.type)) return provider;
     const next = provider.type === 'deepseek'
-      // 凭证上的 model 只是跟随下拉选项记录，真正决定调用模型的是智能体自己的 model（见 handleDeepseekNative）。
+      // 凭证上的 model 只是跟随下拉选项记录，真正决定调用模型的是智能体自己的 model（见 handleNativeChat）。
       // 仍归一化一次，避免存量凭证留着已下线的旧名，后台下拉显示不出来。
       ? { ...provider, baseUrl: DEEPSEEK_BASE_URL, model: normalizeDeepseekModel(provider.model) || DEEPSEEK_DEFAULT_MODEL }
-      : {
-          ...provider,
-          baseUrl: String(provider.baseUrl || BAILIAN_DEFAULT_BASE_URL).replace(/\/+$/, ''),
-          model: BAILIAN_EMBEDDING_MODEL,
-          dimensions: BAILIAN_EMBEDDING_DIMENSIONS,
-        };
+      // 中转站：Base URL 由管理员填写、集中保存在凭证上（「统一管理 Base URL + API Key」的落点）。
+      // model 只是可选的备注字段，真正决定调用模型的是智能体自己的 model。
+      : provider.type === RELAY_PROVIDER_TYPE
+        ? { ...provider, baseUrl: normalizeRelayBaseUrl(provider.baseUrl), model: String(provider.model || '').trim() }
+        : {
+            ...provider,
+            baseUrl: String(provider.baseUrl || BAILIAN_DEFAULT_BASE_URL).replace(/\/+$/, ''),
+            model: BAILIAN_EMBEDDING_MODEL,
+            dimensions: BAILIAN_EMBEDDING_DIMENSIONS,
+          };
     const plain = String(next.apiKey || '').trim();
     if (plain && !isEmptyOrMaskedSecret(plain)) next.apiKeyEncrypted = encryptConfigSecret(plain);
     delete next.apiKey;
-    if (!next.apiKeyEncrypted) throw new Error(`${provider.type === 'deepseek' ? 'DeepSeek' : '百炼向量'}凭证「${next.name || next.id || ''}」缺少 API Key`);
+    if (!next.apiKeyEncrypted) throw new Error(`${PROVIDER_TYPE_LABELS[provider.type] || provider.type}凭证「${next.name || next.id || ''}」缺少 API Key`);
     return next;
   };
   return Array.isArray(merged)
@@ -878,6 +915,7 @@ function authProvidersForClient(value) {
     return {
       ...safe,
       ...(provider.type === 'deepseek' ? { baseUrl: DEEPSEEK_BASE_URL } : {}),
+      ...(provider.type === RELAY_PROVIDER_TYPE ? { baseUrl: String(provider.baseUrl || RELAY_DEFAULT_BASE_URL).replace(/\/+$/, '') } : {}),
       ...(provider.type === BAILIAN_EMBEDDING_TYPE ? { baseUrl: String(provider.baseUrl || BAILIAN_DEFAULT_BASE_URL).replace(/\/+$/, '') } : {}),
       ...(provider.type === BAILIAN_EMBEDDING_TYPE ? { model: BAILIAN_EMBEDDING_MODEL, dimensions: BAILIAN_EMBEDDING_DIMENSIONS } : {}),
       hasApiKey: !!(provider.apiKeyEncrypted || provider.apiKey || provider.token || provider.hasApiKey),
@@ -1219,6 +1257,55 @@ function requestDeepseek(apiKey, payload, timeoutMs = 300000) {
   });
 }
 
+async function getRelayProvider(providerId) {
+  const stored = (await KV.kvGet('authProviders')) || [];
+  const providers = Array.isArray(stored) ? stored : Object.values(stored);
+  const provider = providers.find((item) => item && String(item.id || '') === String(providerId || ''));
+  if (!provider || provider.type !== RELAY_PROVIDER_TYPE || provider.status === 'inactive' || provider.status === 'disabled') throw new Error('中转站授权凭证不存在或未启用');
+  return { ...provider, apiKey: decryptConfigSecret(provider.apiKeyEncrypted), baseUrl: normalizeRelayBaseUrl(provider.baseUrl) };
+}
+
+// 中转站请求：hostname / port / path 全部来自凭证里配置的 Base URL ——
+// 这是与 requestDeepseek 的关键差别（那个把 api.deepseek.com 写死在 https.request 里）。
+function requestOpenAICompatible(baseUrl, apiKey, payload, timeoutMs = 300000) {
+  const body = JSON.stringify(payload);
+  const target = relayEndpointUrl(baseUrl, '/chat/completions');
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: target.hostname, port: target.port, path: target.path, method: 'POST', timeout: timeoutMs,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, 'Content-Length': Buffer.byteLength(body) },
+    }, resolve);
+    req.on('error', reject);
+    req.on('timeout', () => req.destroy(new Error('中转站请求超时')));
+    req.end(body);
+  });
+}
+
+// 拉取中转站模型列表（OpenAI 兼容的 GET /models）。密钥只在服务端使用，绝不下发给浏览器。
+async function fetchRelayModels(baseUrl, apiKey, timeoutMs = 20000) {
+  const target = relayEndpointUrl(baseUrl, '/models');
+  const response = await new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: target.hostname, port: target.port, path: target.path, method: 'GET', timeout: timeoutMs,
+      headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+    }, resolve);
+    req.on('error', reject);
+    req.on('timeout', () => req.destroy(new Error('中转站模型列表请求超时')));
+    req.end();
+  });
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    const text = await readResponseText(response, 4096).catch(() => '');
+    const detail = text.trim().slice(0, 200).replace(/\s+/g, ' ');
+    throw new Error(`中转站返回 ${response.statusCode}${detail ? '：' + detail : ''}`);
+  }
+  const text = await readResponseText(response, 2 * 1024 * 1024);
+  let data;
+  try { data = JSON.parse(text); } catch { throw new Error('中转站返回的不是合法 JSON（可能被网关拦截）'); }
+  const list = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+  const models = list.map((item) => String((item && (item.id || item.model)) || '').trim()).filter(Boolean);
+  return [...new Set(models)].sort();
+}
+
 function readResponseText(response, maxBytes = 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -1235,14 +1322,20 @@ function readResponseText(response, maxBytes = 1024 * 1024) {
   });
 }
 
-async function handleDeepseekNative(res, session, cfg, body) {
+// 原生模型对话（服务端直连上游 + SSE 流式）。DeepSeek 与中转站共用这一份实现，
+// 差异只有三处：凭证来源、上游请求函数、请求体里带不带 DeepSeek 专有字段。
+async function handleNativeChat(res, session, cfg, body) {
   const startedAt = Date.now();
   const requestId = crypto.randomUUID();
   const sessionId = sanitizeIdSafe(body.sessionId || requestId).slice(0, 100);
-  const requestedModel = normalizeDeepseekModel(cfg.model);
-  const baseModel = DEEPSEEK_MODELS.has(requestedModel) ? requestedModel : DEEPSEEK_DEFAULT_MODEL;
-  const thinkingEnabled = cfg.thinkingEnabled !== false;
-  const provider = await getDeepseekProvider(cfg.authProviderId);
+  const isRelay = cfg.platform === RELAY_PLATFORM;
+  const upstreamLabel = isRelay ? '中转站' : 'DeepSeek';
+  const requestedModel = isRelay ? String(cfg.model || '').trim() : normalizeDeepseekModel(cfg.model);
+  if (isRelay && !requestedModel) throw Object.assign(new Error('该智能体未配置模型，请到后台重新选择'), { statusCode: 400 });
+  const baseModel = isRelay ? requestedModel : (DEEPSEEK_MODELS.has(requestedModel) ? requestedModel : DEEPSEEK_DEFAULT_MODEL);
+  // 中转站（OpenAI 兼容）不认 DeepSeek 的 thinking / reasoning_effort，故对中转站恒为关闭。
+  const thinkingEnabled = isRelay ? false : cfg.thinkingEnabled !== false;
+  const provider = isRelay ? await getRelayProvider(cfg.authProviderId) : await getDeepseekProvider(cfg.authProviderId);
   const user = await KV.kvGet('user_' + sanitizeIdSafe(session.userId));
   const validity = getPlanValidity(user);
   if (validity.expired) throw Object.assign(new Error('算力有效期已过期，请先充值'), { statusCode: 402 });
@@ -1265,25 +1358,32 @@ async function handleDeepseekNative(res, session, cfg, body) {
   }
   const conversation = buildDeepseekConversation(history, message, currentImages);
   messages.push(...conversation.messages);
-  const model = conversation.hasImages ? DEEPSEEK_VISION_MODEL : baseModel;
+  // deepseek-v4-pro 不支持图像理解 → 带图时统一走 flash；中转站的模型不做替换（由所选模型自己决定）。
+  const model = (!isRelay && conversation.hasImages) ? DEEPSEEK_VISION_MODEL : baseModel;
   const payload = {
-    model, messages, stream: true, stream_options: { include_usage: true },
-    thinking: { type: thinkingEnabled ? 'enabled' : 'disabled' },
-    ...(thinkingEnabled ? { reasoning_effort: ['low', 'high', 'max'].includes(cfg.reasoningEffort) ? cfg.reasoningEffort : 'high' } : {}),
+    model, messages, stream: true,
+    // 以下三个是 DeepSeek 专有字段，中转站（OpenAI 兼容）不认，故只对 DeepSeek 发送。
+    ...(isRelay ? {} : {
+      stream_options: { include_usage: true },
+      thinking: { type: thinkingEnabled ? 'enabled' : 'disabled' },
+      ...(thinkingEnabled ? { reasoning_effort: ['low', 'high', 'max'].includes(cfg.reasoningEffort) ? cfg.reasoningEffort : 'high' } : {}),
+    }),
     max_tokens: Math.max(1, Math.min(384000, Number(cfg.maxTokens) || 4096)),
     user: crypto.createHash('sha256').update(String(session.userId)).digest('hex'),
   };
-  if (!thinkingEnabled && Number.isFinite(Number(cfg.temperature))) payload.temperature = Math.max(0, Math.min(2, Number(cfg.temperature)));
+  if ((isRelay || !thinkingEnabled) && Number.isFinite(Number(cfg.temperature))) payload.temperature = Math.max(0, Math.min(2, Number(cfg.temperature)));
   let upstream;
   try {
-    upstream = await requestDeepseek(provider.apiKey, payload);
+    upstream = isRelay
+      ? await requestOpenAICompatible(provider.baseUrl, provider.apiKey, payload)
+      : await requestDeepseek(provider.apiKey, payload);
   } catch (error) {
     error.model = model;
     throw error;
   }
   if (upstream.statusCode < 200 || upstream.statusCode >= 300) {
     const text = await readResponseText(upstream).catch(() => '');
-    let messageText = `DeepSeek 返回 ${upstream.statusCode}`;
+    let messageText = `${upstreamLabel} 返回 ${upstream.statusCode}`;
     try { const parsed = JSON.parse(text); messageText += '：' + (parsed?.error?.message || parsed?.message || '请求失败'); } catch { /* no response body exposure */ }
     throw Object.assign(new Error(messageText), { statusCode: upstream.statusCode === 429 ? 429 : 502, model });
   }
@@ -1344,7 +1444,8 @@ async function handleDeepseekNative(res, session, cfg, body) {
     });
   });
   const exact = computeExactCost({ inputTokens: usage?.prompt_tokens, outputTokens: usage?.completion_tokens, priceRate: cfg.priceRate });
-  const apiCost = estimateDeepseekApiCost(model, usage, new Date(startedAt));
+  // 中转站模型没有可用的公开价目，成本记 0。该字段只用于后台运营分析，不参与用户算力扣费。
+  const apiCost = isRelay ? { cny: 0, pricingVersion: 'relay-unpriced' } : estimateDeepseekApiCost(model, usage, new Date(startedAt));
   const completedAt = new Date().toISOString();
   const computeId = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
   const metricId = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
@@ -2541,6 +2642,40 @@ const server = http.createServer(async (req, res) => {
       }
       return;
     }
+    if (p === '/api/admin/relay/test' && req.method === 'POST') {
+      if (!requireAdmin(req, res)) return;
+      const body = await readBody(req);
+      res.setHeader('Content-Type', 'application/json');
+      try {
+        const provider = body.authProviderId
+          ? await getRelayProvider(body.authProviderId)
+          : { baseUrl: normalizeRelayBaseUrl(body.baseUrl), apiKey: String(body.apiKey || '').trim() };
+        if (!provider.apiKey) throw new Error('请填写中转站 API Key');
+        // 用 GET /models 验活：既验证 Base URL 与密钥，又不消耗 token。
+        const models = await fetchRelayModels(provider.baseUrl, provider.apiKey);
+        res.end(JSON.stringify({ ok: true, count: models.length, msg: `连接成功，中转站可用模型 ${models.length} 个` }));
+      } catch (error) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ ok: false, error: String(error.message || error) }));
+      }
+      return;
+    }
+    if (p === '/api/admin/relay/models' && req.method === 'GET') {
+      if (!requireAdmin(req, res)) return;
+      res.setHeader('Content-Type', 'application/json');
+      try {
+        const providerId = String(u.searchParams.get('providerId') || '').trim();
+        if (!providerId) throw new Error('请先选择中转站授权凭证');
+        const provider = await getRelayProvider(providerId);
+        const models = await fetchRelayModels(provider.baseUrl, provider.apiKey);
+        // 只回模型名，密钥绝不下发。
+        res.end(JSON.stringify({ ok: true, baseUrl: provider.baseUrl, models }));
+      } catch (error) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ ok: false, error: String(error.message || error) }));
+      }
+      return;
+    }
     if (p === '/api/bailian/embedding/test' && req.method === 'POST') {
       if (!requireAdmin(req, res)) return;
       const body = await readBody(req);
@@ -2605,10 +2740,10 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const platform = cfg.platform || 'coze-new';
-      if (platform === DEEPSEEK_PLATFORM) {
+      if (isNativePlatform(platform)) {
         const nativeStartedAt = Date.now();
         try {
-          await handleDeepseekNative(res, session, { ...cfg, id: cfg.id || body.agentId }, body);
+          await handleNativeChat(res, session, { ...cfg, id: cfg.id || body.agentId, platform }, body);
         } catch (error) {
           const statusCode = Number(error.statusCode) || 502;
           const metricId = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
@@ -3448,10 +3583,19 @@ const server = http.createServer(async (req, res) => {
           merged.apiKey = '';
           if (merged.ragEnabled && merged.knowledgeBaseIds.length === 0) throw new Error('启用知识库后必须至少选择一个知识库');
         }
+        if (merged.platform === RELAY_PLATFORM) {
+          merged.model = String(merged.model || '').trim();
+          if (!merged.model) throw new Error('请选择或填写中转站模型名称');
+          await getRelayProvider(merged.authProviderId);
+          // Base URL 只保存在凭证里，智能体不存快照 —— 「统一管理」只能有一个真相来源。
+          merged.baseUrl = '';
+          merged.apiKey = '';
+          if (merged.ragEnabled && merged.knowledgeBaseIds.length === 0) throw new Error('启用知识库后必须至少选择一个知识库');
+        }
         agents[id] = merged; // 同步内存缓存
         await KV.kvPut('agents', agents);
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ ok: true, id, hasToken: merged.platform === DEEPSEEK_PLATFORM ? !!merged.authProviderId : !!apiKey }));
+        res.end(JSON.stringify({ ok: true, id, hasToken: isNativePlatform(merged.platform) ? !!merged.authProviderId : !!apiKey }));
         return;
         } catch (e) {
           // 2026-07-30：之前这里无 try/catch，kvPut 抛 SQLITE_BUSY 等会被顶层 catch 变 500 且无日志。

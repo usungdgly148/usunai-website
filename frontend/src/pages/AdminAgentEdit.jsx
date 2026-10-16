@@ -1,5 +1,5 @@
 import { useStore } from '../store.jsx';
-import { testAgentConfig, saveAgentConfig, getAgentConfig, revealAgentToken, getCozeBotDetail } from '../cozeApi.js';
+import { testAgentConfig, saveAgentConfig, getAgentConfig, revealAgentToken, getCozeBotDetail, fetchRelayModels } from '../cozeApi.js';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { ArrowLeft, Save, Eye, EyeOff, Plus, X, Trash2, KeyRound, MessageSquareText, Sparkles, Tag as TagIcon, Hash, ArrowUpDown, ListChecks } from 'lucide-react';
@@ -95,6 +95,9 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
   const [fetchMsg, setFetchMsg] = useState(null); // {ok, msg}
   const [pickerOpen, setPickerOpen] = useState(false);
   const [knowledgeBases, setKnowledgeBases] = useState([]);
+  // 中转站模型列表：只用于给「模型」输入框做下拉建议，最终值仍以输入框为准（允许手填）。
+  const [relayModels, setRelayModels] = useState([]);
+  const [relayModelMsg, setRelayModelMsg] = useState(null); // {ok, msg}
   const set = (patch) => setForm(prev => ({ ...prev, ...patch }));
 
   useEffect(() => {
@@ -197,13 +200,31 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
     { key: 'coze-new', label: 'Coze 新版', desc: 'Project ID + API Token' },
     { key: 'coze-old', label: 'Coze 旧版', desc: 'Bot ID + 授权凭证' },
     { key: 'deepseek-native', label: 'DeepSeek 原生模型', desc: '服务器凭证 + 真正流式输出' },
+    { key: 'relay-native', label: '外部大模型中转站', desc: 'OpenAI 兼容 · 模型可选' },
   ];
 
   const onSelectPlatform = (key) => {
     const patch = { platform: key };
     if (key === 'coze-old' && !form.baseUrl.trim()) patch.baseUrl = 'https://api.coze.cn';
+    // 中转站的模型名由用户在模型列表里选，不能沿用 DeepSeek 的默认值（重复点同一张卡不清空）。
+    if (key === 'relay-native' && form.platform !== 'relay-native') patch.model = '';
     set(patch);
     setFetchMsg(null);
+  };
+
+  // 从中转站拉取可用模型。密钥只在服务端使用，浏览器只拿到模型名。
+  const loadRelayModels = async () => {
+    if (!form.authProviderId) { setRelayModelMsg({ ok: false, msg: '请先选择中转站授权凭证' }); return; }
+    setRelayModelMsg({ ok: true, msg: '正在拉取模型列表…' });
+    const r = await fetchRelayModels(form.authProviderId);
+    if (!r || r.ok === false) {
+      setRelayModels([]);
+      setRelayModelMsg({ ok: false, msg: '拉取失败：' + ((r && r.error) || '未知错误') + '（也可以直接在下方手填模型名）' });
+      return;
+    }
+    const list = Array.isArray(r.models) ? r.models : [];
+    setRelayModels(list);
+    setRelayModelMsg({ ok: true, msg: `已拉取 ${list.length} 个模型，下方输入框可直接选择。` });
   };
 
   // 脱敏占位：'***' 表示服务端已有 Token，不回写；否则本地只存占位，真实 Token 落在后端
@@ -309,6 +330,10 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
   const persist = async () => {
     if (!form.name.trim()) { window.alert('请先填写名称'); return null; }
     if (form.platform === 'deepseek-native' && !form.authProviderId) { window.alert('请先选择 DeepSeek 授权凭证'); return null; }
+    if (form.platform === 'relay-native') {
+      if (!form.authProviderId) { window.alert('请先选择中转站授权凭证'); return null; }
+      if (!String(form.model || '').trim()) { window.alert('请选择或填写模型名称'); return null; }
+    }
     // 明文保存：本地 store（localStorage）也存真实 apiKey，不再用 TOKEN_MASK 占位
     const storeForm = { ...form, apiKey: form.apiKey || '' };
     if (isNew) { const nid = await addAgent(storeForm); return nid; }
@@ -653,6 +678,48 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
                   <input type="checkbox" checked={form.thinkingEnabled} onChange={e => set({ thinkingEnabled: e.target.checked })} />
                 </label>
                 {form.thinkingEnabled && <Field label="思考强度"><select value={form.reasoningEffort} onChange={e => set({ reasoningEffort: e.target.value })} className={inputCls}><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></Field>}
+                <Field label="System Prompt" hint="只用于约束智能体行为；用户输入仍由前端对话框提供。">
+                  <textarea rows={8} value={form.instructions} onChange={e => set({ instructions: e.target.value })} className={`${inputCls} resize-y`} placeholder="请输入系统提示词" />
+                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="上下文上限"><input type="number" min="1024" value={form.contextMaxTokens} onChange={e => set({ contextMaxTokens: Number(e.target.value) })} className={inputCls} /></Field>
+                  <Field label="单次输出上限"><input type="number" min="256" value={form.maxTokens} onChange={e => set({ maxTokens: Number(e.target.value) })} className={inputCls} /></Field>
+                </div>
+                <label className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2.5">
+                  <span className="text-sm font-medium text-slate-700">启用 RAG 知识库</span>
+                  <input type="checkbox" checked={form.ragEnabled} onChange={e => set({ ragEnabled: e.target.checked })} />
+                </label>
+                {form.ragEnabled && <div className="space-y-3 rounded-xl border border-slate-200 p-3">
+                  <div className="text-sm font-medium text-slate-700">绑定知识库（可多选）</div>
+                  {knowledgeBases.filter(kb => kb.status !== 'inactive').map(kb => <label key={kb.id} className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={form.knowledgeBaseIds.includes(kb.id)} onChange={e => set({ knowledgeBaseIds: e.target.checked ? [...form.knowledgeBaseIds, kb.id] : form.knowledgeBaseIds.filter(id => id !== kb.id) })} />{kb.name}<span className="text-xs text-slate-400">{kb.readyDocumentCount || 0} 个文档</span></label>)}
+                  {!knowledgeBases.length && <div className="text-xs text-amber-600">请先到“知识库”页面创建并上传文档。</div>}
+                  <div className="grid grid-cols-2 gap-3"><Field label="召回条数"><input type="number" min="1" max="20" value={form.ragTopK} onChange={e => set({ ragTopK: Number(e.target.value) })} className={inputCls} /></Field><Field label="相似度阈值"><input type="number" min="0" max="1" step="0.05" value={form.ragThreshold} onChange={e => set({ ragThreshold: Number(e.target.value) })} className={inputCls} /></Field></div>
+                </div>}
+              </div>
+            )}
+
+            {form.platform === 'relay-native' && (
+              <div className="space-y-4">
+                <p className="text-xs text-slate-600 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                  Base URL 与 API Key 统一保存在「AI 授权管理」的中转站凭证里；这里只选凭证与模型，浏览器不接触密钥。
+                </p>
+                <Field label="中转站授权凭证">
+                  <select value={form.authProviderId} onChange={e => { set({ authProviderId: e.target.value }); setRelayModels([]); setRelayModelMsg(null); }} className={inputCls}>
+                    <option value="">请选择授权凭证</option>
+                    {authProviders.filter(p => p.type === 'relay' && p.status !== 'disabled').map(p => <option key={p.id} value={p.id}>{p.name}（{p.baseUrl}）</option>)}
+                  </select>
+                </Field>
+                {!authProviders.some(p => p.type === 'relay' && p.status !== 'disabled') && (
+                  <p className="text-xs text-amber-600">还没有可用的中转站凭证：请先到「AI 授权管理 → 新增授权」，选择「外部大模型中转站」并填写 Base URL 与 API Key。</p>
+                )}
+                <Field label="模型" hint="可先拉取模型列表再下拉选择，也可以直接手动输入模型名。">
+                  <div className="flex gap-2">
+                    <input list="relay-model-options" value={form.model} onChange={e => set({ model: e.target.value })} className={inputCls} placeholder="例如 gpt-4o / gemini-2.5-pro" />
+                    <datalist id="relay-model-options">{relayModels.map(m => <option key={m} value={m} />)}</datalist>
+                    <button type="button" onClick={loadRelayModels} className="shrink-0 px-3 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">拉取模型列表</button>
+                  </div>
+                </Field>
+                {relayModelMsg && <p className={`text-xs ${relayModelMsg.ok ? 'text-slate-500' : 'text-rose-500'}`}>{relayModelMsg.msg}</p>}
                 <Field label="System Prompt" hint="只用于约束智能体行为；用户输入仍由前端对话框提供。">
                   <textarea rows={8} value={form.instructions} onChange={e => set({ instructions: e.target.value })} className={`${inputCls} resize-y`} placeholder="请输入系统提示词" />
                 </Field>

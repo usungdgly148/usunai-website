@@ -3,6 +3,7 @@ import http from 'node:http';
 import { errorEnvelope, requestIdFor, sendJson, successEnvelope } from './miniapp-api.mjs';
 import { PHONE_BIND_REQUIRED_CODE, VIP_REQUIRED_CODE, hasPhoneBound, hasVipAccess, phoneBindRequiredMessage, vipRequiredMessage } from './plan-access.mjs';
 import { recordMiniappMetric } from './miniapp-observability.mjs';
+import { isNativePlatform } from './native-platforms.mjs';
 
 const JSON_LIMIT = 35 * 1024 * 1024;
 const TASK_RESULT_LIMIT = 12 * 1024 * 1024;
@@ -262,7 +263,8 @@ export async function handleMiniappRuntime(req, res, url, deps) {
         sendJson(res, 404, errorEnvelope('TARGET_NOT_FOUND', '目标不存在或未上架', requestId), requestId);
         return true;
       }
-      if (target.platform === 'deepseek-native') {
+      // 原生模型平台（DeepSeek / 中转站）的图片由服务端直接读回，不走 Coze 上传通道。
+      if (isNativePlatform(target.platform)) {
         sendJson(res, 200, successEnvelope({ kind: 'data-url', dataUrl: body.dataUrl, fileName: body.fileName || '' }, requestId), requestId);
         return true;
       }

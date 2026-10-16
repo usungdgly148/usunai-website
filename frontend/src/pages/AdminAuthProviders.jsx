@@ -8,6 +8,8 @@ import { testApiTokenConnection, testOAuthConnection, testPatConnection } from '
 const TYPES = {
   apitoken: 'Coze 新版 API Token', pat: 'Coze 旧版 PAT', oauth: 'Coze 旧版 OAuth',
   deepseek: 'DeepSeek 原生模型', 'bailian-embedding': '百炼向量模型',
+  // 外部大模型中转站：Base URL 与 API Key 都由这里统一配置，智能体只引用凭证。
+  relay: '外部大模型中转站',
 };
 const blank = { name: '', type: 'oauth', baseUrl: 'https://api.coze.cn', apiKey: '', clientId: '', keyId: '', privateKey: '', status: 'active', model: '', dimensions: 1024 };
 const inputClass = 'w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:border-blue-500 focus:outline-none';
@@ -32,9 +34,12 @@ export default function AdminAuthProviders() {
   const chooseType = type => {
     const defaults = type === 'deepseek'
       ? { baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash' }
-      : type === 'bailian-embedding'
-        ? { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3.7-text-embedding', dimensions: 1024 }
-        : { baseUrl: 'https://api.coze.cn' };
+      : type === 'relay'
+        // 中转站的 Base URL 由使用者填写；OpenAI 兼容地址一般带 /v1，不填 /v1 时服务端会自动补。
+        ? { baseUrl: 'https://api.easy88ai.com/v1', model: '' }
+        : type === 'bailian-embedding'
+          ? { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3.7-text-embedding', dimensions: 1024 }
+          : { baseUrl: 'https://api.coze.cn' };
     set({ type, ...defaults }); setResult(null);
   };
   const beginNew = () => { setEditingId(''); setForm(blank); setResult(null); setOpen(true); };
@@ -44,7 +49,7 @@ export default function AdminAuthProviders() {
     if (!form.name.trim()) return '请填写授权名称';
     if (!/^https:\/\//i.test(form.baseUrl || '')) return 'Base URL 必须使用 HTTPS';
     if (form.type === 'oauth' && (!form.clientId.trim() || !form.keyId.trim() || (!editingId && !form.privateKey.trim()))) return '请填写 Client ID、kid 和私钥';
-    if (['apitoken', 'pat', 'deepseek', 'bailian-embedding'].includes(form.type) && !editingId && !form.apiKey.trim()) return '请填写 API Key / Token';
+    if (['apitoken', 'pat', 'deepseek', 'bailian-embedding', 'relay'].includes(form.type) && !editingId && !form.apiKey.trim()) return '请填写 API Key / Token';
     return '';
   };
   const save = async () => {
@@ -70,6 +75,7 @@ export default function AdminAuthProviders() {
     try {
       let data;
       if (provider.type === 'deepseek') data = await postJson('/api/deepseek/test', provider.id ? { authProviderId: provider.id } : { apiKey: provider.apiKey });
+      else if (provider.type === 'relay') data = await postJson('/api/admin/relay/test', provider.id ? { authProviderId: provider.id } : { baseUrl: provider.baseUrl, apiKey: provider.apiKey });
       else if (provider.type === 'bailian-embedding') {
         if (!provider.id) throw new Error('请先保存百炼凭证，再测试连接');
         data = await postJson('/api/bailian/embedding/test', { authProviderId: provider.id });
@@ -77,7 +83,7 @@ export default function AdminAuthProviders() {
       else if (provider.type === 'pat') data = await testPatConnection(provider);
       else data = await testApiTokenConnection(provider);
       if (!data?.ok) throw new Error(data?.error || `连接失败${data?.status ? `（${data.status}）` : ''}`);
-      setResult({ target, ok: true, text: provider.type === 'bailian-embedding' ? `连接成功：qwen3.7-text-embedding，${data.dimensions || 1024} 维` : '连接成功，凭证有效' });
+      setResult({ target, ok: true, text: provider.type === 'bailian-embedding' ? `连接成功：qwen3.7-text-embedding，${data.dimensions || 1024} 维` : (provider.type === 'relay' && data.msg ? data.msg : '连接成功，凭证有效') });
     } catch (error) { setResult({ target, ok: false, text: error.message }); }
     finally { setBusy(''); }
   };
@@ -109,6 +115,7 @@ export default function AdminAuthProviders() {
         <input className={inputClass} value={form.name} onChange={e => set({ name: e.target.value })} placeholder="授权名称" />
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{Object.entries(TYPES).map(([type, label]) => <button key={type} type="button" onClick={() => chooseType(type)} className={`rounded-xl border px-3 py-2 text-sm ${form.type === type ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600'}`}>{label}</button>)}</div>
         <input className={inputClass} value={form.baseUrl} onChange={e => set({ baseUrl: e.target.value })} placeholder="Base URL" readOnly={form.type === 'deepseek'} />
+        {form.type === 'relay' && <p className="text-xs text-slate-500">填写中转站的 OpenAI 兼容地址，例如 <span className="font-mono">https://api.easy88ai.com/v1</span>。只填域名时会自动补 <span className="font-mono">/v1</span>。这里配置的 Base URL 与 API Key 会被所有引用该凭证的智能体共用。</p>}
         {form.type === 'oauth' ? <div className="space-y-3"><input className={inputClass} value={form.clientId} onChange={e => set({ clientId: e.target.value })} placeholder="Client ID" /><input className={inputClass} value={form.keyId} onChange={e => set({ keyId: e.target.value })} placeholder="公钥指纹 kid" /><textarea className={`${inputClass} resize-none font-mono text-xs`} rows={6} value={form.privateKey} onChange={e => set({ privateKey: e.target.value })} placeholder={editingId ? '留空则保留服务器中的原私钥' : '-----BEGIN PRIVATE KEY-----'} /></div> : <input type="password" autoComplete="new-password" className={inputClass} value={form.apiKey} onChange={e => set({ apiKey: e.target.value })} placeholder={editingId && form.hasApiKey ? '留空则保留服务器中的原密钥' : 'API Key / Token'} />}
         {form.type === 'bailian-embedding' && <div className="grid grid-cols-2 gap-3"><input className={inputClass} value="qwen3.7-text-embedding" readOnly /><input className={inputClass} value="1024 维" readOnly /></div>}
         {form.type === 'deepseek' && <div className="space-y-2">

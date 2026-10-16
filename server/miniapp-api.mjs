@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { isNativePlatform } from './native-platforms.mjs';
 import {
   VIRTUAL_PAY,
   buildVirtualPaymentParams,
@@ -134,7 +135,7 @@ export function sanitizePublicContent(config = {}) {
       const publicItem = toPublicContentItem(item, AGENT_PUBLIC_FIELDS);
       return publicItem ? {
         ...publicItem,
-        supportsImages: item.platform === 'deepseek-native' || item.supportsImages === true,
+        supportsImages: isNativePlatform(item.platform) || item.supportsImages === true,
       } : null;
     })
     .filter(Boolean)
