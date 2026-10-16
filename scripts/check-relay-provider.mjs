@@ -142,6 +142,22 @@ check('每次点击都重新拉取（loadRelayModels 无「已有列表就跳过
 })());
 check('前端拉取显式禁用缓存 + 时间戳破缓存', cozeApiSrc.includes("cache: 'no-store'") && /_t=\$\{Date\.now\(\)\}/.test(cozeApiSrc));
 check('服务端模型列表端点声明 no-store', /Cache-Control',\s*'no-store/.test(modelsRoute));
+
+// ---------- 3b. 上游「200 但正文全空」的兜底（2026-10-16 线上故障） ----------
+// 中转站实测偶发 200 + 正文全空（15 次里 2 次；DeepSeek 官网 195 次 0 次）。
+// 曾经的实现会把它当成功：照样扣费、客户端收到空正文，最后显示一句扣子专用的兜底文案。
+check('保留上游原始响应尾部用于排障', serverSrc.includes('rawTail'));
+check('空正文时原样重试一次（此时尚未向客户端发过内容）', /if \(!consumed\.answer && !consumed\.reasoning\) \{[\s\S]{0,240}?openUpstream\(\)[\s\S]{0,240}?readUpstream\(upstream\)/.test(serverSrc));
+check('连续两次空正文必须抛错，且抛错早于计费（失败调用不扣费）', (() => {
+  const i = serverSrc.indexOf('async function handleNativeChat(');
+  const j = serverSrc.indexOf('function extractAnswerFromSSE');
+  if (i < 0 || j <= i) return false;
+  const body = serverSrc.slice(i, j);
+  const throwIdx = body.indexOf('都没有返回任何内容');
+  const chargeIdx = body.indexOf('kvRecordNativeUsage');
+  return throwIdx > 0 && chargeIdx > 0 && throwIdx < chargeIdx;
+})());
+check('前端空回复兜底文案按平台区分（原生模型不再提「扣子」）', /isNativePlatform\(agent\.platform\)\s*\?\s*'\(模型没有返回任何内容/.test(chatSrc));
 check('后台授权页新增中转站类型', authProvidersSrc.includes("relay: '外部大模型中转站'"));
 check('中转站的 Base URL 可编辑（只有 DeepSeek 才只读）', authProvidersSrc.includes("readOnly={form.type === 'deepseek'}"));
 

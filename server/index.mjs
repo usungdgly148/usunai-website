@@ -1377,77 +1377,101 @@ async function handleNativeChat(res, session, cfg, body) {
     user: crypto.createHash('sha256').update(String(session.userId)).digest('hex'),
   };
   if ((isRelay || !thinkingEnabled) && Number.isFinite(Number(cfg.temperature))) payload.temperature = Math.max(0, Math.min(2, Number(cfg.temperature)));
-  let upstream;
-  try {
-    upstream = isRelay
-      ? await requestOpenAICompatible(provider.baseUrl, provider.apiKey, payload)
-      : await requestDeepseek(provider.apiKey, payload);
-  } catch (error) {
-    error.model = model;
-    throw error;
-  }
-  if (upstream.statusCode < 200 || upstream.statusCode >= 300) {
+  const emit = (type, content) => {
+    if (!content || res.writableEnded || res.destroyed) return;
+    res.write(`event: message\ndata: ${JSON.stringify({ type, content: { [type]: content } })}\n\n`);
+  };
+  // 打开上游连接：中转站与 DeepSeek 各用各的请求器。
+  const openUpstream = async () => {
+    try {
+      return isRelay
+        ? await requestOpenAICompatible(provider.baseUrl, provider.apiKey, payload)
+        : await requestDeepseek(provider.apiKey, payload);
+    } catch (error) {
+      error.model = model;
+      throw error;
+    }
+  };
+  // 非 2xx 直接按上游故障抛出（此时还没向客户端发过任何字节，走 JSON 错误分支）。
+  const assertUpstreamOk = async (upstream) => {
+    if (upstream.statusCode >= 200 && upstream.statusCode < 300) return;
     const text = await readResponseText(upstream).catch(() => '');
     let messageText = `${upstreamLabel} 返回 ${upstream.statusCode}`;
     try { const parsed = JSON.parse(text); messageText += '：' + (parsed?.error?.message || parsed?.message || '请求失败'); } catch { /* no response body exposure */ }
     throw Object.assign(new Error(messageText), { statusCode: upstream.statusCode === 429 ? 429 : 502, model });
-  }
+  };
+  // 读完整条上游流，拼出正文；同时留一小段原始响应，供「上游返回 200 却没内容」时排障。
+  const readUpstream = async (upstream) => {
+    const state = { answer: '', reasoning: '', usage: null, reasoningFirstTokenMs: null, answerFirstTokenMs: null, rawTail: '' };
+    let buffer = '';
+    const consumeBlock = (block) => {
+      const dataLine = block.split(/\r?\n/).filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim()).join('');
+      if (!dataLine || dataLine === '[DONE]') return;
+      let data;
+      try { data = JSON.parse(dataLine); } catch { return; }
+      if (data.usage) state.usage = data.usage;
+      const delta = data.choices?.[0]?.delta || {};
+      if (typeof delta.reasoning_content === 'string' && delta.reasoning_content) {
+        if (state.reasoningFirstTokenMs === null) state.reasoningFirstTokenMs = Date.now() - startedAt;
+        state.reasoning += delta.reasoning_content;
+        emit('reasoning', delta.reasoning_content);
+      }
+      if (typeof delta.content === 'string' && delta.content) {
+        if (state.answerFirstTokenMs === null) state.answerFirstTokenMs = Date.now() - startedAt;
+        state.answer += delta.content;
+        emit('answer', delta.content);
+      }
+    };
+    await new Promise((resolve, reject) => {
+      upstream.setEncoding('utf8');
+      upstream.on('data', (chunk) => {
+        if (state.rawTail.length < 1200) state.rawTail += chunk;
+        buffer += chunk;
+        let separator = buffer.match(/\r?\n\r?\n/);
+        while (separator) {
+          const split = separator.index;
+          const block = buffer.slice(0, split);
+          buffer = buffer.slice(split + separator[0].length);
+          consumeBlock(block);
+          separator = buffer.match(/\r?\n\r?\n/);
+        }
+      });
+      upstream.on('end', () => {
+        if (buffer.trim()) consumeBlock(buffer);
+        resolve();
+      });
+      upstream.on('error', reject);
+      res.once('close', () => {
+        if (!res.writableEnded && !upstream.destroyed) upstream.destroy();
+      });
+    });
+    return state;
+  };
+  let upstream = await openUpstream();
+  await assertUpstreamOk(upstream);
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders?.();
   res.write(': connected\n\n');
-  let answer = '';
-  let reasoning = '';
-  let usage = null;
-  let reasoningFirstTokenMs = null;
-  let answerFirstTokenMs = null;
-  let buffer = '';
-  const consumeBlock = (block) => {
-    const dataLine = block.split(/\r?\n/).filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim()).join('');
-    if (!dataLine || dataLine === '[DONE]') return;
-    let data;
-    try { data = JSON.parse(dataLine); } catch { return; }
-    if (data.usage) usage = data.usage;
-    const delta = data.choices?.[0]?.delta || {};
-    if (typeof delta.reasoning_content === 'string' && delta.reasoning_content) {
-      if (reasoningFirstTokenMs === null) reasoningFirstTokenMs = Date.now() - startedAt;
-      reasoning += delta.reasoning_content;
-      emit('reasoning', delta.reasoning_content);
-    }
-    if (typeof delta.content === 'string' && delta.content) {
-      if (answerFirstTokenMs === null) answerFirstTokenMs = Date.now() - startedAt;
-      answer += delta.content;
-      emit('answer', delta.content);
-    }
-  };
-  const emit = (type, content) => {
-    if (!content || res.writableEnded || res.destroyed) return;
-    res.write(`event: message\ndata: ${JSON.stringify({ type, content: { [type]: content } })}\n\n`);
-  };
-  await new Promise((resolve, reject) => {
-    upstream.setEncoding('utf8');
-    upstream.on('data', (chunk) => {
-      buffer += chunk;
-      let separator = buffer.match(/\r?\n\r?\n/);
-      while (separator) {
-        const split = separator.index;
-        const block = buffer.slice(0, split);
-        buffer = buffer.slice(split + separator[0].length);
-        consumeBlock(block);
-        separator = buffer.match(/\r?\n\r?\n/);
-      }
-    });
-    upstream.on('end', () => {
-      if (buffer.trim()) consumeBlock(buffer);
-      resolve();
-    });
-    upstream.on('error', reject);
-    res.once('close', () => {
-      if (!res.writableEnded && !upstream.destroyed) upstream.destroy();
-    });
-  });
+  let consumed = await readUpstream(upstream);
+  // 中转站实测会偶发「HTTP 200 + 正文全空」（15 次里 2 次，约 13%；DeepSeek 官网 195 次 0 次）。
+  // 这类响应按上游故障处理，绝不能当成功：
+  //   ① 此时一个字都还没发给客户端，原样重试一次对用户完全无感；
+  //   ② 仍为空则明确报错，且**不进计费**（下面的扣费逻辑自然被跳过）。
+  if (!consumed.answer && !consumed.reasoning) {
+    upstream = await openUpstream();
+    await assertUpstreamOk(upstream);
+    consumed = await readUpstream(upstream);
+  }
+  if (!consumed.answer && !consumed.reasoning) {
+    const tail = consumed.rawTail.replace(/\s+/g, ' ').trim().slice(0, 300);
+    throw Object.assign(new Error(
+      `${upstreamLabel}连续两次都没有返回任何内容${tail ? `（上游原始响应：${tail}）` : ''}。请重试；若持续出现，请确认中转站里该模型当前可用`
+    ), { statusCode: 502, model });
+  }
+  const { answer, reasoning, usage, reasoningFirstTokenMs, answerFirstTokenMs } = consumed;
   const exact = computeExactCost({ inputTokens: usage?.prompt_tokens, outputTokens: usage?.completion_tokens, priceRate: cfg.priceRate });
   // 中转站模型没有可用的公开价目，成本记 0。该字段只用于后台运营分析，不参与用户算力扣费。
   const apiCost = isRelay ? { cny: 0, pricingVersion: 'relay-unpriced' } : estimateDeepseekApiCost(model, usage, new Date(startedAt));

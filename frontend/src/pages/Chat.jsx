@@ -624,7 +624,11 @@ export default function Chat() {
       if (typewriterRef) { clearInterval(typewriterRef); typewriterRef = null; }
       const est = serverUsage
         || await fetchEstimate({ system, history: historyMsgs, message: text, answer: acc, priceRate: agent.priceRate });
-      const finalContent = acc || '(智能体未返回内容，请检查该智能体的扣子配置是否正确，以及项目是否已在扣子后台发布为 API 服务)';
+      // 兜底文案按平台区分：原生模型（DeepSeek / 中转站）走不到扣子那套配置，提「扣子配置」是误导。
+      // 正常情况下服务端已在「上游返回 200 但正文全空」时抛出错误，这里只是最后一道保险。
+      const finalContent = acc || (isNativePlatform(agent.platform)
+        ? '(模型没有返回任何内容，本次不计费。请重试；若持续出现，请检查该智能体的模型与「AI 授权管理」里的授权凭证)'
+        : '(智能体未返回内容，请检查该智能体的扣子配置是否正确，以及项目是否已在扣子后台发布为 API 服务)');
       displayed = finalContent.length;
       // 把 system / history / user 拆分写进 usage，底部展示用
       const usageWithBreakdown = { ...est, systemTokens, historyTokens, userTokens };
