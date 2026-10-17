@@ -357,3 +357,59 @@ P1 未绑手机号 → P7 绑定 ──成功──→ 回 P1（自动续跑生�
 ### 仍未做（P2）
 
 作品详情页（大图 + 参数全文）、批量管理、转发卡片。删除在 P1 已按单条实现（走 `/api/data/assets/delete`）。
+
+---
+
+## 9. P2 实施记录（2026-10-17）
+
+### 配置项顺序调整（主人本轮指定）
+
+创作页从「描述 → 参数 → 参考图」改为 **参考图 → 画面描述 → 模型/清晰度/画面比例**。
+理由：参考图是「给模型看的东西」，属于输入的一部分，放在描述之前更符合「先给素材、再提要求、最后选档位」的顺序；
+把参数区压到最后，也让用户在决定「花多少点」之前已经把要说的话说完。
+
+`refsSupported=false` 的模型（`gpt-image-*`）参考图整块隐藏，此时页面自然回到「描述在前」。
+
+### 新增/改动
+
+| 改动 | 内容 |
+|---|---|
+| `miniapp/src/pages/image-gen/detail.tsx`（新） | 作品详情：大图（点击全屏）+ 参数表（模型/清晰度/比例/体积/算力/时间）+ 可复制的提示词 + 保存到相册 / 再次生成 / 删除 |
+| `miniapp/src/pages/image-gen/detail.config.ts`（新） | 标题「作品详情」 |
+| `miniapp/src/pages/image-gen/history.tsx` | 加「管理 / 完成」：多选 + 全选 + 批量删除；点卡片进详情；分享卡带作品图；`useDidShow` 消费脏标记 |
+| `miniapp/src/utils/share.ts` | `ShareTarget` 新增 `imageUrl`（覆盖后台配图）与 `path`（覆盖落地页，**仅转发给朋友**，朋友圈固定当前页） |
+| `miniapp/src/services/imageGen.ts` | `stashDetailAsset` / `takeDetailAsset` / `shareThumbUrl` / `markWorksDirty` / `takeWorksDirty`；`buildImageAsset` 补 `size`、`mimeType` |
+| `miniapp/src/app.config.ts` | 注册 `pages/image-gen/detail` |
+| `miniapp/src/app.scss` | `.gen-detail-*`、`.gen-history-*`、`.gen-work-check*`、`.gen-manage-*` |
+
+### 四个关键实现口径
+
+1. **详情页数据 = 快照 + 列表兜底**。服务端**没有**「按 id 取单条资产」的接口，资产是「一用户一个 JSON 数组」。
+   所以列表页点卡片时先把整条记录写进 `setStorageSync`（提示词可能 2000 字，塞不进 URL），
+   详情页 `takeDetailAsset(id)` 取用（**只在 id 对得上时采用**，防止拿到别的作品）；
+   没有快照才回退到 `GET /api/data/assets?category=image&pageSize=100` 里按 id 找。
+   **代价**：不在第一页 100 条内的老作品，从分享/直连进入时找不到 → 老实提示「可能已经被删除了」，不编假数据。
+2. **批量删除必须串行**。资产是整把读改写，并发删除会互相覆盖（后写的把先写的复活）。
+   代码里是 `for…of await` 逐条到底，注释写明了原因，别改成 `Promise.all`。
+3. **转发卡片落创作页，不落详情页**。好友看不到别人的资产，落详情页只会看到「作品不存在」。
+   配图用图床变体 `?format=webp&w=450&h=360`（5:4，微信分享卡推荐比例），非本站图床的 URL 原样返回。
+4. **返回刷新用一次性脏标记**。详情页删除成功 → `markWorksDirty()`；作品墙 `useDidShow` 里
+   `takeWorksDirty()` 为真才重拉。**不能无条件 onShow 重拉**：会把滚动位置和已加载的分页全清掉。
+
+### 构建与验证
+
+- `tsc --noEmit` 干净；`npm run build:miniapp:production` → `0.1.10 (deeee5a2227c)`（postbuild 六步全跑完）。
+- `verify-miniapp-dist` **12/12 PASS**（21 页 = 原 18 + 生图 3 页；转发/朋友圈 21/21 全开；manifest 与 HEAD 一致）。
+- 产物解码断言 15/15：详情页标题、删除入口、保存相册、再次生成、提示词复制、消耗算力、
+  批量删除、全选、完成、跳详情路径命中 `detail.js` / `history.js` / `detail.json`；
+  分享缩略图 `format=webp&w=450&h=360`、`usunai_image_detail_v1`、`usunai_image_works_dirty_v1`
+  命中共享 chunk `common.js`（**断言要按 chunk 找，页面包里没有服务层代码**）。
+- 类名自查：P2 新增 24 个类名中 23 个在 `app.scss` 有定义；`gen-detail-page` 是有意留空
+  （纯标记类，详情页没有固定 CTA，不需要底部留白）。
+
+### 真机待验收（P2 三条）
+
+1. 详情页：从作品墙点卡片进入 → 图能全屏、提示词能复制、「再次生成」回创作页且**参数已回填但没自动提交**。
+2. 批量管理：点「管理」→ 多选 / 全选 → 删除 → 列表真的少了这些（串行删除是否全成功）。
+3. 转发卡片：右上角转发 → 卡片带作品缩略图 → 好友点开落在**创作页**而不是「作品不存在」。
+
