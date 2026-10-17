@@ -318,3 +318,42 @@ P1 未绑手机号 → P7 绑定 ──成功──→ 回 P1（自动续跑生�
 - **错误原因透传**：服务端 `POST /api/image-gen` 的错误体是 `{ ok:false, error:'一句人话', code:'XXX' }`
   （**平铺**，不是信封），`rawRequest` 以前只认 `error.code`，会把原因压成「网络请求失败」；
   现在两种形状都认，`IMAGE_MODEL_UNAVAILABLE` / `POINTS_INSUFFICIENT` 才能分流。
+
+---
+
+## 8. P1 实施记录（2026-10-17）
+
+| 改动 | 内容 |
+|---|---|
+| `miniapp/src/pages/image-gen/index.tsx` | 加「参考图」区块（3 宫格 + 加号块 + 删除角标 + 点击预览）、顶部「我的作品 ›」入口、`effectiveResolution` 归一化、`useDidShow` 接「再次生成」回填 |
+| `miniapp/src/pages/image-gen/history.tsx`（新） | 我的作品：两列瀑布 + 模型筛选（服务端 `keyword` 筛）+ 下拉刷新 + 触底加载 + 点图预览 + 「⋯」动作表（保存 / 再次生成 / 删除） |
+| `miniapp/src/pages/image-gen/history.config.ts`（新） | 标题「我的作品」+ 下拉刷新 |
+| `miniapp/src/services/imageGen.ts` | `compressRefImage`（最长边 1024 + 质量 80，失败退原图）/ `pickReferenceImages` / `toApiRefImages` / `stashRegenerate` / `takeRegenerate` / `wallTime` / `firstImageOf` |
+| `miniapp/src/services/api.ts` | `generateImage` 的 `images` 改为 `{mimeType,data}[]`（**服务端只认对象**）；新增 `deleteRuntimeAsset` |
+| `miniapp/src/app.scss` | `.gen-ref-*`（参考图三宫格）+ `.gen-work-*`（作品墙） |
+
+### 三个关键实现口径
+
+1. **参考图必须发对象**：`prepareReferenceImages` 只接受 `{mimeType, data}`，
+   `mimeType` 必须在 `image/jpeg|png|webp` 内，`data` 可以是纯 base64 或 data URL（服务端会剥前缀）。
+   P0 里 `images?: string[]` 的类型是错的，已一并改正。
+2. **必须真压，不能只压质量**：上限三条并存 —— 3 张 / 单张 ≤2MB / 整包 ≤12MB（微信单请求 10MB）。
+   `compressImage` 同时传 `compressedWidth/compressHeight` 才是「缩尺寸」，只传 quality 时
+   4000px 原图仍可能 500KB+。压缩失败**不抛错**，退回原图由体积校验兜底。
+3. **「再次生成」不自动提交**：生成要扣点，只回填提示词/模型/档位/比例，由用户再点一次 CTA。
+   参数走 `setStorageSync` 交接（提示词最长 2000 字，塞 URL 会超长），创作页 `useDidShow` 取一次即删。
+
+### 顺带修掉的一个隐患
+
+`resolution` 可能来自「再次生成」回填，而那个模型/档位可能已下架 → 会出现「没有任何选中态 + CTA 显示 0 点或被禁用」。
+现在统一归一化成 `effectiveResolution`（不可用就落到当前模型第一档），渲染与请求都用它。
+
+### 构建与验证
+
+- `tsc --noEmit` 干净；`npm run build:miniapp:production` → `0.1.9 (3fefefadabcd)`。
+- `verify-miniapp-dist` **12/12 PASS**（20 页，转发/朋友圈 20/20 全开，manifest 与 HEAD 一致）。
+- 产物解码断言：参考图提示、作品墙四个动作、`.gen-ref-grid` / `.gen-work-cols` 全部命中；postbuild 的 `markdownProps` 仍在。
+
+### 仍未做（P2）
+
+作品详情页（大图 + 参数全文）、批量管理、转发卡片。删除在 P1 已按单条实现（走 `/api/data/assets/delete`）。
