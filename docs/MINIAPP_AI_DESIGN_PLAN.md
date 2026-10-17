@@ -70,7 +70,7 @@
 | 算力胶囊 | `user.points` | 点击 → P5 算力明细 | 未登录显示「登录」 |
 | 模型 chips | `/api/image-gen/config` → `models[]` | 单选；切模型时若当前档位不支持 → 自动落到该模型第一档；切到 `supportsRefs=false` → **清空已选参考图** | 只有一个模型时整行隐藏 |
 | 清晰度 | `models[].resolutions[{value,points}]` | 单选，按钮上直接标 `{points} 点` | 不写死任何点数（后台改 KV 即时生效） |
-| 比例 | `aspectRatios` | 单选胶囊 | 默认取后台 `aspectRatio` |
+| 比例 | `models[].aspectRatios` | 单选胶囊，**按当前模型**渲染（gemini 系 10 个 / gpt-image 系 5 个） | 切模型时当前比例不在新表内 → 落到第一项 |
 | 提示词 | 本地 state | textarea，实时字数，`maxlength=2000` | 空 → 禁用 CTA 并 toast「请先描述画面」 |
 | 参考图 | `Taro.chooseMedia` | 最多 3 张；选择后压缩；点图预览、角标删除 | 超 3 张 / 超 2MB / 非图片格式 → 就地提示 |
 | 生成 CTA | — | 见 2.2 流程 | 生成中不可重复点，显示 `已等待 Ns` |

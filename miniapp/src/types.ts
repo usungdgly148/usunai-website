@@ -293,6 +293,11 @@ export interface ImageGenModel {
   supportsRefs: boolean;
   /** 该模型支持的清晰度档位及对应点数（后台 KV 配置，前端不写死任何价格） */
   resolutions: Array<{ value: string; points: number }>;
+  /**
+   * 该模型**实际支持**的宽高比（服务端 aspectRatiosForModel 下发）。
+   * gemini 系 10 个，gpt-image 系 5 个 —— 按模型渲染，不要用顶层 aspectRatios。
+   */
+  aspectRatios: string[];
 }
 
 /** 生图配置：与网页端读同一份，未登录也可读（未登录同样要显示「本次消耗多少点」）。 */

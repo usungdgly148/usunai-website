@@ -54,6 +54,7 @@ import {
   IMAGE_MODEL_DEFAULT,
   IMAGE_REF_BODY_LIMIT,
   IMAGE_RESOLUTIONS,
+  aspectRatiosForModel,
   buildImagePayload,
   buildOpenAIImagePayload,
   downloadImage,
@@ -2876,6 +2877,9 @@ const server = http.createServer(async (req, res) => {
             label: item.label || item.id,
             // 前端据此决定要不要显示参考图上传（gpt-image-* 的「创建」接口没有参考图入口）
             supportsRefs: imageModelSupportsRefs(item.id),
+            // 该模型真正支持的宽高比（gemini 系 10 个 / gpt-image 系 5 个）。
+            // 前端必须按这个渲染，否则会出现「选了比例却被服务端回落到 1:1」。
+            aspectRatios: aspectRatiosForModel(item.id),
             resolutions: IMAGE_RESOLUTIONS
               .filter((value) => Number(item.prices && item.prices[value]) > 0)
               .map((value) => ({ value, points: item.prices[value] })),
@@ -2890,7 +2894,10 @@ const server = http.createServer(async (req, res) => {
           // 兼容旧前端：价格字段仍在，但真实价格按 models[].resolutions[].points
           pricePoints: settings.pricePoints,
           aspectRatio: settings.aspectRatio,
-          aspectRatios: IMAGE_ASPECT_RATIOS,
+          // 顶层字段保留，**给已发布的老客户端**（它们只读这里，不会看 models[]）。
+          // 值取「默认模型」的能力表，保证老客户端即便不知道模型差异也不会越界。
+          // 新客户端应读 models[].aspectRatios，切模型时列表才会跟着变。
+          aspectRatios: aspectRatiosForModel(settings.defaultModel || IMAGE_MODEL_DEFAULT),
           maxRefImages: IMAGE_MAX_REF_IMAGES,
         }));
       } catch (error) {
@@ -2985,13 +2992,26 @@ const server = http.createServer(async (req, res) => {
         const settings = await loadImageGenSettings();
         const providerId = String(body.authProviderId || '').trim() || settings.providerId;
         if (!providerId) throw new Error('请选择生图授权凭证（usun-img）');
+        const model = String(body.model || '').trim() || settings.model;
+        // 2026-10-18：这条路由原本**完全不校验比例**，`body.aspectRatio` 直接透传上游，
+        // 等于给后台留了个绕过能力表的缺口（gpt-image 传 21:9 会被静默换成方图）。
+        // 后台是「验证模型能不能用」的地方，收到不支持的组合必须立刻报错并列出可选值。
+        const adminRatioTable = aspectRatiosForModel(model);
+        const adminAsked = String(body.aspectRatio || '').trim();
+        if (adminAsked && !adminRatioTable.includes(adminAsked)) {
+          throw Object.assign(
+            new Error(`模型 ${model} 不支持比例 ${adminAsked}，可选：${adminRatioTable.join(' / ')}`),
+            { code: 'IMAGE_RATIO_UNSUPPORTED', status: 400 },
+          );
+        }
+        const fallbackRatio = adminRatioTable.includes(settings.aspectRatio) ? settings.aspectRatio : (adminRatioTable[0] || '1:1');
         const provider = await getImageProvider(providerId);
         const result = await generateAndStoreImage({
           provider,
           prompt: body.prompt,
-          aspectRatio: body.aspectRatio,
+          aspectRatio: adminAsked || fallbackRatio,
           resolution: body.resolution,
-          model: String(body.model || '').trim() || settings.model,
+          model,
           images: body.images,
         });
         res.end(JSON.stringify({ ok: true, ...result }));
@@ -3041,7 +3061,16 @@ const server = http.createServer(async (req, res) => {
           );
         }
         const askedRatio = String(body.aspectRatio || '').trim();
-        const aspectRatio = IMAGE_ASPECT_RATIOS.includes(askedRatio) ? askedRatio : settings.aspectRatio;
+        // 按**当前模型**的能力表校验（gemini 系 10 个 / gpt-image 系 5 个），不能用全局并集：
+        // gpt-image 收到 21:9 会被 openAIImageSize() 静默换成 1024×1024 ——
+        // 那就是「扣了点、提示成功、给了方图」，比不给这个选项更糟。
+        const ratioTable = aspectRatiosForModel(model);
+        const fallbackRatio = ratioTable.includes(settings.aspectRatio) ? settings.aspectRatio : (ratioTable[0] || '1:1');
+        const aspectRatio = ratioTable.includes(askedRatio) ? askedRatio : fallbackRatio;
+        if (askedRatio && !ratioTable.includes(askedRatio)) {
+          // 不再完全静默：留一条日志，排查「选了比例却出方图」时有据可查
+          console.warn(`[image-gen] 比例 ${askedRatio} 不被模型 ${model} 支持，已回落到 ${aspectRatio}`);
+        }
         const price = selection.points;
         const startedAt = new Date().toISOString();
         const computeId = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;

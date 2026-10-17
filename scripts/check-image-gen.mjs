@@ -16,6 +16,7 @@ import {
   IMAGE_REF_MAX_BYTES,
   IMAGE_RESOLUTIONS,
   OPENAI_IMAGE_SIZES,
+  aspectRatiosForModel,
   buildImagePayload,
   buildOpenAIImagePayload,
   extractOpenAIImageResult,
@@ -366,6 +367,41 @@ check('重新生成会重置按钮状态', userPageSrc.includes("setAssetState('
 check('成功后给出状态提示与入口', userPageSrc.includes('已加入「图片」资产库') && userPageSrc.includes('to="/assets"'));
 check('资产库「图片」Tab 按 type 过滤（回归锚点）', read('frontend/src/pages/Assets.jsx').includes("(tab === 'image' || tab === 'video' || tab === 'audio')"));
 check('store.addAsset 走单条持久化接口', storeSrc.includes("apiFetch('/api/data/assets'") && storeSrc.includes('persistMyAsset'));
+
+// ===== 8. 比例能力表按模型区分（2026-10-18 新增 5 个比例）=====
+// 背景：原来全站只有一份 5 个的常量，网页端与后台各抄了一份；而上游实测支持 10 个
+// （21:9→1584×672、2:3→848×1264、1:4→512×2064、4:1→2064×512 均真出图）。
+// 关键约束：**不能拿全局并集当生成校验** —— gpt-image 的 size 换算表里没有 21:9，
+// 静默回落会变成「扣了点、提示成功、给了方图」。
+const geminiRatios = aspectRatiosForModel('gemini-nano-banana-2.1');
+const openaiRatios = aspectRatiosForModel('gpt-image-2.5-flare');
+check('gemini 系 10 个比例', geminiRatios.length === 10, String(geminiRatios.length));
+for (const ratio of ['2:3', '3:2', '21:9', '1:4', '4:1']) {
+  check(`gemini 系含新增比例 ${ratio}`, geminiRatios.includes(ratio));
+}
+check('原有 5 个比例仍在', ['1:1', '16:9', '9:16', '4:3', '3:4'].every((r) => geminiRatios.includes(r)));
+check('gpt-image 系仍是 5 个', openaiRatios.length === 5, String(openaiRatios.length));
+check('gpt-image 系不含 21:9（否则会被静默换成方图）', !openaiRatios.includes('21:9'));
+check('gpt-image 系不含 1:4', !openaiRatios.includes('1:4'));
+check('OpenAI 比例是 Gemini 的子集', openaiRatios.every((r) => geminiRatios.includes(r)));
+check('OpenAI 比例与 size 换算表一致',
+  JSON.stringify([...openaiRatios].sort()) === JSON.stringify(Object.keys(OPENAI_IMAGE_SIZES['1K']).sort()));
+
+const serverImageSrc = read('server/index.mjs');
+check('用户路由按模型校验比例（不再用全局常量）',
+  serverImageSrc.includes('const ratioTable = aspectRatiosForModel(model);'));
+check('配置端点逐模型下发 aspectRatios',
+  serverImageSrc.includes('aspectRatios: aspectRatiosForModel(item.id),'));
+check('后台试生成端点也校验比例（补历史缺口）',
+  serverImageSrc.includes('IMAGE_RATIO_UNSUPPORTED'));
+
+const webImageGenSrc = read('frontend/src/pages/ImageGen.jsx');
+check('网页端不再自带「有哪些比例」的清单', !/const ASPECTS = \[/.test(webImageGenSrc));
+check('网页端按当前模型的 aspectRatios 渲染', webImageGenSrc.includes('currentModel.aspectRatios'));
+
+const mpImageGenSrc = read('miniapp/src/pages/image-gen/index.tsx');
+check('小程序按当前模型的比例渲染', mpImageGenSrc.includes('currentModel.aspectRatios'));
+check('小程序比例也做归一化（防回填值越界）', mpImageGenSrc.includes('effectiveAspect'));
 
 // ===== 结果 =====
 const total = pass + failures.length;

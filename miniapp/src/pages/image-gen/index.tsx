@@ -24,12 +24,19 @@ import { shareTargets } from '../../utils/share';
  * P0 不含参考图（图生图）：那条路要先做「真压缩 + 10MB 单请求上限」，
  * 归到 P1；当前服务端已上架的模型里 Gemini 原生支持参考图，P1 直接补区块即可。
  */
+// 比例**文案**表。可用哪些比例由服务端按模型下发（models[].aspectRatios），这里只管中文。
+// 新增比例只需补一行；没写到的直接显示比值本身，不会崩。
 const ASPECT_LABELS: Record<string, string> = {
   '1:1': '方形',
   '16:9': '横版',
   '9:16': '竖版',
   '4:3': '横版',
   '3:4': '竖版',
+  '2:3': '竖版',
+  '3:2': '横版',
+  '21:9': '超宽',
+  '1:4': '超长竖',
+  '4:1': '超长横',
 };
 
 type AssetState = 'idle' | 'saving' | 'added';
@@ -114,6 +121,16 @@ export default function ImageGenPage() {
     ? resolution
     : (resolutions[0]?.value || '');
   const price = resolutions.find((item) => item.value === effectiveResolution)?.points || 0;
+  /**
+   * 可选比例：优先当前模型的 aspectRatios（gemini 系 10 个 / gpt-image 系 5 个）。
+   * `aspect` 可能来自「再次生成」的回填，那个比例未必被当前模型支持（例如回填 21:9 却切到了
+   * gpt-image），所以和 effectiveResolution 同一套思路做归一化 —— 否则会出现「没有选中态」，
+   * 而请求发出去还会被服务端回落成方图。
+   */
+  const ratioOptions = (currentModel && Array.isArray(currentModel.aspectRatios) && currentModel.aspectRatios.length)
+    ? currentModel.aspectRatios
+    : (config?.aspectRatios || []);
+  const effectiveAspect = ratioOptions.includes(aspect) ? aspect : (ratioOptions[0] || aspect);
   /** 参考图能力由服务端下发：gpt-image-* 走 OpenAI 创建接口，那条通道没有参考图入口 */
   const refsSupported = !currentModel || currentModel.supportsRefs !== false;
 
@@ -123,6 +140,9 @@ export default function ImageGenPage() {
     setModel(nextId);
     // 新模型不吃当前档位就落到它的第一档（每个模型的档位点数都可能不同）
     setResolution((prev) => resolutionForModel(entry, prev));
+    // 比例同理：gpt-image 系只有 5 个，从 21:9 切过去必须收敛，否则服务端会回落到方图
+    const nextRatios = (entry && Array.isArray(entry.aspectRatios)) ? entry.aspectRatios : [];
+    if (nextRatios.length) setAspect((prev) => (nextRatios.includes(prev) ? prev : nextRatios[0]));
     // 新模型不吃参考图就把已选的清掉：留着只会在提交时被服务端硬拒（IMAGE_REF_UNSUPPORTED）
     if (entry && entry.supportsRefs === false) setRefs([]);
   };
@@ -191,7 +211,8 @@ export default function ImageGenPage() {
         prompt: text,
         model: currentModel.id,
         resolution: effectiveResolution,
-        aspectRatio: aspect,
+        // 传归一化后的比例：`aspect` 可能残留上一个模型才支持的值（再次生成回填 / 切模型）
+        aspectRatio: effectiveAspect,
         // 参考图只在模型支持且确实选了图时才带（服务端对 gpt-image-* 会硬拒）
         ...(refsSupported && refs.length ? { images: toApiRefImages(refs) } : {}),
         // 一次点击一个 requestId；「再生成一张」走的是新的一次调用，天然换新值
@@ -364,10 +385,10 @@ export default function ImageGenPage() {
 
         <Text className='gen-label'>画面比例</Text>
         <View className='gen-chip-wrap'>
-          {(config?.aspectRatios || []).map((value) => (
+          {ratioOptions.map((value) => (
             <View
               key={value}
-              className={`gen-chip gen-chip-aspect ${value === aspect ? 'gen-chip-active' : ''}`}
+              className={`gen-chip gen-chip-aspect ${value === effectiveAspect ? 'gen-chip-active' : ''}`}
               onClick={() => { if (!busy) setAspect(value); }}
             >
               <Text className='gen-chip-text'>{ASPECT_LABELS[value] || value}</Text>

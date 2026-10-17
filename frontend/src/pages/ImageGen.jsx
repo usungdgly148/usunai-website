@@ -5,15 +5,23 @@ import { useStore } from '../store.jsx';
 import { apiFetch } from '../authFetch.js';
 import RefImagePicker, { MAX_REF_IMAGES, toApiImages } from '../RefImagePicker.jsx';
 
-// 宽高比与服务端 server/gemini-image.mjs 的 IMAGE_ASPECT_RATIOS 保持一致。
-const ASPECTS = [
-  { value: '1:1', label: '方形', hint: '1:1' },
-  { value: '16:9', label: '横版', hint: '16:9' },
-  { value: '9:16', label: '竖版', hint: '9:16' },
-  { value: '4:3', label: '横版', hint: '4:3' },
-  { value: '3:4', label: '竖版', hint: '3:4' },
-];
-// 可选模型 / 分辨率 / 点数全部由服务端下发（后台改 KV 即生效），前端不硬编码任何点数。
+// 比例**文案**表。可用哪些比例由服务端按模型下发（`models[].aspectRatios`），
+// 前端不再自己维护一份「有哪些比例」的清单 —— 那是历史上三份副本不同步的根源。
+// 新增比例只需在这里补一行中文；没写到的会用比值兜底，不会崩。
+const ASPECT_LABELS = {
+  '1:1': { label: '方形', hint: '1:1' },
+  '16:9': { label: '横版', hint: '16:9' },
+  '9:16': { label: '竖版', hint: '9:16' },
+  '4:3': { label: '横版', hint: '4:3' },
+  '3:4': { label: '竖版', hint: '3:4' },
+  '2:3': { label: '竖版', hint: '2:3' },
+  '3:2': { label: '横版', hint: '3:2' },
+  '21:9': { label: '超宽', hint: '21:9' },
+  '1:4': { label: '超长竖', hint: '1:4' },
+  '4:1': { label: '超长横', hint: '4:1' },
+};
+const aspectLabel = (value) => ASPECT_LABELS[value] || { label: '自定义', hint: value };
+// 可选模型 / 分辨率 / 点数 / 比例全部由服务端下发（后台改 KV 即生效），前端不硬编码任何点数。
 
 export default function ImageGen() {
   const { user, openRechargeModal, refreshCurrentUserCompute, addAsset } = useStore();
@@ -22,6 +30,8 @@ export default function ImageGen() {
   const [refs, setRefs] = useState([]);
   const [models, setModels] = useState([]);
   const [model, setModel] = useState('');
+  // 顶层比例列表：只在服务端没给 models[].aspectRatios 时兜底（老服务端 / 字段缺失）
+  const [fallbackRatios, setFallbackRatios] = useState([]);
   const [resolution, setResolution] = useState('');
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -39,11 +49,18 @@ export default function ImageGen() {
         if (!alive || !data || !data.ok) return;
         const list = Array.isArray(data.models) ? data.models : [];
         setModels(list);
+        const topRatios = Array.isArray(data.aspectRatios) ? data.aspectRatios : [];
+        setFallbackRatios(topRatios);
         const pickedModel = list.find((item) => item.id === data.defaultModel) || list[0];
         if (pickedModel) {
           setModel(pickedModel.id);
           const wanted = (pickedModel.resolutions || []).find((item) => item.value === data.defaultResolution);
           setResolution((wanted || (pickedModel.resolutions || [])[0] || {}).value || '');
+          // 初始比例也要落在该模型支持范围内：后台配的默认比例可能是另一个模型才有的值
+          const ratios = (Array.isArray(pickedModel.aspectRatios) && pickedModel.aspectRatios.length)
+            ? pickedModel.aspectRatios
+            : topRatios;
+          if (ratios.length) setAspect((prev) => (ratios.includes(prev) ? prev : ratios[0]));
         }
       })
       .catch(() => {});
@@ -56,13 +73,26 @@ export default function ImageGen() {
   // 参考图能力由服务端下发（gpt-image-* 系列走 OpenAI 创建接口，没有参考图入口）
   const refsSupported = !currentModel || currentModel.supportsRefs !== false;
 
-  // 换模型时，若当前分辨率不被支持就自动落到该模型的第一档
+  // 当前模型实际可用的比例：优先 models[].aspectRatios，其次顶层字段，最后用文案表的键兜底。
+  // 三者顺序不能反 —— 顶层是「默认模型」的列表，拿它渲染 gpt-image 会多出它不支持的比例。
+  const ratioValues = (currentModel && Array.isArray(currentModel.aspectRatios) && currentModel.aspectRatios.length)
+    ? currentModel.aspectRatios
+    : (fallbackRatios.length ? fallbackRatios : Object.keys(ASPECT_LABELS));
+  const aspects = ratioValues.map((value) => ({ value, ...aspectLabel(value) }));
+
+  // 换模型时，若当前分辨率/比例不被支持就自动落到该模型的第一项
   const pickModel = (nextModelId) => {
     const entry = models.find((item) => item.id === nextModelId);
     setModel(nextModelId);
     const options = (entry && entry.resolutions) || [];
     if (!options.some((item) => item.value === resolution)) {
       setResolution((options[0] || {}).value || '');
+    }
+    // 比例同理：gpt-image 系只有 5 个，从 21:9 切过去必须收敛，
+    // 否则用户以为还是 21:9，服务端却回落到方图（点了生成才发现）
+    const nextRatios = (entry && Array.isArray(entry.aspectRatios)) ? entry.aspectRatios : [];
+    if (nextRatios.length && !nextRatios.includes(aspect)) {
+      setAspect(nextRatios[0]);
     }
     // 新模型不吃参考图就把已选的图清掉，避免「传了图却没生效」还照样扣点
     if (entry && entry.supportsRefs === false) setRefs([]);
@@ -236,7 +266,7 @@ export default function ImageGen() {
         <div className="mt-3">
           <div className="text-sm font-medium text-slate-700 mb-2">画面比例</div>
           <div className="flex flex-wrap gap-2">
-            {ASPECTS.map((item) => (
+            {aspects.map((item) => (
               <button
                 key={item.value}
                 type="button"

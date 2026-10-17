@@ -6,8 +6,10 @@ import { fetchRelayModels } from '../cozeApi.js';
 import { AdminPageHeader, Card, PrimaryButton } from '../adminUI.jsx';
 import RefImagePicker, { toApiImages } from '../RefImagePicker.jsx';
 
-// 与 server/gemini-image.mjs 的 IMAGE_ASPECT_RATIOS / IMAGE_RESOLUTIONS 保持一致（那边是唯一实现）。
-const ASPECTS = ['1:1', '16:9', '9:16', '4:3', '3:4'];
+// 后台配的是「默认比例」——全站一个值、与具体模型无关，所以这里用**并集**（10 个）。
+// ⚠️ 各模型实际能用的比例不在这里，由服务端 aspectRatiosForModel() 决定并下发到 models[].aspectRatios；
+//    这里多列出来的比例，对 gpt-image 系模型会在生成时被服务端明确拒绝，不会静默降级。
+const ASPECTS = ['1:1', '16:9', '9:16', '4:3', '3:4', '2:3', '3:2', '21:9', '1:4', '4:1'];
 const RESOLUTIONS = ['1K', '2K', '4K'];
 // 与服务端 server/gemini-image.mjs 的 IMAGE_MODEL_CANDIDATES 保持一致（那边是唯一实现）。
 // gemini-2.5-flash-image 已按主人要求移除（该模型上游无渠道，不再展示）。

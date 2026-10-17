@@ -19,8 +19,27 @@ import https from 'https';
 
 export const IMAGE_MODEL_DEFAULT = 'gemini-nano-banana-2.1';
 
-// 后台下拉给用户选的宽高比。实测 1:1 与 16:9 生效；其余为 Gemini 原生标准档位，未逐个实测。
-export const IMAGE_ASPECT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4'];
+// ===== 宽高比能力表（2026-10-18 实测确定）=====
+// 实测记录（gemini-nano-banana-2.1 / 1K，全部真出图且像素比例正确）：
+//   1:1  → 1024×1024
+//   16:9 → 1376×768
+//   21:9 → 1584×672   / 26.1s
+//   2:3  → 848×1264   / 41.8s
+//   1:4  → 512×2064   / 29.3s
+//   4:1  → 2064×512   / 102.0s  ⚠️ 极端横版明显更慢，前端「已等待 Ns」要能扛住
+//   3:2  未单独实测（是 2:3 的转置；1:4 与 4:1 双向都通过，故推定成立）
+// 比例误差来自宽高取 16 的倍数（如 21:9 实得 2.3571），属正常。
+// ⚠️ 这是 **Gemini 原生通道**的能力表。gpt-image-* 走 OpenAI 的 size 换算表，
+//    只有 OPENAI_IMAGE_SIZES 里列出的比例 —— 两者混用会让用户选了比例却被静默换成 1:1。
+export const IMAGE_ASPECT_RATIOS_GEMINI = [
+  '1:1', '16:9', '9:16', '4:3', '3:4', // 原有 5 个
+  '2:3', '3:2', '21:9', '1:4', '4:1', // 2026-10-18 新增 5 个
+];
+
+// 全站并集：**只**用于「默认比例」这种与具体模型无关的场景（后台配置读写、老客户端兜底）。
+// 生成时的校验必须用 aspectRatiosForModel(model)，绝不能拿这个当白名单。
+// （Gemini 的 10 个是 OpenAI 那 5 个的超集，所以并集就等于 Gemini 这份。）
+export const IMAGE_ASPECT_RATIOS = [...IMAGE_ASPECT_RATIOS_GEMINI];
 
 // ===== 分辨率（imageConfig.imageSize）=====
 // **实测支持（2026-10-17，gemini-nano-banana-2.1，1:1）**：
@@ -94,6 +113,21 @@ export function openAIImageSize(aspectRatio, resolution) {
   const table = OPENAI_IMAGE_SIZES[size] || OPENAI_IMAGE_SIZES[DEFAULT_IMAGE_RESOLUTION];
   const ratio = String(aspectRatio == null ? '' : aspectRatio).trim();
   return table[ratio] || table['1:1'];
+}
+
+/**
+ * 该模型实际可用的宽高比。**生成时的校验必须走这里**，不能再用全局 IMAGE_ASPECT_RATIOS。
+ *
+ * 为什么必须按模型区分：`OPENAI_IMAGE_SIZES` 每档只列了 5 个比例，`openAIImageSize()` 对
+ * 不认识的比例会**静默退回 1:1**。若拿全局并集去校验，gpt-image-* 的用户选了 21:9 会
+ * 「提示成功、扣了点、拿到方图」—— 比不给这个选项更糟。
+ */
+export function aspectRatiosForModel(model) {
+  if (imageApiStyle(model) === IMAGE_API_STYLE_OPENAI) {
+    const table = OPENAI_IMAGE_SIZES[DEFAULT_IMAGE_RESOLUTION] || {};
+    return Object.keys(table);
+  }
+  return IMAGE_ASPECT_RATIOS_GEMINI;
 }
 
 // 兜底单张扣点（各模型各档位应有自己的价；这个只在配置缺价时保底，可在 KV 里改）。
