@@ -33,6 +33,21 @@ export const IMAGE_ASPECT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4'];
 export const IMAGE_RESOLUTIONS = ['1K', '2K', '4K'];
 export const DEFAULT_IMAGE_RESOLUTION = '1K';
 
+// 已接入的图片模型候选清单。作用：**新接入的模型必须能出现在后台「模型与定价」表里**，
+// 否则一旦后台保存过配置，代码里新增的模型就永远补不进配置表（KV 里没有那一条）。
+// ⚠️ 这里只是「候选」，不决定上架与价格 —— 上架与价格完全由后台配置决定。
+// ⚠️ gemini-2.5-flash-image（2026-10-17 接入）：文档端点与 payload 与现有完全一致
+//    （POST /v1beta/models/gemini-2.5-flash-image:generateContent，parts.text + imageConfig.aspectRatio，
+//     返回 inlineData），但**当前该令牌下没有可用渠道**：三种 payload 全 503，
+//     报 `No available channel for model gemini-2.5-flash-image under group 0.17x生图`，
+//     且 /v1/models 里也没有它。⇒ 先把模型接入代码、后台可见可配；等中转站给它开渠道后再上架。
+export const IMAGE_MODEL_CANDIDATES = [
+  'gemini-nano-banana-2.1',
+  'gemini-2.5-flash-image',
+  'gpt-image-2.5-flare',
+  'gpt-image-2.5-sunburst',
+];
+
 // 兜底单张扣点（各模型各档位应有自己的价；这个只在配置缺价时保底，可在 KV 里改）。
 export const DEFAULT_IMAGE_PRICE_POINTS = 30;
 
@@ -344,6 +359,7 @@ export function normalizeImageModels(list, {
   legacyModel = '',
   legacyPrice = 0,
   fallbackPoints = DEFAULT_IMAGE_PRICE_POINTS,
+  includeCandidates = true,
 } = {}) {
   const source = Array.isArray(list) ? list : [];
   const out = [];
@@ -365,14 +381,25 @@ export function normalizeImageModels(list, {
       prices,
     });
   }
-  if (out.length) return out;
   // 老配置迁移：只有一个模型 + 一个价 → 只开放默认档位，其余档位留给后台补价
-  const id = String(legacyModel || '').trim() || IMAGE_MODEL_DEFAULT;
-  const legacy = Number(legacyPrice);
-  const points = Number.isFinite(legacy) && legacy > 0
-    ? Math.ceil(legacy)
-    : Math.ceil(Number(fallbackPoints) > 0 ? Number(fallbackPoints) : DEFAULT_IMAGE_PRICE_POINTS);
-  return [{ id, label: id, enabled: true, prices: { [DEFAULT_IMAGE_RESOLUTION]: points } }];
+  if (!out.length) {
+    const legacyId = String(legacyModel || '').trim() || IMAGE_MODEL_DEFAULT;
+    const legacy = Number(legacyPrice);
+    const points = Number.isFinite(legacy) && legacy > 0
+      ? Math.ceil(legacy)
+      : Math.ceil(Number(fallbackPoints) > 0 ? Number(fallbackPoints) : DEFAULT_IMAGE_PRICE_POINTS);
+    out.push({ id: legacyId, label: legacyId, enabled: true, prices: { [DEFAULT_IMAGE_RESOLUTION]: points } });
+  }
+  // 已知候选补齐：确保新接入的模型一定出现在后台「模型与定价」表里（未上架、无价，等主人填）。
+  // 不补齐的话，一旦后台保存过一次配置，代码里新增的模型就永远不会出现在配置表里。
+  if (includeCandidates) {
+    for (const id of IMAGE_MODEL_CANDIDATES) {
+      if (!out.some((model) => model.id === id)) {
+        out.push({ id, label: id, enabled: false, prices: {} });
+      }
+    }
+  }
+  return out;
 }
 
 /**

@@ -34,7 +34,7 @@ export function toApiImages(refs) {
  * 参考图选择器：最多 MAX_REF_IMAGES 张，选中即压缩成 ~1024px 的 JPEG。
  * 受控组件 —— 图片数组由父级持有（提交时要拿 data）。
  */
-export default function RefImagePicker({ value = [], onChange, disabled = false }) {
+export default function RefImagePicker({ value = [], onChange, disabled = false, showHint = true }) {
   const inputRef = useRef(null);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState('');
@@ -155,9 +155,11 @@ export default function RefImagePicker({ value = [], onChange, disabled = false 
         onChange={pick}
       />
 
-      <p className="mt-2 text-xs text-slate-400 leading-relaxed">
-        参考图会让模型「照着改」，不是像素级编辑。上传后自动压到 1024px 以内（单张 ≤2MB）。
-      </p>
+      {showHint && (
+        <p className="mt-2 text-xs text-slate-400 leading-relaxed">
+          参考图会让模型「照着改」，不是像素级编辑。上传后自动压到 1024px 以内（单张 ≤2MB）。
+        </p>
+      )}
 
       {error && (
         <p className="mt-1.5 text-xs text-rose-600 flex items-start gap-1">

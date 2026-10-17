@@ -13,8 +13,7 @@ const ASPECTS = [
   { value: '4:3', label: '横版', hint: '4:3' },
   { value: '3:4', label: '竖版', hint: '3:4' },
 ];
-// 价格与可选模型/分辨率全部由服务端下发（后台改 KV 即生效），前端不硬编码任何点数。
-const PRICE_FALLBACK = 30;
+// 可选模型 / 分辨率 / 点数全部由服务端下发（后台改 KV 即生效），前端不硬编码任何点数。
 
 export default function ImageGen() {
   const { user, openRechargeModal, refreshCurrentUserCompute } = useStore();
@@ -24,13 +23,12 @@ export default function ImageGen() {
   const [models, setModels] = useState([]);
   const [model, setModel] = useState('');
   const [resolution, setResolution] = useState('');
-  const [price, setPrice] = useState(PRICE_FALLBACK);
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
 
-  // 模型/分辨率/价格都由服务端下发，避免前端硬编码与服务端脱节（后台改 KV 后刷新即生效）
+  // 模型/分辨率/点数都由服务端下发，避免前端硬编码与服务端脱节（后台改 KV 后刷新即生效）
   useEffect(() => {
     let alive = true;
     apiFetch('/api/image-gen/config')
@@ -44,21 +42,15 @@ export default function ImageGen() {
           setModel(pickedModel.id);
           const wanted = (pickedModel.resolutions || []).find((item) => item.value === data.defaultResolution);
           setResolution((wanted || (pickedModel.resolutions || [])[0] || {}).value || '');
-          setPrice(Number((wanted || {}).points) > 0 ? Number(wanted.points) : (Math.ceil(Number(data.pricePoints)) || PRICE_FALLBACK));
         }
       })
       .catch(() => {});
     return () => { alive = false; };
   }, []);
 
-  // 当前模型的可用档位 + 当前档位价格（组合变更时同步一次价格，避免显示与服务端不一致）
+  // 当前模型的可用档位（每个档位自带点数，直接标在按钮上）
   const currentModel = models.find((item) => item.id === model) || models[0] || null;
   const resolutions = (currentModel && currentModel.resolutions) || [];
-  const currentPrice = Number((resolutions.find((item) => item.value === resolution) || {}).points);
-
-  useEffect(() => {
-    if (Number.isFinite(currentPrice) && currentPrice > 0) setPrice(currentPrice);
-  }, [currentPrice]);
 
   // 换模型时，若当前分辨率不被支持就自动落到该模型的第一档
   const pickModel = (nextModelId) => {
@@ -126,11 +118,8 @@ export default function ImageGen() {
     <div className="max-w-4xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-          <Wand2 size={22} className="text-brand-600" /> AI 生图
+          <Wand2 size={22} className="text-brand-600" /> AI全能设计
         </h1>
-        <p className="text-sm text-slate-500 mt-1.5">
-          描述画面即可生成，也可以上传参考图让模型「照着改」。每次消耗 {price} 点算力，生成失败自动退回。
-        </p>
       </div>
 
       {!user && (
@@ -159,7 +148,7 @@ export default function ImageGen() {
         <div className="text-right text-xs text-slate-400 mt-1">{prompt.length}/2000</div>
 
         <div className="mt-4 pt-4 border-t border-slate-100">
-          <RefImagePicker value={refs} onChange={setRefs} disabled={busy} />
+          <RefImagePicker value={refs} onChange={setRefs} disabled={busy} showHint={false} />
         </div>
 
         {/* 模型 + 清晰度：只列后台已上架的组合，点数随组合变化（前端不写死任何价格） */}
@@ -204,9 +193,6 @@ export default function ImageGen() {
                   </button>
                 ))}
               </div>
-              <p className="mt-1.5 text-xs text-slate-400 leading-relaxed">
-                同一模型下清晰度越高越慢、点数越多：1K 约 25 秒，2K 约 37 秒（2048px），4K 约 47 秒（4096px、约 18MB）。
-              </p>
             </div>
           )}
         </div>

@@ -3009,7 +3009,7 @@ const server = http.createServer(async (req, res) => {
           amount: price,
           requestId,
           allowPartial: false,
-          computeRecord: { id: computeId, type: 'consume', amount: price, reason: 'AI 生图', meta: { model, resolution, aspectRatio, promptLength: prompt.length, refImageCount: refImages.length }, createdAt: startedAt, source: 'server-image' },
+          computeRecord: { id: computeId, type: 'consume', amount: price, reason: 'AI 全能设计', meta: { model, resolution, aspectRatio, promptLength: prompt.length, refImageCount: refImages.length }, createdAt: startedAt, source: 'server-image' },
           metricRecord: { id: metricId, requestId, providerId: settings.providerId, model, resolution, aspectRatio, ok: true, createdAt: startedAt },
         });
         if (!charge.ok) {
@@ -3043,7 +3043,7 @@ const server = http.createServer(async (req, res) => {
                 id: `${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
                 type: 'refund',
                 amount: charged.chargedPoints,
-                reason: 'AI 生图失败退款',
+                reason: 'AI 全能设计失败退款',
                 meta: { refundFor: requestId },
                 createdAt: new Date().toISOString(),
                 source: 'server-image',

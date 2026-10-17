@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import {
   DEFAULT_IMAGE_PRICE_POINTS,
   IMAGE_MAX_REF_IMAGES,
+  IMAGE_MODEL_CANDIDATES,
   IMAGE_REF_BODY_LIMIT,
   IMAGE_REF_MAX_BYTES,
   IMAGE_RESOLUTIONS,
@@ -178,8 +179,19 @@ check('重复模型去重', normModels.filter((item) => item.id === 'm1').length
 check('价格取整并过滤非法值', normModels[0].prices['2K'] === 61 && !normModels[0].prices['4K'], JSON.stringify(normModels[0].prices));
 check('没配价的模型自动不上架', normModels.find((item) => item.id === 'm2').enabled === false);
 check('空 id 被丢弃', !normModels.some((item) => item.id === ''));
-const legacyModels = normalizeImageModels(null, { legacyModel: 'old-model', legacyPrice: 20 });
+const legacyModels = normalizeImageModels(null, { legacyModel: 'old-model', legacyPrice: 20, includeCandidates: false });
 check('老配置迁移成单模型单档', legacyModels.length === 1 && legacyModels[0].prices['1K'] === 20, JSON.stringify(legacyModels));
+
+// 新接入的模型必须自动出现在后台配置表（未上架、无价），否则后台永远看不到它
+const withCandidates = normalizeImageModels(null, { legacyModel: 'gemini-nano-banana-2.1', legacyPrice: 30 });
+check('候选清单含 gemini-2.5-flash-image', IMAGE_MODEL_CANDIDATES.includes('gemini-2.5-flash-image'), IMAGE_MODEL_CANDIDATES.join(','));
+check(
+  '新模型自动补进配置表且未上架',
+  withCandidates.some((item) => item.id === 'gemini-2.5-flash-image' && item.enabled === false && Object.keys(item.prices).length === 0),
+  JSON.stringify(withCandidates.map((item) => item.id)),
+);
+check('候选补齐不影响原模型价格', withCandidates.find((item) => item.id === 'gemini-nano-banana-2.1').prices['1K'] === 30);
+check('候选补齐不会顺带把模型上架', withCandidates.filter((item) => item.enabled !== false).length === 1);
 
 // ===== 8. 计费解析：模型 × 分辨率 → 点数（**唯一计费入口**）=====
 const settingsFixture = {
@@ -222,6 +234,23 @@ check('后台页有 1K/2K/4K 三档价格输入', adminPageSrc.includes("const R
 check('后台页能从中转站拉模型列表', adminPageSrc.includes('fetchRelayModels'));
 check('后台页保存配置到 settings 接口', adminPageSrc.includes("adminFetch('/api/admin/image-gen/settings'"));
 check('后台页透传分辨率', adminPageSrc.includes('resolution, aspectRatio: aspect'));
+check('后台页候选含 gemini-2.5-flash-image', adminPageSrc.includes("'gemini-2.5-flash-image'"));
+
+// ===== 11. 名称统一为「AI全能设计」+ 入口归位「AI 创作」组 =====
+const sidebarSrc = read('frontend/src/components.jsx');
+const adminUiSrc = read('frontend/src/adminUI.jsx');
+check('用户页标题改为 AI全能设计', userPageSrc.includes('AI全能设计') && !userPageSrc.includes('AI 生图'));
+check('后台导航改名', adminUiSrc.includes("label: 'AI全能设计'") && !adminUiSrc.includes("label: 'AI 生图'"));
+check('后台页标题改名', adminPageSrc.includes('title="AI全能设计"'));
+check('后端流水名称同步', serverSrc.includes("reason: 'AI 全能设计'"));
+check('侧栏入口挂在 AI 创作 组内第一项', sidebarSrc.includes('group.name === DESIGN_ENTRY_GROUP'));
+check('侧栏入口有兜底（分组改名也不丢入口）', sidebarSrc.includes('hasDesignEntryGroup'));
+check('分类「AI 生图」保持原样（不与入口混用）', read('frontend/src/mock.js').includes("name: 'AI 生图'"));
+
+// ===== 12. 用户页三处说明文案已移除 =====
+check('已删「描述画面即可生成…」', !userPageSrc.includes('描述画面即可生成'));
+check('已删「清晰度越高越慢…」', !userPageSrc.includes('清晰度越高越慢'));
+check('用户页关闭参考图说明（不带到页面）', userPageSrc.includes('showHint={false}'));
 
 // ===== 结果 =====
 const total = pass + failures.length;

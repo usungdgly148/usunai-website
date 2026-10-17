@@ -9,8 +9,9 @@ import RefImagePicker, { toApiImages } from '../RefImagePicker.jsx';
 // 与 server/gemini-image.mjs 的 IMAGE_ASPECT_RATIOS / IMAGE_RESOLUTIONS 保持一致（那边是唯一实现）。
 const ASPECTS = ['1:1', '16:9', '9:16', '4:3', '3:4'];
 const RESOLUTIONS = ['1K', '2K', '4K'];
-// 接口还没返回时的兜底模型名（真实列表以「拉取模型列表」+ 已保存配置为准）
-const MODEL_FALLBACKS = ['gemini-nano-banana-2.1', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
+// 与服务端 server/gemini-image.mjs 的 IMAGE_MODEL_CANDIDATES 保持一致（那边是唯一实现）。
+// gemini-2.5-flash-image：2026-10-17 接入，文档端点/payload 与现有一致，但该令牌下暂无可用渠道（503）。
+const MODEL_FALLBACKS = ['gemini-nano-banana-2.1', 'gemini-2.5-flash-image', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
 
 const inputCls = 'w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-500';
 const priceCls = 'w-20 px-2 py-1.5 border border-slate-300 rounded-lg text-sm text-center focus:outline-none focus:border-blue-500';
@@ -197,7 +198,7 @@ export default function AdminImageGen() {
   return (
     <div>
       <AdminPageHeader
-        title="AI 生图"
+        title="AI全能设计"
         subtitle="调用 Gemini 原生图片模型，支持文生图、参考图（图生图）与 1K/2K/4K 清晰度。此页测试不扣用户算力。"
       />
 

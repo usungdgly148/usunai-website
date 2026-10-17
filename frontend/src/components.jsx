@@ -69,6 +69,11 @@ export function Sidebar() {
 
   const isActive = (cat) => activeCategory === cat;
 
+  // 「AI全能设计」= 独立生图功能页（不是分类筛选）。它挂在「AI 创作」分组下作为第一项；
+  // 若后台把该分组改名/删掉，则退回到首页下方显示，避免入口直接消失。
+  const DESIGN_ENTRY_GROUP = 'AI 创作';
+  const hasDesignEntryGroup = groupEntries.some((group) => group.name === DESIGN_ENTRY_GROUP);
+
 
   const homeItemClass = (active) =>
     `group relative flex items-center gap-4 px-5 py-3.5 rounded-full text-[15px] font-medium transition-all duration-200 ease-out hover:translate-x-1 hover:text-brand-700 active:scale-[0.98] motion-reduce:hover:translate-x-0 motion-reduce:active:scale-100 before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-[3px] before:h-5 before:rounded-full before:bg-brand-600 before:content-[''] before:origin-center before:transition-transform before:duration-200 ${active ? 'bg-brand-100 text-slate-900 before:scale-y-100' : 'text-slate-700 hover:bg-slate-200/50 before:scale-y-0'}`;
@@ -104,13 +109,16 @@ export function Sidebar() {
             </div>
           </Link>
 
-          {/* AI 生图：独立功能页。不挂在分类下 —— 分类点击是 `?category=` 筛选，不是路由跳转 */}
-          <Link to="/image-gen" onClick={() => { setSidebarOpen(false); if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'auto' }); }}>
-            <div className={homeItemClass(location.pathname === '/image-gen')}>
-              <Image size={22} strokeWidth={1.8} className="transition-transform duration-200 group-hover:scale-110 motion-reduce:group-hover:scale-100" />
-              <span>AI 生图</span>
-            </div>
-          </Link>
+          {/* AI全能设计：独立功能页。正常情况下挂在「AI 创作」组内第一项；
+              这里只在后台分组被改名/删掉时兜底显示，避免入口整个消失 */}
+          {!hasDesignEntryGroup && (
+            <Link to="/image-gen" onClick={() => { setSidebarOpen(false); if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'auto' }); }}>
+              <div className={homeItemClass(location.pathname === '/image-gen')}>
+                <Image size={22} strokeWidth={1.8} className="transition-transform duration-200 group-hover:scale-110 motion-reduce:group-hover:scale-100" />
+                <span>AI全能设计</span>
+              </div>
+            </Link>
+          )}
 
           {/* 分组 */}
           <div className="mt-2 space-y-0">
@@ -119,6 +127,15 @@ export function Sidebar() {
                 {gIdx > 0 && <div className="border-t border-slate-300/60 mb-4 mx-1" />}
                 <div className="px-5 mb-1.5 text-[13px] font-medium text-slate-600 tracking-wide">{group.name}</div>
                 <div className="space-y-0.5">
+                  {/* 「AI 创作」组的第一项固定是 AI全能设计（独立功能页，不是分类筛选） */}
+                  {group.name === DESIGN_ENTRY_GROUP && (
+                    <Link to="/image-gen" onClick={() => setSidebarOpen(false)}>
+                      <div className={subItemClass(location.pathname === '/image-gen')}>
+                        <Image size={18} strokeWidth={1.8} className="transition-transform duration-200 group-hover:scale-110 motion-reduce:group-hover:scale-100" />
+                        <span>AI全能设计</span>
+                      </div>
+                    </Link>
+                  )}
                   {group.items.map(item => {
                     const Icon = ICON_MAP[item.icon] || Home;
                     const cat = item.cat || item.id;

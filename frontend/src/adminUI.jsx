@@ -27,7 +27,7 @@ export const ADMIN_NAV = [
     label: '内容管理',
     items: [
       { label: '授权中心', icon: KeyRound, href: '/admin/auth-providers' },
-      { label: 'AI 生图', icon: Image, href: '/admin/image-gen' },
+      { label: 'AI全能设计', icon: Image, href: '/admin/image-gen' },
       { label: '知识库', icon: BookOpen, href: '/admin/knowledge-bases' },
       { label: '小程序设计', icon: Smartphone, href: '/admin/miniapp-design' },
       { label: '小程序设置', icon: KeyRound, href: '/admin/miniapp-settings' },
