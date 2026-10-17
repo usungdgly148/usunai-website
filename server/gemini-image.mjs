@@ -20,14 +20,26 @@ export const IMAGE_MODEL_DEFAULT = 'gemini-nano-banana-2.1';
 // 后台下拉给用户选的宽高比。实测 1:1 与 16:9 生效；其余为 Gemini 原生标准档位，未逐个实测。
 export const IMAGE_ASPECT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4'];
 
-// 单张扣点默认值（可在 KV `imageGenSettings.pricePoints` 覆盖）。
-// 2026-10-17 主人定价：统一 30 点/张（不再区分文生图 / 带参考图）。
+// ===== 分辨率（imageConfig.imageSize）=====
+// **实测支持（2026-10-17，gemini-nano-banana-2.1，1:1）**：
+//   不传 → 1024×1024 / 1.51MB / 29.8s / candidatesToken 599
+//   1K   → 1024×1024 / 1.35MB / 23.3s / 565
+//   2K   → **2048×2048** / 5.40MB / 36.6s / 2037
+//   4K   → **4096×4096** / 18.46MB / 47.4s / 3040
+// ⇒ 分辨率是真生效的，且 4K 的 token 是 1K 的 5.4 倍（成本确实上升，必须按档位定价）。
+// ⚠️ 另外两个模型（gpt-image-2.5-flare / -sunburst）当前走不通：前者连不传分辨率都回 503，
+//    后者报「No available channel … under group」，所以**它们是否支持 imageSize 无法判定**，
+//    后台默认不上架，等上游有渠道了再开。
+export const IMAGE_RESOLUTIONS = ['1K', '2K', '4K'];
+export const DEFAULT_IMAGE_RESOLUTION = '1K';
+
+// 兜底单张扣点（各模型各档位应有自己的价；这个只在配置缺价时保底，可在 KV 里改）。
 export const DEFAULT_IMAGE_PRICE_POINTS = 30;
 
-// 上游单张耗时实测 20~23 秒（带 3 张参考图 42 秒），留足余量。
-export const IMAGE_TIMEOUT_MS = 150000;
-// 下载上限：实测最大 852KB，给 20MB 余量（换更高分辨率模型也不至于被卡）。
-export const IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+// 上游单张耗时实测 20~23 秒（4K 47 秒、带 3 张参考图 42 秒），留足余量。
+export const IMAGE_TIMEOUT_MS = 180000;
+// 下载上限：4K PNG 实测 18.46MB，20MB 会踩线 ⇒ 提到 64MB。
+export const IMAGE_MAX_BYTES = 64 * 1024 * 1024;
 
 // ===== 参考图（图生图）=====
 // 实测（2026-10-17，同一端点、同一模型）：把参考图放进 `parts[].inlineData` 就能被读取，
@@ -120,11 +132,18 @@ export function prepareReferenceImages(list) {
   return out;
 }
 
+/** 归一化分辨率：只认 1K/2K/4K（大小写不敏感），其它一律当未指定。 */
+export function normalizeResolution(value) {
+  const text = String(value == null ? '' : value).trim().toUpperCase();
+  return IMAGE_RESOLUTIONS.includes(text) ? text : '';
+}
+
 /**
  * 构造请求体。aspectRatio 为空则不传 imageConfig（走上游默认）。
  * 有参考图时：text 在前、图在后，全部平铺在同一个 parts 数组里（实测上游按顺序读）。
+ * resolution 非空时写 `imageConfig.imageSize`（实测真生效，见文件头实测表）。
  */
-export function buildImagePayload({ prompt, aspectRatio, images } = {}) {
+export function buildImagePayload({ prompt, aspectRatio, resolution, images } = {}) {
   const text = String(prompt == null ? '' : prompt).trim();
   if (!text) throw new Error('请填写画面描述');
   const refs = prepareReferenceImages(images);
@@ -132,7 +151,12 @@ export function buildImagePayload({ prompt, aspectRatio, images } = {}) {
   for (const image of refs) parts.push({ inlineData: { mimeType: image.mimeType, data: image.data } });
   const generationConfig = { responseModalities: ['IMAGE'] };
   const ratio = String(aspectRatio == null ? '' : aspectRatio).trim();
-  if (ratio) generationConfig.imageConfig = { aspectRatio: ratio };
+  const size = normalizeResolution(resolution);
+  if (ratio || size) {
+    generationConfig.imageConfig = {};
+    if (ratio) generationConfig.imageConfig.aspectRatio = ratio;
+    if (size) generationConfig.imageConfig.imageSize = size;
+  }
   return { contents: [{ role: 'user', parts }], generationConfig };
 }
 
@@ -181,6 +205,11 @@ export function describeUpstreamError(statusCode, bodyText) {
   }
   if (statusCode === 400) {
     return { code: 'IMAGE_BAD_REQUEST', status: 502, message: `图片生成参数被上游拒绝${detail ? '（上游：' + detail + '）' : ''}` };
+  }
+  // 503 实测有两种成因（都用这一条覆盖）：模型服务临时不可用、或该分组下没有可用渠道。
+  // 2026-10-17 实测：gpt-image-2.5-flare 连不传分辨率都 503；-sunburst 报「No available channel …」。
+  if (statusCode === 503) {
+    return { code: 'IMAGE_MODEL_UNAVAILABLE', status: 503, message: `该模型上游暂无可用渠道或服务暂时不可用，请换一个模型或稍后再试${detail ? '（上游：' + detail + '）' : ''}` };
   }
   return { code: 'IMAGE_UPSTREAM_ERROR', status: 502, message: `图片生成上游异常（HTTP ${statusCode}）${detail ? '：' + detail : ''}` };
 }
@@ -300,4 +329,88 @@ export function downloadImage(url, { timeoutMs = 60000, maxBytes = IMAGE_MAX_BYT
 export function makeImageStorageKey(mimeType) {
   const ext = /png/i.test(String(mimeType || '')) ? 'png' : /webp/i.test(String(mimeType || '')) ? 'webp' : 'jpg';
   return `uploads/gen-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+}
+
+// ===== 定价（模型 × 分辨率 → 点数）=====
+// 设计要点：价格**不在代码里写死**，全部来自 KV `imageGenSettings.models[].prices`；
+// 代码只负责「哪个组合合法、该扣多少」，后台随时改价、改上架模型都不需要发版。
+
+/**
+ * 归一化后台配置的模型清单。用于把 KV 里的脏数据收敛成可信结构。
+ * 每条：{ id, label, enabled, prices: { '1K':30, '2K':60, '4K':120 } }
+ * 兼容老配置（只有 `model` + `pricePoints` 的单模型结构）。
+ */
+export function normalizeImageModels(list, {
+  legacyModel = '',
+  legacyPrice = 0,
+  fallbackPoints = DEFAULT_IMAGE_PRICE_POINTS,
+} = {}) {
+  const source = Array.isArray(list) ? list : [];
+  const out = [];
+  for (const item of source) {
+    const id = String((item && item.id) || '').trim();
+    if (!id) continue;
+    if (out.some((model) => model.id === id)) continue;
+    const pricesRaw = (item && item.prices) || {};
+    const prices = {};
+    for (const resolution of IMAGE_RESOLUTIONS) {
+      const value = Number(pricesRaw[resolution]);
+      if (Number.isFinite(value) && value > 0) prices[resolution] = Math.ceil(value);
+    }
+    out.push({
+      id,
+      label: String((item && item.label) || '').trim() || id,
+      // 没配价的模型视为未上架（否则用户能选到「无价」组合）
+      enabled: item && item.enabled === false ? false : Object.keys(prices).length > 0,
+      prices,
+    });
+  }
+  if (out.length) return out;
+  // 老配置迁移：只有一个模型 + 一个价 → 只开放默认档位，其余档位留给后台补价
+  const id = String(legacyModel || '').trim() || IMAGE_MODEL_DEFAULT;
+  const legacy = Number(legacyPrice);
+  const points = Number.isFinite(legacy) && legacy > 0
+    ? Math.ceil(legacy)
+    : Math.ceil(Number(fallbackPoints) > 0 ? Number(fallbackPoints) : DEFAULT_IMAGE_PRICE_POINTS);
+  return [{ id, label: id, enabled: true, prices: { [DEFAULT_IMAGE_RESOLUTION]: points } }];
+}
+
+/**
+ * 解析一次请求最终用哪个模型、哪档分辨率、扣多少点。
+ * 返回 { ok:true, model, label, resolution, points } 或 { ok:false, code, message }。
+ * ⚠️ 这是**计费唯一入口**：路由不许自己算价，否则迟早两处不一致。
+ */
+export function resolveImageSelection(settings, requestedModel, requestedResolution) {
+  const models = settings && Array.isArray(settings.models) ? settings.models : [];
+  const enabled = models.filter((model) => model && model.enabled !== false);
+  if (!enabled.length) {
+    return { ok: false, code: 'IMAGE_NO_MODEL_AVAILABLE', message: '暂时没有可用的生图模型，请稍后再试' };
+  }
+  const wanted = String(requestedModel == null ? '' : requestedModel).trim();
+  const fallbackModel = String((settings && settings.defaultModel) || '').trim();
+  const modelId = wanted || fallbackModel || enabled[0].id;
+  const entry = enabled.find((model) => model.id === modelId);
+  if (!entry) {
+    return { ok: false, code: 'IMAGE_MODEL_NOT_AVAILABLE', message: `模型 ${modelId} 当前未上架，请换一个模型` };
+  }
+  const supported = Object.keys(entry.prices || {});
+  if (!supported.length) {
+    return { ok: false, code: 'IMAGE_PRICE_NOT_CONFIGURED', message: '该模型还没有配置价格，请联系管理员' };
+  }
+  const asked = normalizeResolution(requestedResolution);
+  const presetDefault = normalizeResolution(settings && settings.defaultResolution);
+  const resolution = asked
+    || (supported.includes(presetDefault) ? presetDefault : (supported.includes(DEFAULT_IMAGE_RESOLUTION) ? DEFAULT_IMAGE_RESOLUTION : supported[0]));
+  if (!supported.includes(resolution)) {
+    return { ok: false, code: 'IMAGE_RESOLUTION_NOT_SUPPORTED', message: `模型 ${entry.label || entry.id} 不支持 ${String(requestedResolution || resolution)} 分辨率` };
+  }
+  const raw = Number(entry.prices[resolution]);
+  const fallback = Number(settings && settings.fallbackPoints);
+  const points = Number.isFinite(raw) && raw > 0
+    ? Math.ceil(raw)
+    : (Number.isFinite(fallback) && fallback > 0 ? Math.ceil(fallback) : 0);
+  if (!points) {
+    return { ok: false, code: 'IMAGE_PRICE_NOT_CONFIGURED', message: '该模型该分辨率还没有配置价格，请联系管理员' };
+  }
+  return { ok: true, model: entry.id, label: entry.label || entry.id, resolution, points };
 }

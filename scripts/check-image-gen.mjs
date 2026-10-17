@@ -13,8 +13,12 @@ import {
   IMAGE_MAX_REF_IMAGES,
   IMAGE_REF_BODY_LIMIT,
   IMAGE_REF_MAX_BYTES,
+  IMAGE_RESOLUTIONS,
   buildImagePayload,
+  normalizeImageModels,
+  normalizeResolution,
   prepareReferenceImages,
+  resolveImageSelection,
 } from '../server/gemini-image.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -112,7 +116,7 @@ check('用户侧路由放宽请求体上限', serverSrc.includes('await readBody
 check('IMAGE_REF_BODY_LIMIT 已导入 index.mjs', /IMAGE_REF_BODY_LIMIT,/.test(serverSrc.slice(0, serverSrc.indexOf("} from './gemini-image.mjs';"))));
 
 const userRouteStart = serverSrc.indexOf("if (p === '/api/image-gen' && req.method === 'POST')");
-const userRoute = userRouteStart >= 0 ? serverSrc.slice(userRouteStart, userRouteStart + 4200) : '';
+const userRoute = userRouteStart >= 0 ? serverSrc.slice(userRouteStart, userRouteStart + 6000) : '';
 check('用户侧路由存在', userRouteStart > 0);
 check('已通过 body.images 读参考图', userRoute.includes('prepareReferenceImages(body.images)'));
 check(
@@ -132,7 +136,7 @@ check('后台路由透传参考图', adminRoute.includes('images: body.images'))
 check('后台路由不扣算力（无计费调用）', !adminRoute.includes('kvRecordNativeUsage'));
 
 const configStart = serverSrc.indexOf("if (p === '/api/image-gen/config' && req.method === 'GET')");
-const configRoute = configStart >= 0 ? serverSrc.slice(configStart, configStart + 900) : '';
+const configRoute = configStart >= 0 ? serverSrc.slice(configStart, configStart + 1600) : '';
 check('配置下发路由存在', configStart > 0);
 check('配置路由下发价格', configRoute.includes('pricePoints: settings.pricePoints'));
 check('配置路由下发张数上限', configRoute.includes('maxRefImages: IMAGE_MAX_REF_IMAGES'));
@@ -150,6 +154,74 @@ check('选择器单张上限与服务端一致（均为 2MB）', pickerSrc.inclu
 check('参考图压缩输出 JPEG（WebP 未实测，不用）', pickerSrc.includes("mimeType: 'image/jpeg'"));
 check('压缩函数支持指定输出格式', compressSrc.includes("mimeType = 'image/webp'"));
 check('JPEG 压缩先铺白底（避免透明变黑）', compressSrc.includes("ctx.fillStyle = '#ffffff'"));
+
+// ===== 6. 分辨率（imageConfig.imageSize，实测 1K/2K/4K 真生效）=====
+check('分辨率档位固定为 1K/2K/4K', JSON.stringify(IMAGE_RESOLUTIONS) === '["1K","2K","4K"]');
+check('normalizeResolution 大小写归一化', normalizeResolution('2k') === '2K');
+check('normalizeResolution 拒绝非法档位', normalizeResolution('8K') === '');
+
+const payload1K = buildImagePayload({ prompt: 'x', resolution: '1K' });
+check('带分辨率时写入 imageSize', payload1K.generationConfig.imageConfig.imageSize === '1K', JSON.stringify(payload1K.generationConfig));
+const payloadBoth = buildImagePayload({ prompt: 'x', aspectRatio: '16:9', resolution: '4K' });
+check('宽高比与分辨率可共存', payloadBoth.generationConfig.imageConfig.aspectRatio === '16:9' && payloadBoth.generationConfig.imageConfig.imageSize === '4K');
+check('不传分辨率时不写 imageConfig', !buildImagePayload({ prompt: 'x' }).generationConfig.imageConfig);
+check('分辨率键名是驼峰 imageSize', JSON.stringify(payload1K).includes('"imageSize"') && !JSON.stringify(payload1K).includes('image_size'));
+
+// ===== 7. 模型清单归一化（后台配置收敛）=====
+const normModels = normalizeImageModels([
+  { id: 'm1', label: 'M1', prices: { '1K': 30, '2K': 60.4, '4K': -1 } },
+  { id: 'm1', label: 'dup', prices: { '1K': 99 } },
+  { id: 'm2', enabled: true },
+  { id: '', prices: { '1K': 10 } },
+]);
+check('重复模型去重', normModels.filter((item) => item.id === 'm1').length === 1);
+check('价格取整并过滤非法值', normModels[0].prices['2K'] === 61 && !normModels[0].prices['4K'], JSON.stringify(normModels[0].prices));
+check('没配价的模型自动不上架', normModels.find((item) => item.id === 'm2').enabled === false);
+check('空 id 被丢弃', !normModels.some((item) => item.id === ''));
+const legacyModels = normalizeImageModels(null, { legacyModel: 'old-model', legacyPrice: 20 });
+check('老配置迁移成单模型单档', legacyModels.length === 1 && legacyModels[0].prices['1K'] === 20, JSON.stringify(legacyModels));
+
+// ===== 8. 计费解析：模型 × 分辨率 → 点数（**唯一计费入口**）=====
+const settingsFixture = {
+  models: normalizeImageModels([
+    { id: 'A', label: 'A', prices: { '1K': 30, '2K': 60, '4K': 120 } },
+    { id: 'B', label: 'B', prices: { '1K': 45 } },
+    { id: 'C', enabled: false, prices: { '1K': 10 } },
+  ]),
+  defaultModel: 'A',
+  defaultResolution: '1K',
+  fallbackPoints: 30,
+};
+check('同模型 1K/2K 扣点不同', resolveImageSelection(settingsFixture, 'A', '1K').points === 30 && resolveImageSelection(settingsFixture, 'A', '2K').points === 60);
+check('4K 扣点按配置取', resolveImageSelection(settingsFixture, 'A', '4K').points === 120);
+check('不同模型同档位可不同价', resolveImageSelection(settingsFixture, 'B', '1K').points === 45);
+check('未传分辨率时用默认档', resolveImageSelection(settingsFixture, 'A', '').resolution === '1K');
+check('未传模型时用默认模型', resolveImageSelection(settingsFixture, '', '1K').model === 'A');
+check('未上架模型被拒', resolveImageSelection(settingsFixture, 'C', '1K').code === 'IMAGE_MODEL_NOT_AVAILABLE');
+check('未配置的档位被拒', resolveImageSelection(settingsFixture, 'B', '4K').code === 'IMAGE_RESOLUTION_NOT_SUPPORTED');
+check('没有可用模型时被拒', resolveImageSelection({ models: [] }, 'A', '1K').code === 'IMAGE_NO_MODEL_AVAILABLE');
+const fallbackSelection = resolveImageSelection({ models: [{ id: 'A', label: 'A', enabled: true, prices: { '1K': 0 } }], fallbackPoints: 77 }, 'A', '1K');
+check('缺价时用后台兜底点数', fallbackSelection.ok === true && fallbackSelection.points === 77, JSON.stringify(fallbackSelection));
+
+// ===== 9. 服务端接线（分辨率 + 动态定价）=====
+check('用户路由统一走 resolveImageSelection 算价', serverSrc.includes('resolveImageSelection(settings, body.model, body.resolution)'));
+check('用户路由不再拿 pricePoints 当扣费额', !/const price = settings\.pricePoints/.test(serverSrc));
+check('用户路由把 model/resolution 传给生成函数', userRoute.includes('aspectRatio, resolution, model'));
+check('后台路由透传分辨率', adminRoute.includes('resolution: body.resolution'));
+check('配置下发默认分辨率', configRoute.includes('defaultResolution: settings.defaultResolution'));
+check('配置下发已上架模型清单', configRoute.includes('models,') && configRoute.includes('resolutions:'));
+check('后台配置读写路由都存在', serverSrc.includes("'/api/admin/image-gen/settings' && req.method === 'GET'") && serverSrc.includes("'/api/admin/image-gen/settings' && req.method === 'POST'"));
+check('保存配置走 KV（不发版即可改价）', serverSrc.includes("await KV.kvPut('imageGenSettings', next)"));
+check('保存后回吐最新配置', serverSrc.includes('settings: await loadImageGenSettings()'));
+
+// ===== 10. 前端接线（模型/清晰度选择）=====
+check('用户页提交 model 与 resolution', /model,\s*\n\s*resolution,/.test(userPageSrc));
+check('用户页档位来自接口下发', userPageSrc.includes('const resolutions =') && userPageSrc.includes('currentModel'));
+check('用户页没有写死价格表', !/points:\s*\d+/.test(userPageSrc));
+check('后台页有 1K/2K/4K 三档价格输入', adminPageSrc.includes("const RESOLUTIONS = ['1K', '2K', '4K']"));
+check('后台页能从中转站拉模型列表', adminPageSrc.includes('fetchRelayModels'));
+check('后台页保存配置到 settings 接口', adminPageSrc.includes("adminFetch('/api/admin/image-gen/settings'"));
+check('后台页透传分辨率', adminPageSrc.includes('resolution, aspectRatio: aspect'));
 
 // ===== 结果 =====
 const total = pass + failures.length;

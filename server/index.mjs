@@ -48,16 +48,20 @@ import { attachMiniappRequestMetric, handleMiniappObservability } from './miniap
 import { DEEPSEEK_PLATFORM, RELAY_PLATFORM, isNativePlatform } from './native-platforms.mjs';
 import {
   DEFAULT_IMAGE_PRICE_POINTS,
+  DEFAULT_IMAGE_RESOLUTION,
   IMAGE_ASPECT_RATIOS,
   IMAGE_MAX_REF_IMAGES,
   IMAGE_MODEL_DEFAULT,
   IMAGE_REF_BODY_LIMIT,
+  IMAGE_RESOLUTIONS,
   buildImagePayload,
   downloadImage,
   extractImageResult,
   makeImageStorageKey,
+  normalizeImageModels,
   prepareReferenceImages,
   requestGeminiImage,
+  resolveImageSelection,
 } from './gemini-image.mjs';
 import {
   configureKnowledgeService,
@@ -1297,28 +1301,56 @@ async function getImageProvider(providerId) {
   return { ...provider, apiKey: decryptConfigSecret(provider.apiKeyEncrypted), baseUrl: normalizeRelayBaseUrl(provider.baseUrl) };
 }
 
-// 生图配置走 KV（无需发版即可调价/换模型）：单张扣点、默认模型、用户侧用哪条凭证、默认宽高比。
+// 生图配置走 KV（无需发版即可调价/换模型/上下架）：
+//   { providerId, models:[{id,label,enabled,prices:{'1K':30,'2K':60,'4K':120}}],
+//     defaultModel, defaultResolution, fallbackPoints, aspectRatio }
+// **扣点不写死在代码里** —— 唯一价格来源是 models[].prices，见 resolveImageSelection()。
 // ⚠️ 用户侧必须显式配置 providerId —— 不能「随便取一条 relay 凭证」：
 //    站上同时存在对话专用凭证（分组里没有生图模型），取错就是 403。
 async function loadImageGenSettings() {
   const raw = (await KV.kvGet('imageGenSettings')) || {};
-  const pricePoints = Number(raw.pricePoints);
+  const legacyPrice = Number(raw.pricePoints);
+  const rawFallback = Number(raw.fallbackPoints);
+  const fallbackPoints = Number.isFinite(rawFallback) && rawFallback > 0
+    ? Math.ceil(rawFallback)
+    : (Number.isFinite(legacyPrice) && legacyPrice > 0 ? Math.ceil(legacyPrice) : DEFAULT_IMAGE_PRICE_POINTS);
+  const models = normalizeImageModels(raw.models, {
+    legacyModel: raw.model || IMAGE_MODEL_DEFAULT,
+    legacyPrice: Number.isFinite(legacyPrice) ? legacyPrice : 0,
+    fallbackPoints,
+  });
+  const enabled = models.filter((item) => item.enabled !== false);
+  const askedDefault = String(raw.defaultModel || '').trim();
+  const defaultModel = (enabled.find((item) => item.id === askedDefault) || enabled[0] || models[0] || {}).id
+    || String(raw.model || '').trim()
+    || IMAGE_MODEL_DEFAULT;
+  const defaultEntry = models.find((item) => item.id === defaultModel) || { prices: {} };
+  const supported = Object.keys(defaultEntry.prices || {});
+  const askedResolution = String(raw.defaultResolution || '').trim().toUpperCase();
+  const defaultResolution = supported.includes(askedResolution)
+    ? askedResolution
+    : (supported.includes(DEFAULT_IMAGE_RESOLUTION) ? DEFAULT_IMAGE_RESOLUTION : (supported[0] || DEFAULT_IMAGE_RESOLUTION));
   const ratio = String(raw.aspectRatio || '').trim();
   return {
-    pricePoints: Number.isFinite(pricePoints) && pricePoints > 0 ? Math.ceil(pricePoints) : DEFAULT_IMAGE_PRICE_POINTS,
-    model: String(raw.model || '').trim() || IMAGE_MODEL_DEFAULT,
     providerId: String(raw.providerId || '').trim(),
+    models,
+    defaultModel,
+    defaultResolution,
+    fallbackPoints,
+    // 兼容旧字段：pricePoints 仅作「兜底价」展示，真实计费走 models[].prices
+    pricePoints: fallbackPoints,
+    model: defaultModel,
     aspectRatio: IMAGE_ASPECT_RATIOS.includes(ratio) ? ratio : '1:1',
   };
 }
 
 // 生成 + 落盘。**上游返回的是第三方 CDN 链接（实测不是 base64）**，必须立刻下载转存本站：
 // 那个链接带日期目录、不保证长期有效，也绝不能直接交给前端（会暴露上游域名且随时失效）。
-async function generateAndStoreImage({ provider, prompt, aspectRatio, model, images }) {
+async function generateAndStoreImage({ provider, prompt, aspectRatio, resolution, model, images }) {
   // images 是前端传来的参考图（可空）。校验在 buildImagePayload → prepareReferenceImages 里做，
   // 但用户侧路由会**先校验再预扣**，避免「参数不合法还先扣钱再退钱」。
   const refs = prepareReferenceImages(images);
-  const payload = buildImagePayload({ prompt, aspectRatio, images: refs });
+  const payload = buildImagePayload({ prompt, aspectRatio, resolution, images: refs });
   const json = await requestGeminiImage({ baseUrl: provider.baseUrl, apiKey: provider.apiKey, payload, model });
   const extracted = extractImageResult(json);
   if (!extracted.ok) {
@@ -1354,6 +1386,7 @@ async function generateAndStoreImage({ provider, prompt, aspectRatio, model, ima
     model: String(model || '').trim() || IMAGE_MODEL_DEFAULT,
     prompt,
     aspectRatio: String(aspectRatio || '').trim() || null,
+    resolution: String(resolution || '').trim() || null,
     refImageCount: refs.length,
   };
 }
@@ -2798,14 +2831,30 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     // ============ Gemini 原生图片生成 ============
-    // 生图参数下发：价格 / 张数上限 / 宽高比。前端不再硬编码价格（改 KV 即生效）。
+    // 生图参数下发：**已上架的模型 + 每个模型支持的档位与点数**、默认模型/档位、宽高比、参考图上限。
+    // 只下发 enabled 且配了价的模型 —— 未上架（如上游无渠道的 gpt-image-2.5-*）绝不暴露给用户。
     // 不含凭证与密钥，未登录也允许读 —— 未登录时页面同样要显示「本次消耗多少点」。
     if (p === '/api/image-gen/config' && req.method === 'GET') {
       res.setHeader('Content-Type', 'application/json');
       try {
         const settings = await loadImageGenSettings();
+        const models = settings.models
+          .filter((item) => item.enabled !== false)
+          .map((item) => ({
+            id: item.id,
+            label: item.label || item.id,
+            resolutions: IMAGE_RESOLUTIONS
+              .filter((value) => Number(item.prices && item.prices[value]) > 0)
+              .map((value) => ({ value, points: item.prices[value] })),
+          }))
+          .filter((item) => item.resolutions.length > 0);
         res.end(JSON.stringify({
           ok: true,
+          models,
+          defaultModel: settings.defaultModel,
+          defaultResolution: settings.defaultResolution,
+          resolutions: IMAGE_RESOLUTIONS,
+          // 兼容旧前端：价格字段仍在，但真实价格按 models[].resolutions[].points
           pricePoints: settings.pricePoints,
           aspectRatio: settings.aspectRatio,
           aspectRatios: IMAGE_ASPECT_RATIOS,
@@ -2814,6 +2863,81 @@ const server = http.createServer(async (req, res) => {
       } catch (error) {
         res.statusCode = 500;
         res.end(JSON.stringify({ ok: false, error: String(error.message || error) }));
+      }
+      return;
+    }
+
+    // 后台：读生图配置（**含未上架模型**，便于编辑；价格/上架状态全在 KV，不发版即可改）
+    if (p === '/api/admin/image-gen/settings' && req.method === 'GET') {
+      if (!requireAdmin(req, res)) return;
+      res.setHeader('Content-Type', 'application/json');
+      try {
+        const settings = await loadImageGenSettings();
+        res.end(JSON.stringify({
+          ok: true,
+          settings,
+          resolutions: IMAGE_RESOLUTIONS,
+          maxRefImages: IMAGE_MAX_REF_IMAGES,
+        }));
+      } catch (error) {
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, error: String(error.message || error) }));
+      }
+      return;
+    }
+
+    // 后台：保存生图配置。**这里是「模型 × 分辨率 → 点数」的唯一写入口**。
+    // 入参 { providerId?, models:[{id,label,enabled,prices:{'1K':30,'2K':60,'4K':120}}],
+    //        defaultModel, defaultResolution, fallbackPoints, aspectRatio }
+    if (p === '/api/admin/image-gen/settings' && req.method === 'POST') {
+      if (!requireAdmin(req, res)) return;
+      const body = await readBody(req);
+      res.setHeader('Content-Type', 'application/json');
+      try {
+        const current = (await KV.kvGet('imageGenSettings')) || {};
+        if (!Array.isArray(body.models) || !body.models.length) {
+          throw Object.assign(new Error('至少要保留一个模型'), { status: 400, code: 'IMAGE_MODELS_REQUIRED' });
+        }
+        const rawFallback = Number(body.fallbackPoints);
+        const keptFallback = Number(current.fallbackPoints);
+        const fallbackPoints = Number.isFinite(rawFallback) && rawFallback > 0
+          ? Math.ceil(rawFallback)
+          : (Number.isFinite(keptFallback) && keptFallback > 0
+            ? Math.ceil(keptFallback)
+            : (Number(current.pricePoints) > 0 ? Math.ceil(Number(current.pricePoints)) : DEFAULT_IMAGE_PRICE_POINTS));
+        const models = normalizeImageModels(body.models, { fallbackPoints });
+        const enabled = models.filter((item) => item.enabled !== false);
+        if (!enabled.length) {
+          throw Object.assign(new Error('至少要上架一个模型（勾选「上架」并填好价格）'), { status: 400, code: 'IMAGE_NO_MODEL_ENABLED' });
+        }
+        const askedDefault = String(body.defaultModel || '').trim();
+        const defaultModel = enabled.some((item) => item.id === askedDefault) ? askedDefault : enabled[0].id;
+        const defaultEntry = models.find((item) => item.id === defaultModel) || { prices: {} };
+        const supported = Object.keys(defaultEntry.prices || {});
+        const askedResolution = String(body.defaultResolution || '').trim().toUpperCase();
+        const defaultResolution = supported.includes(askedResolution)
+          ? askedResolution
+          : (supported.includes(DEFAULT_IMAGE_RESOLUTION) ? DEFAULT_IMAGE_RESOLUTION : supported[0]);
+        const askedRatio = String(body.aspectRatio || '').trim();
+        const aspectRatio = IMAGE_ASPECT_RATIOS.includes(askedRatio)
+          ? askedRatio
+          : (IMAGE_ASPECT_RATIOS.includes(String(current.aspectRatio || '')) ? current.aspectRatio : '1:1');
+        const providerId = String(body.providerId || current.providerId || '').trim();
+        const next = {
+          ...current,
+          providerId,
+          models,
+          defaultModel,
+          defaultResolution,
+          fallbackPoints,
+          aspectRatio,
+          updatedAt: new Date().toISOString(),
+        };
+        await KV.kvPut('imageGenSettings', next);
+        res.end(JSON.stringify({ ok: true, settings: await loadImageGenSettings() }));
+      } catch (error) {
+        res.statusCode = error.status || 400;
+        res.end(JSON.stringify({ ok: false, error: String(error.message || error), code: error.code || 'IMAGE_SETTINGS_INVALID' }));
       }
       return;
     }
@@ -2832,6 +2956,7 @@ const server = http.createServer(async (req, res) => {
           provider,
           prompt: body.prompt,
           aspectRatio: body.aspectRatio,
+          resolution: body.resolution,
           model: String(body.model || '').trim() || settings.model,
           images: body.images,
         });
@@ -2865,10 +2990,17 @@ const server = http.createServer(async (req, res) => {
         if (prompt.length > 2000) throw Object.assign(new Error('画面描述过长（上限 2000 字）'), { code: 'IMAGE_PROMPT_TOO_LONG', status: 400 });
         // 参考图**先校验再预扣**：参数不合法（超张数/超体积/格式不对）就别去动用户算力。
         const refImages = prepareReferenceImages(body.images);
-        const model = String(body.model || '').trim() || settings.model;
+        // 计费唯一入口：模型是否上架、该模型是否支持这档分辨率、扣多少点 —— 全部由后台配置决定，
+        // 路由里**不出现任何写死的点数**。客户端传了未上架模型/未配置档位 → 直接 400，连上游都不调。
+        const selection = resolveImageSelection(settings, body.model, body.resolution);
+        if (!selection.ok) {
+          throw Object.assign(new Error(selection.message || '当前模型或分辨率不可用'), { code: selection.code, status: 400 });
+        }
+        const model = selection.model;
+        const resolution = selection.resolution;
         const askedRatio = String(body.aspectRatio || '').trim();
         const aspectRatio = IMAGE_ASPECT_RATIOS.includes(askedRatio) ? askedRatio : settings.aspectRatio;
-        const price = settings.pricePoints;
+        const price = selection.points;
         const startedAt = new Date().toISOString();
         const computeId = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
         const metricId = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
@@ -2877,8 +3009,8 @@ const server = http.createServer(async (req, res) => {
           amount: price,
           requestId,
           allowPartial: false,
-          computeRecord: { id: computeId, type: 'consume', amount: price, reason: 'AI 生图', meta: { model, aspectRatio, promptLength: prompt.length, refImageCount: refImages.length }, createdAt: startedAt, source: 'server-image' },
-          metricRecord: { id: metricId, requestId, providerId: settings.providerId, model, aspectRatio, ok: true, createdAt: startedAt },
+          computeRecord: { id: computeId, type: 'consume', amount: price, reason: 'AI 生图', meta: { model, resolution, aspectRatio, promptLength: prompt.length, refImageCount: refImages.length }, createdAt: startedAt, source: 'server-image' },
+          metricRecord: { id: metricId, requestId, providerId: settings.providerId, model, resolution, aspectRatio, ok: true, createdAt: startedAt },
         });
         if (!charge.ok) {
           res.statusCode = charge.reason === 'insufficient' ? 402 : 500;
@@ -2890,7 +3022,7 @@ const server = http.createServer(async (req, res) => {
           return;
         }
         charged = charge;
-        const result = await generateAndStoreImage({ provider, prompt, aspectRatio, model, images: refImages });
+        const result = await generateAndStoreImage({ provider, prompt, aspectRatio, resolution, model, images: refImages });
         res.end(JSON.stringify({
           ok: true,
           ...result,

@@ -13,7 +13,7 @@ const ASPECTS = [
   { value: '4:3', label: '横版', hint: '4:3' },
   { value: '3:4', label: '竖版', hint: '3:4' },
 ];
-// 真实价格从 /api/image-gen/config 取（后台改 KV 即生效），这里只是接口未返回前的兜底。
+// 价格与可选模型/分辨率全部由服务端下发（后台改 KV 即生效），前端不硬编码任何点数。
 const PRICE_FALLBACK = 30;
 
 export default function ImageGen() {
@@ -21,24 +21,54 @@ export default function ImageGen() {
   const [prompt, setPrompt] = useState('');
   const [aspect, setAspect] = useState('1:1');
   const [refs, setRefs] = useState([]);
+  const [models, setModels] = useState([]);
+  const [model, setModel] = useState('');
+  const [resolution, setResolution] = useState('');
   const [price, setPrice] = useState(PRICE_FALLBACK);
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
 
-  // 价格/张数上限由服务端下发，避免前端硬编码与服务端脱节（后台改 KV 后刷新即生效）
+  // 模型/分辨率/价格都由服务端下发，避免前端硬编码与服务端脱节（后台改 KV 后刷新即生效）
   useEffect(() => {
     let alive = true;
     apiFetch('/api/image-gen/config')
       .then((res) => res.json())
       .then((data) => {
-        const value = Math.ceil(Number(data && data.pricePoints));
-        if (alive && Number.isFinite(value) && value > 0) setPrice(value);
+        if (!alive || !data || !data.ok) return;
+        const list = Array.isArray(data.models) ? data.models : [];
+        setModels(list);
+        const pickedModel = list.find((item) => item.id === data.defaultModel) || list[0];
+        if (pickedModel) {
+          setModel(pickedModel.id);
+          const wanted = (pickedModel.resolutions || []).find((item) => item.value === data.defaultResolution);
+          setResolution((wanted || (pickedModel.resolutions || [])[0] || {}).value || '');
+          setPrice(Number((wanted || {}).points) > 0 ? Number(wanted.points) : (Math.ceil(Number(data.pricePoints)) || PRICE_FALLBACK));
+        }
       })
       .catch(() => {});
     return () => { alive = false; };
   }, []);
+
+  // 当前模型的可用档位 + 当前档位价格（组合变更时同步一次价格，避免显示与服务端不一致）
+  const currentModel = models.find((item) => item.id === model) || models[0] || null;
+  const resolutions = (currentModel && currentModel.resolutions) || [];
+  const currentPrice = Number((resolutions.find((item) => item.value === resolution) || {}).points);
+
+  useEffect(() => {
+    if (Number.isFinite(currentPrice) && currentPrice > 0) setPrice(currentPrice);
+  }, [currentPrice]);
+
+  // 换模型时，若当前分辨率不被支持就自动落到该模型的第一档
+  const pickModel = (nextModelId) => {
+    const entry = models.find((item) => item.id === nextModelId);
+    setModel(nextModelId);
+    const options = (entry && entry.resolutions) || [];
+    if (!options.some((item) => item.value === resolution)) {
+      setResolution((options[0] || {}).value || '');
+    }
+  };
 
   // 单张实测 20~23 秒，没有进度可拿，显示已等待秒数避免用户以为卡死
   useEffect(() => {
@@ -62,6 +92,8 @@ export default function ImageGen() {
         body: JSON.stringify({
           prompt: text,
           aspectRatio: aspect,
+          model,
+          resolution,
           images: toApiImages(refs),
           requestId: `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         }),
@@ -130,6 +162,55 @@ export default function ImageGen() {
           <RefImagePicker value={refs} onChange={setRefs} disabled={busy} />
         </div>
 
+        {/* 模型 + 清晰度：只列后台已上架的组合，点数随组合变化（前端不写死任何价格） */}
+        <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">
+          {models.length > 1 && (
+            <div>
+              <div className="text-sm font-medium text-slate-700 mb-2">模型</div>
+              <div className="flex flex-wrap gap-2">
+                {models.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => pickModel(item.id)}
+                    disabled={busy}
+                    className={`px-3.5 py-2 rounded-xl border text-sm transition disabled:opacity-60 ${model === item.id ? 'border-brand-600 bg-brand-50 text-brand-700 font-medium' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                  >
+                    {item.label || item.id}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {resolutions.length > 0 && (
+            <div>
+              <div className="text-sm font-medium text-slate-700 mb-2">
+                清晰度
+                {models.length <= 1 && currentModel && (
+                  <span className="ml-1.5 text-xs font-normal text-slate-400">（{currentModel.label || currentModel.id}）</span>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {resolutions.map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    onClick={() => setResolution(item.value)}
+                    disabled={busy}
+                    className={`px-3.5 py-2 rounded-xl border text-sm transition disabled:opacity-60 ${resolution === item.value ? 'border-brand-600 bg-brand-50 text-brand-700 font-medium' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                  >
+                    {item.value} <span className={`text-xs ${resolution === item.value ? 'text-brand-600' : 'text-slate-400'}`}>{item.points} 点</span>
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1.5 text-xs text-slate-400 leading-relaxed">
+                同一模型下清晰度越高越慢、点数越多：1K 约 25 秒，2K 约 37 秒（2048px），4K 约 47 秒（4096px、约 18MB）。
+              </p>
+            </div>
+          )}
+        </div>
+
         <div className="mt-3">
           <div className="text-sm font-medium text-slate-700 mb-2">画面比例</div>
           <div className="flex flex-wrap gap-2">
@@ -187,6 +268,7 @@ export default function ImageGen() {
             <img src={result.url} alt={result.prompt || '生成结果'} className="w-full rounded-xl border border-slate-200" />
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                <span>{result.resolution || resolution}</span>
                 <span>{result.aspectRatio || aspect}</span>
                 {result.refImageCount > 0 && <span>参考图 {result.refImageCount}/{MAX_REF_IMAGES}</span>}
                 <span>{Math.round((Number(result.size) || 0) / 1024)} KB</span>
