@@ -770,6 +770,48 @@ export async function kvRecordNativeUsage({ userId, amount, computeRecord, metri
   try { return run(); } catch (error) { return { ok: false, reason: 'database', msg: error.message }; }
 }
 
+// 生图失败退款：把**预扣**的点数加回余额与注册镜像，并补一条 `type:'refund'` 流水。
+//
+// 为什么需要它：生图是「先扣后生成」（必须如此 —— 上游按张收费，不能等生成完再扣，
+// 否则余额 0 也能白拿图）。一旦上游超时 / 5xx / 返回 200 但没有图，就必须原额退回，
+// 否则用户会「没拿到图还掉了算力」。
+// 与 kvRecordNativeUsage 同款事务与幂等：requestId 派生 `refund_<rid>` 标记，重复调用只退一次。
+// 消费流水 stays 不动（审计口径：消费和退款各记一条，净额正确，历史不可篡改）。
+export async function kvRefundNativeUsage({ userId, amount, computeRecord, requestId }) {
+  const uid = safeKey(userId);
+  const points = Number(amount);
+  const rid = safeKey(requestId);
+  if (!uid || !rid || !Number.isFinite(points) || points <= 0 || !computeRecord) {
+    return { ok: false, reason: 'invalid' };
+  }
+  const userKey = 'user_' + uid;
+  const regKey = 'reg_' + uid;
+  const markerKey = 'refund_' + rid;
+  const select = db.prepare('SELECT value FROM kv WHERE key = ?');
+  const put = db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)');
+  const run = db.transaction(() => {
+    const marker = select.get(markerKey);
+    if (marker) return { ...JSON.parse(marker.value), duplicate: true };
+    const userRow = select.get(userKey);
+    if (!userRow) return { ok: false, reason: 'notfound' };
+    const user = JSON.parse(userRow.value);
+    const current = Math.max(0, Number(user.points) || 0);
+    const next = current + points;
+    put.run(userKey, JSON.stringify({ ...user, points: next }, null, 2));
+    const regRow = select.get(regKey);
+    if (regRow) {
+      const reg = JSON.parse(regRow.value);
+      put.run(regKey, JSON.stringify({ ...reg, points: next }, null, 2));
+    }
+    const savedRefund = { ...computeRecord, userId: uid, amount: points };
+    put.run('compute_' + safeKey(savedRefund.id), JSON.stringify(savedRefund, null, 2));
+    const result = { ok: true, points: next, refundedPoints: points, computeRecord: savedRefund };
+    put.run(markerKey, JSON.stringify(result));
+    return result;
+  });
+  try { return run(); } catch (error) { return { ok: false, reason: 'database', msg: error.message }; }
+}
+
 // 管理员调整算力：余额、注册镜像、算力流水和订单在同一事务中落库。
 // requestId 用作幂等键，避免网络重试造成重复加点。
 export async function kvAdminAdjustPoints({ userId, amount, userPatch = {}, computeRecord, orderRecord, requestId }) {

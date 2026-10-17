@@ -47,6 +47,16 @@ import {
 import { attachMiniappRequestMetric, handleMiniappObservability } from './miniapp-observability.mjs';
 import { DEEPSEEK_PLATFORM, RELAY_PLATFORM, isNativePlatform } from './native-platforms.mjs';
 import {
+  DEFAULT_IMAGE_PRICE_POINTS,
+  IMAGE_ASPECT_RATIOS,
+  IMAGE_MODEL_DEFAULT,
+  buildImagePayload,
+  downloadImage,
+  extractImageResult,
+  makeImageStorageKey,
+  requestGeminiImage,
+} from './gemini-image.mjs';
+import {
   configureKnowledgeService,
   handleKnowledgeAdminRoute,
   retrieveKnowledgeContext,
@@ -1268,6 +1278,77 @@ async function getRelayProvider(providerId) {
   const provider = providers.find((item) => item && String(item.id || '') === String(providerId || ''));
   if (!provider || provider.type !== RELAY_PROVIDER_TYPE || provider.status === 'inactive' || provider.status === 'disabled') throw new Error('中转站授权凭证不存在或未启用');
   return { ...provider, apiKey: decryptConfigSecret(provider.apiKeyEncrypted), baseUrl: normalizeRelayBaseUrl(provider.baseUrl) };
+}
+
+// ===== Gemini 原生图片生成：凭证、配置、落盘 =====
+// 生图凭证与对话凭证同为 relay 类型（同一个中转站、同一套 Base URL + Key），
+// 区别只在接口根路径（/v1beta vs /v1），由 gemini-image.mjs 的 imageEndpoint() 处理。
+async function getImageProvider(providerId) {
+  const stored = (await KV.kvGet('authProviders')) || [];
+  const providers = Array.isArray(stored) ? stored : Object.values(stored);
+  const provider = providers.find((item) => item && String(item.id || '') === String(providerId || ''));
+  if (!provider || provider.type !== RELAY_PROVIDER_TYPE || provider.status === 'inactive' || provider.status === 'disabled') {
+    throw new Error('生图授权凭证不存在或未启用');
+  }
+  if (!provider.apiKeyEncrypted) throw new Error('生图授权凭证没有 API Key');
+  return { ...provider, apiKey: decryptConfigSecret(provider.apiKeyEncrypted), baseUrl: normalizeRelayBaseUrl(provider.baseUrl) };
+}
+
+// 生图配置走 KV（无需发版即可调价/换模型）：单张扣点、默认模型、用户侧用哪条凭证、默认宽高比。
+// ⚠️ 用户侧必须显式配置 providerId —— 不能「随便取一条 relay 凭证」：
+//    站上同时存在对话专用凭证（分组里没有生图模型），取错就是 403。
+async function loadImageGenSettings() {
+  const raw = (await KV.kvGet('imageGenSettings')) || {};
+  const pricePoints = Number(raw.pricePoints);
+  const ratio = String(raw.aspectRatio || '').trim();
+  return {
+    pricePoints: Number.isFinite(pricePoints) && pricePoints > 0 ? Math.ceil(pricePoints) : DEFAULT_IMAGE_PRICE_POINTS,
+    model: String(raw.model || '').trim() || IMAGE_MODEL_DEFAULT,
+    providerId: String(raw.providerId || '').trim(),
+    aspectRatio: IMAGE_ASPECT_RATIOS.includes(ratio) ? ratio : '1:1',
+  };
+}
+
+// 生成 + 落盘。**上游返回的是第三方 CDN 链接（实测不是 base64）**，必须立刻下载转存本站：
+// 那个链接带日期目录、不保证长期有效，也绝不能直接交给前端（会暴露上游域名且随时失效）。
+async function generateAndStoreImage({ provider, prompt, aspectRatio, model }) {
+  const payload = buildImagePayload({ prompt, aspectRatio });
+  const json = await requestGeminiImage({ baseUrl: provider.baseUrl, apiKey: provider.apiKey, payload, model });
+  const extracted = extractImageResult(json);
+  if (!extracted.ok) {
+    const detail = extracted.blockReason
+      ? `图片被上游安全策略拦截（${extracted.blockReason}）`
+      : `图片没有生成出来${extracted.finishReason ? `（finishReason=${extracted.finishReason}）` : ''}`;
+    throw Object.assign(new Error(detail), {
+      code: extracted.reason === 'blocked' ? 'IMAGE_BLOCKED' : 'IMAGE_EMPTY',
+      status: 502,
+    });
+  }
+  let buffer;
+  let mimeType;
+  if (extracted.inline) {
+    buffer = Buffer.from(extracted.inline.base64, 'base64');
+    mimeType = extracted.inline.mimeType;
+  } else {
+    const downloaded = await downloadImage(extracted.file.url);
+    buffer = downloaded.buffer;
+    mimeType = extracted.file.mimeType || downloaded.contentType || 'image/jpeg';
+  }
+  if (!buffer || !buffer.length) throw Object.assign(new Error('生成的图片内容为空'), { code: 'IMAGE_EMPTY', status: 502 });
+  // key 必须落在 uploads/ 下：其它路径（如 localUploadPathFromUrl）按这个前缀认本站文件。
+  const key = makeImageStorageKey(mimeType);
+  const filePath = path.resolve(DATA_DIR, key);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, buffer);
+  return {
+    key,
+    url: `/api/blob/serve?key=${encodeURIComponent(key)}`,
+    size: buffer.length,
+    mimeType,
+    model: String(model || '').trim() || IMAGE_MODEL_DEFAULT,
+    prompt,
+    aspectRatio: String(aspectRatio || '').trim() || null,
+  };
 }
 
 // 中转站请求：hostname / port / path 全部来自凭证里配置的 Base URL ——
@@ -2706,6 +2787,115 @@ const server = http.createServer(async (req, res) => {
       } catch (error) {
         res.statusCode = 400;
         res.end(JSON.stringify({ ok: false, error: String(error.message || error) }));
+      }
+      return;
+    }
+    // ============ Gemini 原生图片生成 ============
+    // 后台测试页：管理员自用，**不扣算力**。
+    if (p === '/api/admin/image-gen' && req.method === 'POST') {
+      if (!requireAdmin(req, res)) return;
+      const body = await readBody(req);
+      res.setHeader('Content-Type', 'application/json');
+      try {
+        const settings = await loadImageGenSettings();
+        const providerId = String(body.authProviderId || '').trim() || settings.providerId;
+        if (!providerId) throw new Error('请选择生图授权凭证（usun-img）');
+        const provider = await getImageProvider(providerId);
+        const result = await generateAndStoreImage({
+          provider,
+          prompt: body.prompt,
+          aspectRatio: body.aspectRatio,
+          model: String(body.model || '').trim() || settings.model,
+        });
+        res.end(JSON.stringify({ ok: true, ...result }));
+      } catch (error) {
+        res.statusCode = error.status || 400;
+        res.end(JSON.stringify({ ok: false, error: String(error.message || error), code: error.code || 'IMAGE_FAILED' }));
+      }
+      return;
+    }
+
+    // 用户侧生图：登录 + 算力。**先预扣、再生成、失败原额退回**。
+    // 为什么必须预扣：上游按张收费，若等生成完再扣，余额 0 的用户也能白拿图。
+    // 与对话通道的差别：对话可以 allowPartial（扣到 0 继续给结果），生图**必须**拒绝（allowPartial:false）。
+    if (p === '/api/image-gen' && req.method === 'POST') {
+      const session = requireUser(req, res, '未登录，无法生成图片');
+      if (!session) return;
+      const body = await readBody(req);
+      const requestId = (String(body.requestId || '').trim() || `img_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`).slice(0, 80);
+      res.setHeader('Content-Type', 'application/json');
+      let charged = null;
+      try {
+        const settings = await loadImageGenSettings();
+        if (!settings.providerId) {
+          throw Object.assign(new Error('平台还没有配置生图凭证，请联系管理员'), { code: 'IMAGE_NOT_CONFIGURED', status: 503 });
+        }
+        const provider = await getImageProvider(settings.providerId);
+        const prompt = String(body.prompt || '').trim();
+        if (!prompt) throw Object.assign(new Error('请填写画面描述'), { code: 'IMAGE_PROMPT_REQUIRED', status: 400 });
+        if (prompt.length > 2000) throw Object.assign(new Error('画面描述过长（上限 2000 字）'), { code: 'IMAGE_PROMPT_TOO_LONG', status: 400 });
+        const model = String(body.model || '').trim() || settings.model;
+        const askedRatio = String(body.aspectRatio || '').trim();
+        const aspectRatio = IMAGE_ASPECT_RATIOS.includes(askedRatio) ? askedRatio : settings.aspectRatio;
+        const price = settings.pricePoints;
+        const startedAt = new Date().toISOString();
+        const computeId = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+        const metricId = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+        const charge = await KV.kvRecordNativeUsage({
+          userId: session.userId,
+          amount: price,
+          requestId,
+          allowPartial: false,
+          computeRecord: { id: computeId, type: 'consume', amount: price, reason: 'AI 生图', meta: { model, aspectRatio, promptLength: prompt.length }, createdAt: startedAt, source: 'server-image' },
+          metricRecord: { id: metricId, requestId, providerId: settings.providerId, model, aspectRatio, ok: true, createdAt: startedAt },
+        });
+        if (!charge.ok) {
+          res.statusCode = charge.reason === 'insufficient' ? 402 : 500;
+          res.end(JSON.stringify({
+            ok: false,
+            error: charge.reason === 'insufficient' ? '算力不足，请先充值' : '计费失败，请稍后重试',
+            code: charge.reason === 'insufficient' ? 'POINTS_INSUFFICIENT' : 'IMAGE_CHARGE_FAILED',
+          }));
+          return;
+        }
+        charged = charge;
+        const result = await generateAndStoreImage({ provider, prompt, aspectRatio, model });
+        res.end(JSON.stringify({
+          ok: true,
+          ...result,
+          chargedPoints: charge.chargedPoints,
+          billablePoints: price,
+          points: charge.points,
+        }));
+      } catch (error) {
+        // 预扣成功但生成失败 → 原额退回。绝不能让用户「没拿到图还掉了算力」。
+        let refunded = false;
+        if (charged && charged.ok && charged.chargedPoints > 0) {
+          try {
+            const refund = await KV.kvRefundNativeUsage({
+              userId: session.userId,
+              amount: charged.chargedPoints,
+              requestId,
+              computeRecord: {
+                id: `${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
+                type: 'refund',
+                amount: charged.chargedPoints,
+                reason: 'AI 生图失败退款',
+                meta: { refundFor: requestId },
+                createdAt: new Date().toISOString(),
+                source: 'server-image',
+              },
+            });
+            refunded = !!refund.ok;
+          } catch { refunded = false; }
+        }
+        res.statusCode = error.status || 502;
+        res.end(JSON.stringify({
+          ok: false,
+          error: String(error.message || error),
+          code: error.code || 'IMAGE_FAILED',
+          refunded,
+        }));
       }
       return;
     }
