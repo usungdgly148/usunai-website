@@ -348,6 +348,25 @@ check('用户页按 supportsRefs 隐藏参考图', userPageSrc.includes('refsSup
 check('用户页换到不吃图的模型会清空已选参考图', userPageSrc.includes('if (entry && entry.supportsRefs === false) setRefs([])'));
 check('后台页按 caps 隐藏参考图', adminPageSrc.includes('caps[model] !== false'));
 
+// ===== 14. 「加入资产库」按钮（用户页生成结果区）=====
+// 复用现有资产体系：store.addAsset → 单条 POST /api/data/assets（服务端强制 userId = 登录用户）。
+// 默认落到「图片」库：type='image'，资产库的「图片」Tab 直接按 type 过滤。
+const assetUtilsSrc = read('frontend/src/assetUtils.js');
+const storeSrc = read('frontend/src/store.jsx');
+check('用户页从 store 取 addAsset', /const \{[^}]*addAsset[^}]*\} = useStore\(\)/.test(userPageSrc));
+check('按钮文案为「加入资产库」', userPageSrc.includes('加入资产库'));
+check('加入后按钮变「已加入资产库」', userPageSrc.includes('已加入资产库'));
+check('默认写入图片库（type=image）', userPageSrc.includes("type: 'image'"));
+check('资产来源标记为 imageGen', userPageSrc.includes("sourceType: 'imageGen'"));
+check('资产名与来源名使用 AI全能设计', userPageSrc.includes("sourceName: 'AI全能设计'") && assetUtilsSrc.includes("imageGen: 'AI 全能设计'"));
+check('写入生成的图片链接', userPageSrc.includes('images: [result.url]'));
+check('提示词一并存进资产（可复制复用）', userPageSrc.includes('content: text'));
+check('防重复提交：非 idle 时按钮禁用', userPageSrc.includes("disabled={assetState !== 'idle'}"));
+check('重新生成会重置按钮状态', userPageSrc.includes("setAssetState('idle')"));
+check('成功后给出状态提示与入口', userPageSrc.includes('已加入「图片」资产库') && userPageSrc.includes('to="/assets"'));
+check('资产库「图片」Tab 按 type 过滤（回归锚点）', read('frontend/src/pages/Assets.jsx').includes("(tab === 'image' || tab === 'video' || tab === 'audio')"));
+check('store.addAsset 走单条持久化接口', storeSrc.includes("apiFetch('/api/data/assets'") && storeSrc.includes('persistMyAsset'));
+
 // ===== 结果 =====
 const total = pass + failures.length;
 if (failures.length) {

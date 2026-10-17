@@ -168,6 +168,7 @@ export function resolveAssetCategory(configured, fallback) {
 export const SOURCE_TYPE_NAMES = {
   agent: 'AI 对话',
   workflow: '工作流',
+  imageGen: 'AI 全能设计',
 };
 
 export function formatDuration(seconds) {

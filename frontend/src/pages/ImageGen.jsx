@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Wand2, Download, Image as ImageIcon, AlertCircle, Coins, Loader2 } from 'lucide-react';
+import { Wand2, Download, FolderPlus, Check, Image as ImageIcon, AlertCircle, Coins, Loader2 } from 'lucide-react';
 import { useStore } from '../store.jsx';
 import { apiFetch } from '../authFetch.js';
 import RefImagePicker, { MAX_REF_IMAGES, toApiImages } from '../RefImagePicker.jsx';
@@ -16,7 +16,7 @@ const ASPECTS = [
 // 可选模型 / 分辨率 / 点数全部由服务端下发（后台改 KV 即生效），前端不硬编码任何点数。
 
 export default function ImageGen() {
-  const { user, openRechargeModal, refreshCurrentUserCompute } = useStore();
+  const { user, openRechargeModal, refreshCurrentUserCompute, addAsset } = useStore();
   const [prompt, setPrompt] = useState('');
   const [aspect, setAspect] = useState('1:1');
   const [refs, setRefs] = useState([]);
@@ -27,6 +27,8 @@ export default function ImageGen() {
   const [elapsed, setElapsed] = useState(0);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  // 「加入资产库」的按钮状态：idle 未加入 / saving 提交中 / added 已加入（防重复点）
+  const [assetState, setAssetState] = useState('idle');
 
   // 模型/分辨率/点数都由服务端下发，避免前端硬编码与服务端脱节（后台改 KV 后刷新即生效）
   useEffect(() => {
@@ -81,6 +83,7 @@ export default function ImageGen() {
     setBusy(true);
     setError('');
     setResult(null);
+    setAssetState('idle');
     try {
       const res = await apiFetch('/api/image-gen', {
         method: 'POST',
@@ -115,6 +118,33 @@ export default function ImageGen() {
       setError(String(e.message || e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  // 加入资产库：写入「图片」库（type='image'），与对话/工作流的资产同构（见 store.addAsset）。
+  // 只提交单条记录（store 内部走 POST /api/data/assets，服务端强制 userId=当前登录用户）。
+  const addToAssets = () => {
+    if (!result || assetState !== 'idle') return;
+    const text = String(result.prompt || prompt || '').trim();
+    const shortName = text ? (text.length > 24 ? `${text.slice(0, 24)}…` : text) : 'AI全能设计 · 图片';
+    setAssetState('saving');
+    try {
+      addAsset({
+        sourceType: 'imageGen',
+        sourceId: String(result.model || model || ''),
+        sourceName: 'AI全能设计',
+        type: 'image',
+        name: shortName,
+        // 提示词一并存下来，方便在资产库里复制复用
+        content: text,
+        images: [result.url],
+        videos: [],
+        audios: [],
+      });
+      setAssetState('added');
+    } catch (e) {
+      setAssetState('idle');
+      setError(`加入资产库失败：${String(e.message || e)}`);
     }
   };
 
@@ -267,16 +297,37 @@ export default function ImageGen() {
                 {typeof result.chargedPoints === 'number' && <span>消耗 {result.chargedPoints} 点</span>}
                 {typeof result.points === 'number' && <span>余额 {result.points} 点</span>}
               </div>
-              <a
-                href={result.url}
-                download
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-slate-300 text-sm text-slate-700 hover:bg-slate-50"
-              >
-                <Download size={16} /> 下载图片
-              </a>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={addToAssets}
+                  disabled={assetState !== 'idle'}
+                  className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition disabled:cursor-default ${assetState === 'added'
+                    ? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : 'bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-70'}`}
+                >
+                  {assetState === 'saving' && <><Loader2 size={16} className="animate-spin" /> 加入中…</>}
+                  {assetState === 'added' && <><Check size={16} /> 已加入资产库</>}
+                  {assetState === 'idle' && <><FolderPlus size={16} /> 加入资产库</>}
+                </button>
+                <a
+                  href={result.url}
+                  download
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-slate-300 text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  <Download size={16} /> 下载图片
+                </a>
+              </div>
             </div>
+            {assetState === 'added' && (
+              <p className="text-xs text-emerald-600 flex items-center gap-1">
+                <Check size={14} /> 已加入「图片」资产库，可在
+                <Link to="/assets" className="underline hover:text-emerald-700">我的资产</Link>
+                的「图片」标签下查看。
+              </p>
+            )}
           </div>
         )}
       </div>
