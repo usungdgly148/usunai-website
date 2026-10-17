@@ -11,6 +11,7 @@ export default {
     'pages/compute/index',
     'pages/assets/index',
     'pages/image-gen/index',
+    'pages/image-gen/history',
     'pages/orders/index',
     'pages/bind/index',
     'pages/account-security/index',

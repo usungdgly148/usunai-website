@@ -6,8 +6,10 @@ import { useLoad } from '../../hooks/use-load';
 import { useThemePage } from '../../hooks/use-theme-page';
 import { generateImage, getImageGenConfig, getMe, isLoggedOut, saveRuntimeAsset } from '../../services/api';
 import {
-  buildImageAsset, formatFileSize, formatPoints, imageUrl, newImageRequestId, pickDefaultSelection, resolutionForModel, saveImageToAlbum,
+  buildImageAsset, formatFileSize, formatPoints, imageUrl, newImageRequestId, pickDefaultSelection,
+  pickReferenceImages, resolutionForModel, saveImageToAlbum, takeRegenerate, toApiRefImages, REF_IMAGE_MAX,
 } from '../../services/imageGen';
+import type { RefImage } from '../../services/imageGen';
 import type { ImageGenResult } from '../../types';
 import { ensureEnoughPoints, handlePointsInsufficient } from '../../utils/points-gate';
 import { toast } from '../../utils/feedback';
@@ -53,6 +55,9 @@ export default function ImageGenPage() {
   const [result, setResult] = useState<ImageGenResult | null>(null);
   const [assetState, setAssetState] = useState<AssetState>('idle');
   const [error, setError] = useState('');
+  /** 参考图（P1）：已压缩好的本地图，直接就是请求体要的 base64 */
+  const [refs, setRefs] = useState<RefImage[]>([]);
+  const [refBusy, setRefBusy] = useState(false);
   /**
    * 同步锁：`busy` 是 state，两次快速点击会在同一帧里都读到 false（setBusy 还没生效），
    * 那样会**发两次生图请求 = 扣两次点**。用 ref 做硬闸（与网页端同一处风险，这里直接堵死）。
@@ -79,8 +84,17 @@ export default function ImageGenPage() {
   }, []);
 
   useEffect(() => { void refreshPoints(); }, [refreshPoints]);
-  // 从充值页 / 算力明细返回时余额可能变了，重新拉一次
-  useDidShow(() => { void refreshPoints(); });
+  // 从充值页 / 算力明细返回时余额可能变了，重新拉一次；顺带接「再次生成」的回填
+  // （作品墙写本地存储 → 返回本站 → 这里取一次即删，见 imageGen.ts 的 stashRegenerate）
+  useDidShow(() => {
+    void refreshPoints();
+    const next = takeRegenerate();
+    if (!next) return;
+    setPrompt(next.prompt);
+    if (next.model) setModel(next.model);
+    if (next.resolution) setResolution(next.resolution);
+    if (next.aspectRatio) setAspect(next.aspectRatio);
+  });
 
   // 单张实测 20~47 秒，上游没有进度接口 —— 只显示已等待秒数，绝不画假进度条
   useEffect(() => {
@@ -91,7 +105,17 @@ export default function ImageGenPage() {
 
   const currentModel = models.find((item) => item.id === model) || models[0] || null;
   const resolutions = currentModel?.resolutions || [];
-  const price = resolutions.find((item) => item.value === resolution)?.points || 0;
+  /**
+   * 实际生效的档位：`resolution` 可能来自「再次生成」的回填，而那个模型/档位可能已经下架。
+   * 直接拿它渲染会出现「没有一个选中态 + CTA 显示 0 点/被禁用」。统一在这里归一化，
+   * 渲染与请求都只用 effectiveResolution。
+   */
+  const effectiveResolution = resolutions.some((item) => item.value === resolution)
+    ? resolution
+    : (resolutions[0]?.value || '');
+  const price = resolutions.find((item) => item.value === effectiveResolution)?.points || 0;
+  /** 参考图能力由服务端下发：gpt-image-* 走 OpenAI 创建接口，那条通道没有参考图入口 */
+  const refsSupported = !currentModel || currentModel.supportsRefs !== false;
 
   const pickModel = (nextId: string) => {
     if (busy || nextId === model) return;
@@ -99,6 +123,41 @@ export default function ImageGenPage() {
     setModel(nextId);
     // 新模型不吃当前档位就落到它的第一档（每个模型的档位点数都可能不同）
     setResolution((prev) => resolutionForModel(entry, prev));
+    // 新模型不吃参考图就把已选的清掉：留着只会在提交时被服务端硬拒（IMAGE_REF_UNSUPPORTED）
+    if (entry && entry.supportsRefs === false) setRefs([]);
+  };
+
+  /**
+   * 选参考图：系统选图 → 逐张压缩到「最长边 1024 / 质量 80」→ 转 base64。
+   * 服务端 `prepareReferenceImages` 只认 `{mimeType, data}` 对象（不认裸字符串），
+   * 且单张 ≤2MB、最多 3 张、整包 ≤12MB —— 压缩是这条链路能不能跑通的前提。
+   */
+  const chooseRefs = async () => {
+    if (busy || refBusy) return;
+    if (!refsSupported) { toast('当前模型不支持参考图', 'warning'); return; }
+    const remaining = REF_IMAGE_MAX - refs.length;
+    if (remaining <= 0) { toast(`参考图最多 ${REF_IMAGE_MAX} 张`, 'warning'); return; }
+    setRefBusy(true);
+    try {
+      const picked = await pickReferenceImages(remaining);
+      if (picked.length) setRefs((prev) => [...prev, ...picked].slice(0, REF_IMAGE_MAX));
+    } catch (reason) {
+      const message = String((reason as { errMsg?: string } | null)?.errMsg || (reason instanceof Error ? reason.message : ''));
+      // 用户点了取消不是错误，静默返回
+      if (message && !/cancel/i.test(message)) {
+        toast(message.includes('2MB') ? message : '图片处理失败，请换一张', 'error');
+      }
+    } finally {
+      setRefBusy(false);
+    }
+  };
+
+  const removeRef = (uid: string) => setRefs((prev) => prev.filter((item) => item.uid !== uid));
+
+  const previewRef = (current: string) => {
+    const urls = refs.map((item) => item.path);
+    if (!urls.length) return;
+    void Taro.previewImage({ urls, current });
   };
 
   const startGenerate = async () => {
@@ -131,8 +190,10 @@ export default function ImageGenPage() {
       const data = await generateImage({
         prompt: text,
         model: currentModel.id,
-        resolution,
+        resolution: effectiveResolution,
         aspectRatio: aspect,
+        // 参考图只在模型支持且确实选了图时才带（服务端对 gpt-image-* 会硬拒）
+        ...(refsSupported && refs.length ? { images: toApiRefImages(refs) } : {}),
         // 一次点击一个 requestId；「再生成一张」走的是新的一次调用，天然换新值
         requestId: newImageRequestId(),
       });
@@ -198,7 +259,10 @@ export default function ImageGenPage() {
     <View className='gen-topbar'>
       <View className='gen-topbar-main'>
         <Text className='gen-title'>AI全能设计</Text>
-        <Text className='gen-caption'>描述画面，直接出图</Text>
+        <View className='gen-sub-row'>
+          <Text className='gen-caption'>描述画面，直接出图</Text>
+          <Text className='gen-works-link' onClick={() => Taro.navigateTo({ url: '/pages/image-gen/history' })}>我的作品 ›</Text>
+        </View>
       </View>
       <View className='gen-points' onClick={() => Taro.navigateTo({ url: '/pages/compute/index' })}>
         <View className='gen-points-icon ui-icon-power' />
@@ -241,7 +305,7 @@ export default function ImageGenPage() {
           {resolutions.map((item) => (
             <View
               key={item.value}
-              className={`gen-segment-item ${item.value === resolution ? 'gen-segment-item-active' : ''}`}
+              className={`gen-segment-item ${item.value === effectiveResolution ? 'gen-segment-item-active' : ''}`}
               onClick={() => { if (!busy) setResolution(item.value); }}
             >
               <Text className='gen-segment-value'>{item.value}</Text>
@@ -282,7 +346,38 @@ export default function ImageGenPage() {
         />
       </View>
 
-      {/* ③ 生成中 / 失败 */}
+      {/* ③ 参考图（P1）：模型不支持时整块隐藏 —— gpt-image-* 那条通道没有参考图入口，
+             留在界面上只会让用户传了图却被服务端拒（IMAGE_REF_UNSUPPORTED） */}
+      {refsSupported && <View className='gen-card'>
+        <View className='gen-label-row'>
+          <Text className='gen-label gen-label-flat'>参考图</Text>
+          <Text className='gen-count'>可选 · 最多 {REF_IMAGE_MAX} 张</Text>
+        </View>
+        <View className='gen-ref-grid'>
+          {refs.map((item) => (
+            <View key={item.uid} className='gen-ref-item'>
+              <Image
+                className='gen-ref-img'
+                src={item.path}
+                mode='aspectFill'
+                onClick={() => previewRef(item.path)}
+              />
+              <View className='gen-ref-remove' onClick={() => removeRef(item.uid)}>
+                <Text className='gen-ref-remove-text'>×</Text>
+              </View>
+            </View>
+          ))}
+          {refs.length < REF_IMAGE_MAX && (
+            <View className={`gen-ref-add ${refBusy ? 'gen-ref-add-busy' : ''}`} onClick={chooseRefs}>
+              <Text className='gen-ref-add-icon'>{refBusy ? '…' : '+'}</Text>
+              <Text className='gen-ref-add-text'>{refBusy ? '处理中' : '添加'}</Text>
+            </View>
+          )}
+        </View>
+        <Text className='gen-ref-hint'>会先压到 1024px 内再上传，单张不超过 2MB</Text>
+      </View>}
+
+      {/* ④ 生成中 / 失败 */}
       {busy && <View className='gen-waiting'>
         <View className='gen-waiting-dot' />
         <Text className='gen-waiting-text'>正在生成，已等待 {elapsed} 秒</Text>
@@ -291,12 +386,13 @@ export default function ImageGenPage() {
 
       {!busy && error && <View className='gen-error'><Text className='gen-error-text'>{error}</Text></View>}
 
-      {/* ④ 结果卡 */}
+      {/* ⑤ 结果卡 */}
       {result && <View id='gen-result' className='gen-card gen-result'>
         <Text className='gen-label'>生成结果</Text>
         <Image className='gen-result-image' src={imageUrl(result.url)} mode='widthFix' onClick={previewResult} />
         <Text className='gen-result-meta'>
           {result.resolution || '-'} · {result.aspectRatio || '-'} · {formatFileSize(result.size)} · {result.chargedPoints} 点
+          {result.refImageCount > 0 ? ` · 参考图 ${result.refImageCount} 张` : ''}
         </Text>
 
         <View className='gen-result-actions'>
@@ -321,7 +417,7 @@ export default function ImageGenPage() {
         </View>
       </View>}
 
-      {/* ⑤ 底部固定 CTA（含安全区） */}
+      {/* ⑥ 底部固定 CTA（含安全区） */}
       <View className='gen-cta-wrap'>
         <Button className='gen-cta' loading={busy} disabled={busy} onClick={startGenerate}>
           {busy ? `生成中 · 已等待 ${elapsed}s` : (price ? `开始生成 · ${price} 点` : '开始生成')}

@@ -220,7 +220,11 @@ export async function generateImage(payload: {
   model: string;
   resolution: string;
   aspectRatio?: string;
-  images?: string[];
+  /**
+   * 参考图：**必须是 `{mimeType, data}` 对象**（服务端 prepareReferenceImages 只认这一种形态，
+   * 传裸 base64 字符串会被判「参考图参数格式不正确」）。
+   */
+  images?: Array<{ mimeType: string; data: string }>;
   requestId: string;
 }): Promise<ImageGenResult> {
   return apiRequestFlat<ImageGenResult>('/api/image-gen', {
@@ -486,6 +490,19 @@ export async function saveRuntimeHistory(record: Record<string, unknown>) {
 
 export async function saveRuntimeAsset(item: Record<string, unknown>) {
   return (await apiRequest<Record<string, unknown>>('/api/miniapp/v1/assets', { method: 'POST', data: { item } })).data;
+}
+
+/**
+ * 删除一条资产（作品墙用）。
+ *
+ * 走的是网页端同一个接口 `POST /api/data/assets/delete`（服务端 `requireUser` + 只删自己的
+ * `assetsKeyOf(session.userId)`），小程序会话就是标准用户 JWT，所以能直接调。
+ * ⚠️ 这条接口是**平铺返回** `{ok, ...}`，所以用 apiRequestFlat，不能用 apiRequest（取 `.data` 会拿到 undefined）。
+ */
+export async function deleteRuntimeAsset(assetId: string) {
+  return apiRequestFlat<{ ok: boolean; removed?: number }>('/api/data/assets/delete', {
+    method: 'POST', data: { assetId },
+  });
 }
 
 export async function submitWorkflowTask(workflowId: string, parameters: Record<string, unknown>, idempotencyKey: string) {

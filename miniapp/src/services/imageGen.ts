@@ -1,6 +1,7 @@
 import Taro from '@tarojs/taro';
 import type { ImageGenConfig, ImageGenModel, ImageGenResult } from '../types';
 import { toMiniappUrl } from '../utils/entity-visual';
+import { fileToDataUrl } from './runtime';
 
 /**
  * 「AI 全能设计」小程序端的纯工具层（P0 只有文生图，参考图压缩在 P1 补）。
@@ -121,6 +122,194 @@ export function buildImageAsset(result: ImageGenResult, fallbackPrompt = ''): Re
     audios: [],
     // 算力消耗列（资产库的「消耗算力」直接读 points）
     points: Number(result.chargedPoints) || 0,
+    // 档位与比例一并存下来：作品墙的「再次生成」要靠它原样回填
+    // （老记录没有这两个字段 → 回填时只用模型，档位落到该模型的第一档）
+    resolution: result.resolution || '',
+    aspectRatio: result.aspectRatio || '',
     createdAt: new Date().toISOString(),
   };
+}
+
+/* ===================== P1：参考图（图生图） ===================== */
+
+/**
+ * 参考图上限 —— 三条限制**同时存在**，任何一条超了服务端都会拒：
+ *   ① 张数 3（`IMAGE_MAX_REF_IMAGES`）
+ *   ② 单张解码后 ≤2MB（`IMAGE_REF_MAX_BYTES`）
+ *   ③ 整个请求体 ≤12MB（`IMAGE_REF_BODY_LIMIT`）＋ 微信小程序单请求 10MB
+ * 所以客户端必须**真压**：只压质量不缩尺寸时，一张 4000px 的手机原图仍有 500KB+，三张就贴近上限。
+ */
+export const REF_IMAGE_MAX = 3;
+/** 压缩后的最长边（像素）。服务端注释里写的也是「前端先压到 ~1024px 的 JPEG」。 */
+const REF_MAX_SIDE = 1024;
+const REF_MAX_BYTES = 2 * 1024 * 1024;
+
+export interface RefImage {
+  uid: string;
+  /** 压缩后的本地临时路径（用于预览与删除后重读） */
+  path: string;
+  /** 压缩后的字节数（用于在界面上显示「已压到 xxxKB」） */
+  size: number;
+  mimeType: string;
+  /** 纯 base64（不含 data: 前缀）—— 服务端两种都收，但传原始 base64 更省 20 字节/张 */
+  data: string;
+}
+
+/** 按扩展名判 MIME：compressImage 一般输出 .jpg，但 PNG 入参可能仍是 .png。 */
+function mimeOfPath(path: string): string {
+  if (/\.png$/i.test(path)) return 'image/png';
+  if (/\.webp$/i.test(path)) return 'image/webp';
+  return 'image/jpeg';
+}
+
+function getImageInfoAsync(src: string) {
+  return new Promise<{ width: number; height: number }>((resolve, reject) => {
+    Taro.getImageInfo({
+      src,
+      success: (res) => resolve({ width: Number(res.width) || 0, height: Number(res.height) || 0 }),
+      fail: (error) => reject(new Error(error.errMsg || '读取图片信息失败')),
+    });
+  });
+}
+
+function getFileSizeAsync(filePath: string) {
+  return new Promise<number>((resolve) => {
+    Taro.getFileSystemManager().getFileInfo({
+      filePath,
+      success: (res) => resolve(Number(res.size) || 0),
+      // 拿不到体积不该阻断流程：后续 base64 长度校验会兜底
+      fail: () => resolve(0),
+    });
+  });
+}
+
+/**
+ * 把一张选中图压到「最长边 ≤1024 + 质量 80」。
+ *
+ * ⚠️ `compressedWidth` / `compressHeight` 需要基础库 2.26.0+（本项目最低版本足够）；
+ *    Taro 的类型定义里还没有这两个字段，所以这里显式收窄成一个自定义签名，避免 TS 报错。
+ * ⚠️ 压缩本身失败时**不抛错**，退回原图 —— 体积校验会在 pickReferenceImages 里兜底，
+ *    在这里抛会让用户「选了一张图就整批失败」。
+ */
+const compressImageCompat = Taro.compressImage as unknown as (
+  options: { src: string; quality?: number; compressedWidth?: number; compressHeight?: number },
+) => Promise<{ tempFilePath?: string }>;
+
+export async function compressRefImage(tempPath: string): Promise<{ path: string; size: number }> {
+  let path = tempPath;
+  try {
+    const info = await getImageInfoAsync(tempPath);
+    const longest = Math.max(info.width, info.height);
+    const scale = longest > REF_MAX_SIDE ? REF_MAX_SIDE / longest : 1;
+    const result = await compressImageCompat({
+      src: tempPath,
+      quality: 80,
+      ...(scale < 1
+        ? { compressedWidth: Math.max(1, Math.round(info.width * scale)), compressHeight: Math.max(1, Math.round(info.height * scale)) }
+        : {}),
+    });
+    if (result?.tempFilePath) path = result.tempFilePath;
+  } catch {
+    // 压缩失败 → 用原图，交给下面的体积判定
+  }
+  let size = await getFileSizeAsync(path);
+  if (size > REF_MAX_BYTES) {
+    try {
+      const again = await compressImageCompat({ src: path, quality: 60 });
+      if (again?.tempFilePath) { path = again.tempFilePath; size = await getFileSizeAsync(path); }
+    } catch { /* 二次压缩失败就按原样交给调用方判定 */ }
+  }
+  return { path, size };
+}
+
+/**
+ * 选参考图：`chooseMedia` → 逐张压缩 → 转 base64。
+ *
+ * @param remaining 还能选几张（上限 3，调用方用 `REF_IMAGE_MAX - refs.length` 算）
+ * @returns 已经压好、可直接塞进 `POST /api/image-gen` 的参考图数组（可能少于请求数：用户可取消）
+ * @throws 压缩后仍 >2MB 时抛错 —— 这种图不该悄悄发出去（服务端会 413/400，白等一轮）
+ */
+export async function pickReferenceImages(remaining: number): Promise<RefImage[]> {
+  const count = Math.max(0, Math.min(remaining, REF_IMAGE_MAX));
+  if (!count) return [];
+  const selected = await Taro.chooseMedia({ count, mediaType: ['image'], sourceType: ['album', 'camera'] });
+  const files = (selected.tempFiles || []) as Array<{ tempFilePath: string; size?: number }>;
+  const out: RefImage[] = [];
+  for (const file of files) {
+    const compressed = await compressRefImage(file.tempFilePath);
+    if (!compressed.size) continue;
+    if (compressed.size > REF_MAX_BYTES) {
+      throw new Error('有参考图压缩后仍超过 2MB，请换一张更简单的图');
+    }
+    const mimeType = mimeOfPath(compressed.path);
+    const dataUrl = await fileToDataUrl(compressed.path, mimeType);
+    out.push({
+      uid: `ref_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      path: compressed.path,
+      size: compressed.size,
+      mimeType,
+      data: dataUrl.replace(/^data:[^,]*,/, ''),
+    });
+  }
+  return out;
+}
+
+/** 参考图 → 服务端认的形态（`prepareReferenceImages` 只认 `{mimeType, data}` 对象，不认裸字符串）。 */
+export function toApiRefImages(refs: RefImage[]) {
+  return refs.map((item) => ({ mimeType: item.mimeType, data: item.data }));
+}
+
+/* ===================== P1：作品墙「再次生成」回填 ===================== */
+
+/**
+ * 「再次生成」的参数交接。
+ *
+ * 为什么不走 URL 参数：提示词最长 2000 字，塞进 query 会超长且被各种转义坑到。
+ * 走本地存储 + `navigateBack`，回到创作页由 `useDidShow` 取一次即删。
+ */
+const REGENERATE_KEY = 'usunai_image_regen_v1';
+
+export interface RegenerateParams {
+  prompt: string;
+  model?: string;
+  resolution?: string;
+  aspectRatio?: string;
+}
+
+export function stashRegenerate(params: RegenerateParams): void {
+  try { Taro.setStorageSync(REGENERATE_KEY, params); } catch { /* 存储满时不阻断返回 */ }
+}
+
+/** 取出并**立刻清掉**（只用一次，避免下次进页面又被回填一遍）。 */
+export function takeRegenerate(): RegenerateParams | null {
+  try {
+    const raw = Taro.getStorageSync<RegenerateParams>(REGENERATE_KEY);
+    if (!raw || typeof raw !== 'object') return null;
+    Taro.removeStorageSync(REGENERATE_KEY);
+    return {
+      prompt: String(raw.prompt || ''),
+      model: raw.model ? String(raw.model) : '',
+      resolution: raw.resolution ? String(raw.resolution) : '',
+      aspectRatio: raw.aspectRatio ? String(raw.aspectRatio) : '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** 作品墙卡片的时间：`M/D HH:mm`（完整时间在预览页/任务详情里看，列表不需要秒）。 */
+export function wallTime(value: unknown): string {
+  const raw = String(value || '');
+  if (!raw) return '';
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/** 从一条资产记录里取第一张图（作品墙只收 type==='image' 的记录，理论上必有）。 */
+export function firstImageOf(item: Record<string, unknown>): string {
+  const list = Array.isArray(item.images) ? item.images : [];
+  const first = list.map(String).find((url) => !!url);
+  return first || '';
 }
