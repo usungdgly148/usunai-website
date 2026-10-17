@@ -162,7 +162,7 @@ export default function ImageGen() {
         </div>
       )}
 
-      <div className="bg-white rounded-2xl border border-slate-200 p-5">
+      <div className="ig-card bg-white rounded-2xl border border-slate-200 p-5">
         <div className="flex items-center justify-between mb-2">
           <label className="text-sm font-medium text-slate-700">画面描述</label>
           {points !== null && (
@@ -176,7 +176,7 @@ export default function ImageGen() {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           maxLength={2000}
-          className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:border-brand-600 resize-y"
+          className="ig-input w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:border-brand-600 resize-y"
           placeholder="例如：一张产品海报，暖色木桌，柔和窗光，浅景深"
         />
         <div className="text-right text-xs text-slate-400 mt-1">{prompt.length}/2000</div>
@@ -199,7 +199,7 @@ export default function ImageGen() {
                     type="button"
                     onClick={() => pickModel(item.id)}
                     disabled={busy}
-                    className={`px-3.5 py-2 rounded-xl border text-sm transition disabled:opacity-60 ${model === item.id ? 'border-brand-600 bg-brand-50 text-brand-700 font-medium' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                    className={`ig-chip px-3.5 py-2 rounded-xl border text-sm disabled:opacity-60 ${model === item.id ? 'ig-chip-on border-brand-600 bg-brand-50 text-brand-700 font-medium' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
                   >
                     {item.label || item.id}
                   </button>
@@ -223,7 +223,7 @@ export default function ImageGen() {
                     type="button"
                     onClick={() => setResolution(item.value)}
                     disabled={busy}
-                    className={`px-3.5 py-2 rounded-xl border text-sm transition disabled:opacity-60 ${resolution === item.value ? 'border-brand-600 bg-brand-50 text-brand-700 font-medium' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                    className={`ig-chip px-3.5 py-2 rounded-xl border text-sm disabled:opacity-60 ${resolution === item.value ? 'ig-chip-on border-brand-600 bg-brand-50 text-brand-700 font-medium' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
                   >
                     {item.value} <span className={`text-xs ${resolution === item.value ? 'text-brand-600' : 'text-slate-400'}`}>{item.points} 点</span>
                   </button>
@@ -241,7 +241,7 @@ export default function ImageGen() {
                 key={item.value}
                 type="button"
                 onClick={() => setAspect(item.value)}
-                className={`px-3.5 py-2 rounded-xl border text-sm transition ${aspect === item.value ? 'border-brand-600 bg-brand-50 text-brand-700 font-medium' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                className={`ig-chip px-3.5 py-2 rounded-xl border text-sm ${aspect === item.value ? 'ig-chip-on border-brand-600 bg-brand-50 text-brand-700 font-medium' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
               >
                 {item.label} <span className="text-xs text-slate-400">{item.hint}</span>
               </button>
@@ -253,7 +253,7 @@ export default function ImageGen() {
           type="button"
           onClick={generate}
           disabled={busy || !user}
-          className="mt-5 w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-brand-600 text-white text-sm font-medium hover:bg-brand-700 disabled:opacity-50 transition"
+          className={`ig-cta mt-5 w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-brand-600 text-white text-sm font-medium hover:bg-brand-700 disabled:opacity-50 ${busy ? 'is-busy' : ''}`}
         >
           {busy ? <><Loader2 size={16} className="animate-spin" /> 生成中… 已等待 {elapsed}s</> : <><Wand2 size={16} /> 开始生成</>}
         </button>
@@ -266,12 +266,12 @@ export default function ImageGen() {
         )}
       </div>
 
-      <div className="mt-6 bg-white rounded-2xl border border-slate-200 p-5">
+      <div className="ig-card mt-6 bg-white rounded-2xl border border-slate-200 p-5">
         <div className="text-sm font-medium text-slate-700 mb-3">生成结果</div>
 
         {!result && !busy && (
           <div className="flex flex-col items-center justify-center gap-2 py-20 text-slate-300">
-            <ImageIcon size={40} />
+            <ImageIcon size={40} className="ig-float" />
             <p className="text-sm">描述画面后点「开始生成」</p>
           </div>
         )}
@@ -287,7 +287,12 @@ export default function ImageGen() {
 
         {result && (
           <div className="space-y-3">
-            <img src={result.url} alt={result.prompt || '生成结果'} className="w-full rounded-xl border border-slate-200" />
+            <img
+              src={result.url}
+              alt={result.prompt || '生成结果'}
+              decoding="async"
+              className="ig-result-img w-full rounded-xl border border-slate-200"
+            />
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
                 <span>{result.resolution || resolution}</span>
@@ -302,7 +307,7 @@ export default function ImageGen() {
                   type="button"
                   onClick={addToAssets}
                   disabled={assetState !== 'idle'}
-                  className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition disabled:cursor-default ${assetState === 'added'
+                  className={`ig-cta inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium disabled:cursor-default ${assetState === 'added'
                     ? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
                     : 'bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-70'}`}
                 >
@@ -315,7 +320,7 @@ export default function ImageGen() {
                   download
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-slate-300 text-sm text-slate-700 hover:bg-slate-50"
+                  className="ig-cta inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-slate-300 text-sm text-slate-700 hover:bg-slate-50"
                 >
                   <Download size={16} /> 下载图片
                 </a>

@@ -330,3 +330,140 @@ aside:hover .apple-scrollbar::-webkit-scrollbar-thumb:hover,
   to   { opacity: 1; }
 }
 .overlay-fade { animation: overlayFadeIn 0.3s ease-out both; }
+
+/* ==========================================================================
+   交互细节基线（2026-10-18）—— 只给「AI全能设计」页用，前缀 ig-
+   --------------------------------------------------------------------------
+   原则：
+   1. 只动 transition / shadow / transform / opacity，不动 width/height/margin，
+      避免触发重排（这页有两个大卡片，重排代价高）。
+   2. 阴影分三级：静止 → 悬停/聚焦 → 抬起。用极低透明度，浅背景上只做"存在感"，
+      不做"漂浮感"。
+   3. hover 一律包在 @media (hover:hover) 里 —— 触屏没有真 hover，
+      否则点完会留一层"粘住的"高亮。
+   4. 所有动效都在 prefers-reduced-motion 下降级为瞬时。
+   ========================================================================== */
+:root {
+  --ig-ease: cubic-bezier(0.25, 1, 0.5, 1);        /* out-quart：起步快、收尾稳 */
+  --ig-ease-expo: cubic-bezier(0.16, 1, 0.3, 1);    /* 用于卡片抬起 */
+  --ig-d1: 120ms;                                   /* 状态切换 */
+  --ig-d2: 180ms;                                   /* 悬停 */
+  --ig-d3: 260ms;                                   /* 卡片/入场 */
+
+  /* 三级阴影：越靠下越"远"，透明度始终 < 0.18 */
+  --ig-shadow-1: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.03);
+  --ig-shadow-2: 0 2px 4px rgba(15, 23, 42, 0.05), 0 10px 24px -14px rgba(15, 23, 42, 0.14);
+  --ig-ring: 0 0 0 3px rgba(22, 58, 95, 0.12);
+}
+
+/* ---------- 卡片：静止几乎无阴影，hover / 内部聚焦时抬一级 ---------- */
+.ig-card {
+  box-shadow: var(--ig-shadow-1);
+  transition: box-shadow var(--ig-d3) var(--ig-ease-expo),
+              border-color var(--ig-d2) var(--ig-ease);
+}
+@media (hover: hover) {
+  .ig-card:hover { box-shadow: var(--ig-shadow-2); }
+}
+/* 聚焦进卡片（比如点到里面的输入框）时也抬一级 —— 键盘用户能感知"我现在在这块" */
+.ig-card:focus-within { box-shadow: var(--ig-shadow-2); }
+
+/* ---------- 参数 chip ---------- */
+.ig-chip {
+  position: relative;
+  transition: background-color var(--ig-d1) var(--ig-ease),
+              border-color var(--ig-d1) var(--ig-ease),
+              color var(--ig-d1) var(--ig-ease),
+              box-shadow var(--ig-d1) var(--ig-ease),
+              transform 90ms var(--ig-ease);
+  /* 触屏点按不要出现系统灰块（和自绘的按下反馈重复） */
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) {
+  .ig-chip:hover { transform: translateY(-1px); }
+}
+/* 按下：轻微内收，幅度只够"有感"，不会跳 */
+.ig-chip:active { transform: scale(0.985); }
+.ig-chip:focus-visible {
+  outline: none;
+  box-shadow: var(--ig-ring);
+}
+/* 选中：给一点"落定"的呼吸 —— 只在类名刚加上时播一次，不是无限循环 */
+.ig-chip-on {
+  box-shadow: inset 0 0 0 1px rgba(22, 58, 95, 0.06), 0 1px 2px rgba(22, 58, 95, 0.06);
+  /* backwards（不是 both）：动画结束后释放 transform，否则会一直压住 hover 的位移 */
+  animation: igSettle var(--ig-d3) var(--ig-ease-expo) backwards;
+}
+@keyframes igSettle {
+  from { transform: scale(0.97); }
+  to   { transform: scale(1); }
+}
+
+/* ---------- 输入框：聚焦时描边加深 + 极淡光环，不改变尺寸 ---------- */
+.ig-input {
+  transition: border-color var(--ig-d2) var(--ig-ease),
+              box-shadow var(--ig-d2) var(--ig-ease),
+              background-color var(--ig-d2) var(--ig-ease);
+  caret-color: #163A5F;
+}
+@media (hover: hover) {
+  /* slate-400：与静止的 slate-300 拉开一档，否则看不出变化 */
+  .ig-input:hover { border-color: rgb(148 163 184); }
+}
+.ig-input:focus { box-shadow: var(--ig-ring); }
+
+/* ---------- 主按钮 / 次按钮 ---------- */
+.ig-cta {
+  transition: background-color var(--ig-d2) var(--ig-ease),
+              box-shadow var(--ig-d2) var(--ig-ease),
+              transform var(--ig-d1) var(--ig-ease);
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) {
+  .ig-cta:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px -4px rgba(22, 58, 95, 0.35);
+  }
+}
+.ig-cta:active:not(:disabled) {
+  transform: translateY(0) scale(0.995);
+  box-shadow: none;
+}
+.ig-cta:focus-visible { outline: none; box-shadow: var(--ig-ring); }
+.ig-cta:disabled { transform: none; box-shadow: none; }
+/* 等待中的"呼吸"：只在这一刻出现，2.4s 一轮、幅度极低，不干扰阅读 */
+.ig-cta.is-busy { animation: igBreathe 2.4s var(--ig-ease) infinite; }
+@keyframes igBreathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(22, 58, 95, 0); }
+  50%      { box-shadow: 0 0 0 4px rgba(22, 58, 95, 0.10); }
+}
+
+/* ---------- 结果图：出现时轻微放大 + 淡入，像照片"落定" ---------- */
+.ig-result-img {
+  /* backwards（不是 both）：播完就释放 transform，图片回落到正常合成层，避免长期占着合成层发虚 */
+  animation: igDevelop var(--ig-d3) var(--ig-ease-expo) backwards;
+  transition: box-shadow var(--ig-d2) var(--ig-ease);
+  background-color: rgb(248 250 252); /* slate-50：图未解码完时不留白闪 */
+}
+@keyframes igDevelop {
+  from { opacity: 0; transform: scale(0.995); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ---------- 空态图标：极慢的上下浮动（4s / 3px），只是让页面"活着" ---------- */
+.ig-float { animation: igFloat 4s ease-in-out infinite; }
+@keyframes igFloat {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-3px); }
+}
+
+/* ---------- 统一降级 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .ig-card, .ig-chip, .ig-input, .ig-cta, .ig-result-img {
+    transition-duration: 1ms !important;
+  }
+  .ig-chip-on, .ig-cta.is-busy, .ig-float, .ig-result-img {
+    animation: none !important;
+  }
+  .ig-chip:hover, .ig-chip:active, .ig-cta:hover, .ig-cta:active { transform: none !important; }
+}
