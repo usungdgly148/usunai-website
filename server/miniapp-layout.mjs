@@ -39,6 +39,7 @@ export const MINIAPP_INTERNAL_PAGES = [
   { path: '/pages/profile/index', label: '我的' },
   { path: '/pages/compute/index', label: '算力记录' },
   { path: '/pages/assets/index', label: '我的资产' },
+  { path: '/pages/image-gen/index', label: 'AI全能设计' },
   { path: '/pages/orders/index', label: '订单记录' },
   { path: '/pages/bind/index', label: '绑定账号' },
   { path: '/pages/account-security/index', label: '账号与安全' },

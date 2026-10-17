@@ -4,6 +4,8 @@
 export const SOURCE_TYPE_NAMES: Record<string, string> = {
   agent: 'AI 对话',
   workflow: '工作流',
+  // 必须与 frontend/src/assetUtils.js 的同名表一致，否则同一条资产在两端显示不同的类型
+  imageGen: 'AI 全能设计',
 };
 
 export const ASSET_TYPE_NAMES: Record<string, string> = {

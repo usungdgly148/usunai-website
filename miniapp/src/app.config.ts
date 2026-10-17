@@ -10,6 +10,7 @@ export default {
     'pages/profile/index',
     'pages/compute/index',
     'pages/assets/index',
+    'pages/image-gen/index',
     'pages/orders/index',
     'pages/bind/index',
     'pages/account-security/index',

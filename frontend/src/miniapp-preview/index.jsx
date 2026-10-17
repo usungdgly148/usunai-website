@@ -50,6 +50,7 @@ const PAGE_LABELS = {
   '/pages/profile/index': '我的',
   '/pages/compute/index': '算力记录',
   '/pages/assets/index': '我的资产',
+  '/pages/image-gen/index': 'AI全能设计',
   '/pages/orders/index': '订单记录',
   '/pages/bind/index': '绑定账号',
   '/pages/account-security/index': '账号与安全',

@@ -126,6 +126,17 @@ export default function ProfilePage() {
           </View>
         </View>
 
+        {/* 模块①½：AI 创作入口 —— 「AI全能设计」是主推能力，首页工具卡之外在「我的」留一个稳定入口，
+            老用户找不到首页卡时也能进来（不是第 6 个 tab：底部 5 等分玻璃胶囊不能再挤） */}
+        <View className='mini-design-entry' onClick={() => Taro.navigateTo({ url: '/pages/image-gen/index' })}>
+          <View className='mini-design-entry-badge'><Text className='mini-design-entry-badge-text'>AI</Text></View>
+          <View className='mini-design-entry-main'>
+            <Text className='mini-design-entry-title'>AI全能设计</Text>
+            <Text className='mini-design-entry-desc'>描述一句话，直接生成图片</Text>
+          </View>
+          <Text className='mini-design-entry-arrow'>›</Text>
+        </View>
+
         {/* 模块②：我的服务（四宫格） */}
         <View className='mini-group'>
           <View className='mini-group-card'>

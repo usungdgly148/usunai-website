@@ -278,3 +278,55 @@ export interface RechargeStatus {
   amount: number;
   name: string;
 }
+
+/**
+ * 「AI 全能设计」的一个模型。
+ * 只下发**已上架且配了价**的模型（服务端 GET /api/image-gen/config），点数一律以这里为准。
+ */
+export interface ImageGenModel {
+  id: string;
+  label: string;
+  /**
+   * 能否传参考图（图生图）：gpt-image-* 走 OpenAI 的 /v1/images/generations，
+   * 那条通道没有参考图入口，服务端也会在扣费前硬拒（IMAGE_REF_UNSUPPORTED）。
+   */
+  supportsRefs: boolean;
+  /** 该模型支持的清晰度档位及对应点数（后台 KV 配置，前端不写死任何价格） */
+  resolutions: Array<{ value: string; points: number }>;
+}
+
+/** 生图配置：与网页端读同一份，未登录也可读（未登录同样要显示「本次消耗多少点」）。 */
+export interface ImageGenConfig {
+  models: ImageGenModel[];
+  defaultModel: string;
+  defaultResolution: string;
+  resolutions: string[];
+  /** 兼容旧版本的单一价格字段；真实价格看 models[].resolutions[].points */
+  pricePoints: number;
+  aspectRatio: string;
+  aspectRatios: string[];
+  maxRefImages: number;
+}
+
+/**
+ * 生成结果。⚠️ `POST /api/image-gen` 是**平铺返回**（`{ ok:true, ...字段 }`），
+ * 不套 `{data}` 信封 —— 所以取用它必须走 apiRequestFlat，不能用 apiRequest。
+ */
+export interface ImageGenResult {
+  key: string;
+  /** 相对地址 `/api/blob/serve?key=…`：小程序必须拼成绝对域名才能渲染 / 下载 */
+  url: string;
+  size: number;
+  mimeType: string;
+  model: string;
+  prompt: string;
+  aspectRatio: string | null;
+  resolution: string | null;
+  refImageCount: number;
+  /** 本次实际扣除点数 */
+  chargedPoints: number;
+  /** 本次应扣点数（与 chargedPoints 的差别只在「余额不足抵扣」等异常路径） */
+  billablePoints: number;
+  /** 扣费后剩余算力 */
+  points: number;
+}

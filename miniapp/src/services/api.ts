@@ -1,5 +1,5 @@
 import Taro from '@tarojs/taro';
-import type { ApiEnvelope, MiniappLayout, MiniappLayoutBlockType, PublicContent, RechargeOrderResult, RechargeStatus, UserProfile } from '../types';
+import type { ApiEnvelope, ImageGenConfig, ImageGenResult, MiniappLayout, MiniappLayoutBlockType, PublicContent, RechargeOrderResult, RechargeStatus, UserProfile } from '../types';
 // 分享设置（转发卡片标题 / 落地路径 / 配图）由后台配置、随内容一起下发，
 // 拉到内容后必须立刻落一份到本地缓存：微信的分享回调是同步求值的（见 utils/share.ts）。
 import { applyShareSettings } from '../utils/share';
@@ -45,7 +45,17 @@ export class ApiError extends Error {
   }
 }
 
-interface RequestOptions { method?: 'GET' | 'POST'; data?: unknown; auth?: boolean; header?: Record<string, string>; }
+interface RequestOptions {
+  method?: 'GET' | 'POST';
+  data?: unknown;
+  auth?: boolean;
+  header?: Record<string, string>;
+  /**
+   * 单请求超时（毫秒）。缺省沿用全局 15s（app.config.ts 的 networkTimeout.request）。
+   * ⚠️ 只有生图这类「上游要跑几十秒」的接口才需要放大，别图省事给全站调高。
+   */
+  timeout?: number;
+}
 
 function requestHeaders() {
   return {
@@ -81,7 +91,7 @@ async function rawRequest<T>(path: string, options: RequestOptions = {}): Promis
       method: options.method || 'GET',
       data: options.data,
       dataType: 'json',
-      timeout: 15000,
+      timeout: options.timeout || 15000,
       header: {
         'Content-Type': 'application/json',
         ...requestHeaders(),
@@ -104,7 +114,21 @@ async function rawRequest<T>(path: string, options: RequestOptions = {}): Promis
     body = responseData as ApiEnvelope<T>;
   }
   if (response.statusCode < 200 || response.statusCode >= 300 || !body?.ok) {
-    throw new ApiError(body?.error?.code || 'REQUEST_FAILED', body?.error?.message || '网络请求失败，请稍后重试', response.statusCode);
+    // 错误体有两种形状，必须都认：
+    //   · 信封形态 `{ ok:false, error:{ code, message } }` —— /api/miniapp/v1/* 都是这个；
+    //   · 平铺形态 `{ ok:false, error:'一句人话', code:'XXX', refunded }` —— /api/image-gen 这类
+    //     老接口把错误码放在**顶层**、error 是一句字符串。
+    // 不认平铺形态的话，`body.error.code` 取到 undefined，用户只能看到一句「网络请求失败」，
+    // 调用方也没法按 IMAGE_REF_UNSUPPORTED / POINTS_INSUFFICIENT 分流（那是要弹不同引导的）。
+    const flat = body as unknown as { error?: unknown; code?: unknown; msg?: unknown } | undefined;
+    const nested = body?.error && typeof body.error === 'object'
+      ? body.error as { code?: string; message?: string }
+      : null;
+    const code = String(nested?.code || flat?.code || 'REQUEST_FAILED');
+    const message = typeof flat?.error === 'string'
+      ? flat.error
+      : String(nested?.message || (typeof flat?.msg === 'string' ? flat.msg : '') || '网络请求失败，请稍后重试');
+    throw new ApiError(code, message, response.statusCode);
   }
   return body;
 }
@@ -148,6 +172,62 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     }
     throw error;
   }
+}
+
+/**
+ * 少数接口**平铺返回**（`{ ok:true, ...字段 }`，不套 `{ data }` 信封），例如
+ * `GET /api/image-gen/config` 与 `POST /api/image-gen`。
+ *
+ * 这类接口不能用 apiRequest（它取的是 `body.data`，平铺体上那个字段不存在，取到 undefined）。
+ * 这里复用同一套「静默登录 + 401 重登一次」的容错，只把**整包 body** 交给调用方。
+ */
+export async function apiRequestFlat<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  if (options.auth !== false) await ensureMiniappSession();
+  try {
+    // rawRequest 的返回值在类型上是 ApiEnvelope<T>，但平铺接口实际回的就是 T 本身。
+    return await rawRequest<T>(path, options) as unknown as T;
+  } catch (error) {
+    if (options.auth !== false && needsSessionRefresh(error) && !isLoggedOut()) {
+      await refreshMiniappSession();
+      return await rawRequest<T>(path, options) as unknown as T;
+    }
+    throw error;
+  }
+}
+
+/**
+ * 生图请求超时（毫秒）。
+ *
+ * ⚠️ 这个数是算出来的，别改小：服务端等上游的超时是 **180s**，客户端必须比它**长**。
+ * 客户端先断的话，用户看到的是「失败了」，而服务端那边其实还在生成、且**已经扣过点**
+ * （4K 实测 20~47s，带参考图更久）。
+ */
+export const IMAGE_GEN_TIMEOUT = 200000;
+
+/** 生图配置（免登录可读：未登录时页面也要显示「本次消耗多少点」）。 */
+export async function getImageGenConfig(): Promise<ImageGenConfig> {
+  return apiRequestFlat<ImageGenConfig>('/api/image-gen/config', { auth: false });
+}
+
+/**
+ * 文生图 / 图生图。
+ *
+ * ⚠️ `requestId` 由调用方生成，服务端拿它做**扣费幂等 + 失败退款标记**：
+ * 一次点击只能有一个 requestId，**重试必须换新的**（沿用旧值会把上次的退款标记撞掉）。
+ */
+export async function generateImage(payload: {
+  prompt: string;
+  model: string;
+  resolution: string;
+  aspectRatio?: string;
+  images?: string[];
+  requestId: string;
+}): Promise<ImageGenResult> {
+  return apiRequestFlat<ImageGenResult>('/api/image-gen', {
+    method: 'POST',
+    data: payload,
+    timeout: IMAGE_GEN_TIMEOUT,
+  });
 }
 
 /**

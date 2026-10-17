@@ -281,3 +281,40 @@ P1 未绑手机号 → P7 绑定 ──成功──→ 回 P1（自动续跑生�
 | **P2** | 作品详情页 + 批量管理 + 转发卡片 | 分享卡带图、落地到 P1 且不丢失参数 |
 
 **P0 完成即满足"网页已定稿 → 小程序可用"的最小闭环**；P1/P2 是体验增强，不影响上线。
+
+---
+
+## 7. P0 实施记录（2026-10-17）
+
+已按 P0 范围落地（**未发版、未上传小程序**）：
+
+| 文件 | 改动 |
+|---|---|
+| `miniapp/src/pages/image-gen/index.tsx` | 新建：创作页（模型 / 清晰度 / 比例 / 提示词 / 生成 / 结果卡 / 加入资产库 / 保存相册） |
+| `miniapp/src/pages/image-gen/index.config.ts` | 新建：导航标题「AI全能设计」 |
+| `miniapp/src/app.config.ts` | 注册 `pages/image-gen/index` |
+| `miniapp/src/services/api.ts` | `RequestOptions` 加 `timeout`；错误体兼容**平铺形态**；新增 `apiRequestFlat` / `getImageGenConfig` / `generateImage` / `IMAGE_GEN_TIMEOUT=200s` |
+| `miniapp/src/services/imageGen.ts` | 新建：requestId、绝对地址、体积/点数格式化、默认档位选择、保存相册、资产记录组装 |
+| `miniapp/src/types.ts` | 新增 `ImageGenModel` / `ImageGenConfig` / `ImageGenResult` |
+| `miniapp/src/pages/profile/index.tsx` | 「我的」新增一张 AI 创作入口卡（不是第 6 个 tab） |
+| `miniapp/src/app.scss` | 新增 `.gen-*` 与 `.mini-design-entry` 样式（全部走语义 token） |
+| `miniapp/src/utils/asset-format.ts` | `SOURCE_TYPE_NAMES` 补 `imageGen: 'AI 全能设计'`（与网页端同名表一致） |
+| `server/miniapp-layout.mjs` | `MINIAPP_INTERNAL_PAGES` 补 `/pages/image-gen/index`（后台「点击链接 → 小程序页面」下拉才能选到） |
+| `frontend/src/miniapp-preview/index.jsx` | `PAGE_LABELS` 补该页中文名（后台画布上显示「AI全能设计」而不是裸路径） |
+
+### 与规划的两处**有意偏差**
+
+1. **P0 不加手机号 / VIP 门禁**，只保留算力门禁。
+   核实结果：`/api/image-gen` 服务端只有 `requireUser` + 扣费，**没有** `PHONE_BIND_REQUIRED` / `VIP_REQUIRED`
+   （那两道只在充值下单、对话、工作流三处）。网页端 `/image-gen` 也**没有任何**客户端门禁。
+   若小程序单方面加手机号门禁，会出现「同一账号在网页能生成、在小程序被拦」的两端不一致。
+   所以这里只做 `ensureEnoughPoints`（fail-open）+ `handlePointsInsufficient`（402 弹充值）。
+2. **P0 不含参考图区块**（规划里也是 P1）：避免把「真压缩 + 10MB 单请求上限」一起拖进首版。
+
+### 额外加固（规划里没写）
+
+- **连点防重**：`busyRef` 同步锁 + 预检后再抢一次锁。`busy` 是 state，快速双击会在同一帧都读到 `false`
+  → 两条请求 = 扣两次点（网页端同一处风险，小程序这边直接堵死）。
+- **错误原因透传**：服务端 `POST /api/image-gen` 的错误体是 `{ ok:false, error:'一句人话', code:'XXX' }`
+  （**平铺**，不是信封），`rawRequest` 以前只认 `error.code`，会把原因压成「网络请求失败」；
+  现在两种形状都认，`IMAGE_MODEL_UNAVAILABLE` / `POINTS_INSUFFICIENT` 才能分流。
