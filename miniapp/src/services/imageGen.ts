@@ -126,6 +126,9 @@ export function buildImageAsset(result: ImageGenResult, fallbackPrompt = ''): Re
     // （老记录没有这两个字段 → 回填时只用模型，档位落到该模型的第一档）
     resolution: result.resolution || '',
     aspectRatio: result.aspectRatio || '',
+    // 体积 / MIME 存进记录，详情页要显示（老记录没有 → 详情页显示 '-'）
+    size: Number(result.size) || 0,
+    mimeType: result.mimeType || '',
     createdAt: new Date().toISOString(),
   };
 }
@@ -312,4 +315,70 @@ export function firstImageOf(item: Record<string, unknown>): string {
   const list = Array.isArray(item.images) ? item.images : [];
   const first = list.map(String).find((url) => !!url);
   return first || '';
+}
+
+/* ===================== P2：详情页交接 / 分享缩略图 ===================== */
+
+/**
+ * 作品详情页的数据交接。
+ *
+ * 服务端没有「按 id 取单条资产」的接口（列表才有），而提示词可能有 2000 字、塞不进 URL。
+ * 所以列表页点卡片时先把整条记录写进本地存储，详情页读一次即删；
+ * 带 `?id=` 直接进（分享/回退）且快照不匹配时，详情页再回退去列表接口里找。
+ */
+const DETAIL_KEY = 'usunai_image_detail_v1';
+
+export function stashDetailAsset(item: Record<string, unknown>): void {
+  try { Taro.setStorageSync(DETAIL_KEY, item); } catch { /* 存储满时详情页会走接口兜底 */ }
+}
+
+/** 取出快照并**只在 id 对得上时**采用（避免用户点了 A、快照还留着 B 的旧数据）。 */
+export function takeDetailAsset(id: string): Record<string, unknown> | null {
+  try {
+    const raw = Taro.getStorageSync<Record<string, unknown>>(DETAIL_KEY);
+    Taro.removeStorageSync(DETAIL_KEY);
+    if (!raw || typeof raw !== 'object') return null;
+    if (!id || String(raw.id) !== String(id)) return null;
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 分享卡片配图。
+ *
+ * 作品原图动辄 1MB+（4K 能到 18MB），直接当分享图微信多半不认（回落成默认卡片）。
+ * `/api/blob/serve` 支持按 `format=webp&w=&h=` 出小图（服务端 sharp 生成、公网可读），
+ * 450×360 约几 KB～几十 KB，正好是分享卡的 5:4 比例。
+ * ⚠️ 非本站图床（外链）原样返回，加参数会把外链弄坏。
+ */
+export function shareThumbUrl(url: string): string {
+  const full = imageUrl(url);
+  if (!full || !full.includes('/api/blob/serve')) return full;
+  return `${full}${full.includes('?') ? '&' : '?'}format=webp&w=450&h=360`;
+}
+
+/**
+ * 「作品墙需要刷新」标记。
+ *
+ * 场景：列表 → 详情 → 删除 → 返回列表。列表页在页面栈里没被销毁，不刷新的话
+ * 已删掉的那张还挂在那儿（点进去才发现"作品不存在"）。
+ * 但也不能每次 onShow 都重拉 —— 那会把滚动位置清掉。所以用一次性标记。
+ */
+const WORKS_DIRTY_KEY = 'usunai_image_works_dirty_v1';
+
+export function markWorksDirty(): void {
+  try { Taro.setStorageSync(WORKS_DIRTY_KEY, true); } catch { /* 标记失败仅影响一次刷新 */ }
+}
+
+/** 读一次即清（返回 true 表示需要重拉列表） */
+export function takeWorksDirty(): boolean {
+  try {
+    const flag = Taro.getStorageSync<boolean>(WORKS_DIRTY_KEY);
+    if (flag) Taro.removeStorageSync(WORKS_DIRTY_KEY);
+    return flag === true;
+  } catch {
+    return false;
+  }
 }

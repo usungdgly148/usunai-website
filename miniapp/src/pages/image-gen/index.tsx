@@ -281,7 +281,55 @@ export default function ImageGenPage() {
     )}
 
     {models.length > 0 && (<>
-      {/* ① 参数区：模型 / 清晰度 / 比例 */}
+      {/* ① 参考图（最上）：模型不支持时整块隐藏 —— gpt-image-* 那条通道没有参考图入口，
+             留在界面上只会让用户传了图却被服务端拒（IMAGE_REF_UNSUPPORTED） */}
+      {refsSupported && <View className='gen-card'>
+        <View className='gen-label-row'>
+          <Text className='gen-label gen-label-flat'>参考图</Text>
+          <Text className='gen-count'>可选 · 最多 {REF_IMAGE_MAX} 张</Text>
+        </View>
+        <View className='gen-ref-grid'>
+          {refs.map((item) => (
+            <View key={item.uid} className='gen-ref-item'>
+              <Image
+                className='gen-ref-img'
+                src={item.path}
+                mode='aspectFill'
+                onClick={() => previewRef(item.path)}
+              />
+              <View className='gen-ref-remove' onClick={() => removeRef(item.uid)}>
+                <Text className='gen-ref-remove-text'>×</Text>
+              </View>
+            </View>
+          ))}
+          {refs.length < REF_IMAGE_MAX && (
+            <View className={`gen-ref-add ${refBusy ? 'gen-ref-add-busy' : ''}`} onClick={chooseRefs}>
+              <Text className='gen-ref-add-icon'>{refBusy ? '…' : '+'}</Text>
+              <Text className='gen-ref-add-text'>{refBusy ? '处理中' : '添加'}</Text>
+            </View>
+          )}
+        </View>
+        <Text className='gen-ref-hint'>会先压到 1024px 内再上传，单张不超过 2MB</Text>
+      </View>}
+
+      {/* ② 画面描述 */}
+      <View className='gen-card'>
+        <View className='gen-label-row'>
+          <Text className='gen-label gen-label-flat'>画面描述</Text>
+          <Text className='gen-count'>{prompt.length}/2000</Text>
+        </View>
+        <Textarea
+          className='gen-textarea'
+          value={prompt}
+          maxlength={2000}
+          placeholder='例如：一张产品海报，暖色木桌，柔和窗光，浅景深'
+          placeholderClass='gen-placeholder'
+          disabled={busy}
+          onInput={(event) => setPrompt(event.detail.value)}
+        />
+      </View>
+
+      {/* ③ 参数区：模型 / 清晰度 / 画面比例（放最后：先让用户说清要什么，再决定花多少点） */}
       <View className='gen-card'>
         {models.length > 1 && (<>
           <Text className='gen-label'>模型</Text>
@@ -328,54 +376,6 @@ export default function ImageGenPage() {
           ))}
         </View>
       </View>
-
-      {/* ② 提示词 */}
-      <View className='gen-card'>
-        <View className='gen-label-row'>
-          <Text className='gen-label gen-label-flat'>画面描述</Text>
-          <Text className='gen-count'>{prompt.length}/2000</Text>
-        </View>
-        <Textarea
-          className='gen-textarea'
-          value={prompt}
-          maxlength={2000}
-          placeholder='例如：一张产品海报，暖色木桌，柔和窗光，浅景深'
-          placeholderClass='gen-placeholder'
-          disabled={busy}
-          onInput={(event) => setPrompt(event.detail.value)}
-        />
-      </View>
-
-      {/* ③ 参考图（P1）：模型不支持时整块隐藏 —— gpt-image-* 那条通道没有参考图入口，
-             留在界面上只会让用户传了图却被服务端拒（IMAGE_REF_UNSUPPORTED） */}
-      {refsSupported && <View className='gen-card'>
-        <View className='gen-label-row'>
-          <Text className='gen-label gen-label-flat'>参考图</Text>
-          <Text className='gen-count'>可选 · 最多 {REF_IMAGE_MAX} 张</Text>
-        </View>
-        <View className='gen-ref-grid'>
-          {refs.map((item) => (
-            <View key={item.uid} className='gen-ref-item'>
-              <Image
-                className='gen-ref-img'
-                src={item.path}
-                mode='aspectFill'
-                onClick={() => previewRef(item.path)}
-              />
-              <View className='gen-ref-remove' onClick={() => removeRef(item.uid)}>
-                <Text className='gen-ref-remove-text'>×</Text>
-              </View>
-            </View>
-          ))}
-          {refs.length < REF_IMAGE_MAX && (
-            <View className={`gen-ref-add ${refBusy ? 'gen-ref-add-busy' : ''}`} onClick={chooseRefs}>
-              <Text className='gen-ref-add-icon'>{refBusy ? '…' : '+'}</Text>
-              <Text className='gen-ref-add-text'>{refBusy ? '处理中' : '添加'}</Text>
-            </View>
-          )}
-        </View>
-        <Text className='gen-ref-hint'>会先压到 1024px 内再上传，单张不超过 2MB</Text>
-      </View>}
 
       {/* ④ 生成中 / 失败 */}
       {busy && <View className='gen-waiting'>

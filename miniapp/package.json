@@ -1,6 +1,6 @@
 {
   "name": "usunai-miniapp",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "scripts": {
     "dev:weapp": "taro build --type weapp --watch",

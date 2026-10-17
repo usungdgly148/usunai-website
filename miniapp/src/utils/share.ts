@@ -50,6 +50,17 @@ const EMPTY_SETTINGS: ShareSettings = { title: '', path: '', imageUrl: '' };
 export interface ShareTarget {
   /** 页面语境名（智能体名 / 工作流名 / 分类名等）。留空则用缺省标题。 */
   title?: string;
+  /**
+   * 覆盖分享配图（例如「我的作品」里某张图）。传本站 `/api/blob/serve?…` 相对地址即可，
+   * 这里会补成绝对地址；外链 http(s) 原样使用。
+   */
+  imageUrl?: string;
+  /**
+   * 覆盖「转发给朋友」的落地页（必须是 `/pages/xxx/index`）。
+   * 优先级高于后台配置的全局落地页 —— 作品墙分享出去要落创作页，而不是全局首页。
+   * 朋友圈卡片固定打开当前页，不受这个字段影响。
+   */
+  path?: string;
 }
 
 export interface ShareAppPayload {
@@ -157,13 +168,14 @@ export function shareTargets(target: ShareTarget = {}): SharePayloads {
   // 标题：后台配了就用全局标题；没配则按语境拼（详情页「<智能体名> · 友尚AI」）。
   const title = settings.title || shareTitle(target.title);
 
-  // 落地页：后台配了固定路径就用它 —— 这才是「转发整个小程序名片」的形态；
+  // 落地页：页面级覆盖 > 后台配的固定路径 > 当前页（带 query）。
   // 配的路径自带 query 时按其原文使用，不再叠加当前页的 query（那属于当前页，叠上去是错的）。
-  const appPath = settings.path || (query ? `${path}?${query}` : path);
+  const overridePath = target.path && isPagePath(target.path) ? target.path : '';
+  const appPath = overridePath || settings.path || (query ? `${path}?${query}` : path);
 
-  // 配图：本站上传图是 `/api/blob/serve?key=…` 相对地址，必须补全成绝对地址，
+  // 配图：页面级覆盖（作品图）> 后台配置。本站地址一律补全成绝对地址，
   // 否则分享卡片加载不出来（与头像 / banner 同一套补全逻辑）。
-  const imageUrl = toMiniappUrl(settings.imageUrl);
+  const imageUrl = toMiniappUrl(target.imageUrl || settings.imageUrl);
 
   return {
     // 未配图时**不带** imageUrl 字段：交给微信「截取当前页面」，与以前的行为一致。

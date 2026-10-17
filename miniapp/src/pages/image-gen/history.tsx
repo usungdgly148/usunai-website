@@ -1,22 +1,29 @@
-import Taro, { usePullDownRefresh, useReachBottom, useShareAppMessage, useShareTimeline } from '@tarojs/taro';
-import { Image, ScrollView, Text, View } from '@tarojs/components';
+import Taro, {
+  useDidShow, usePullDownRefresh, useReachBottom, useShareAppMessage, useShareTimeline,
+} from '@tarojs/taro';
+import { Button, Image, ScrollView, Text, View } from '@tarojs/components';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PageState } from '../../components/page-state';
 import { useLoad } from '../../hooks/use-load';
 import { useThemePage } from '../../hooks/use-theme-page';
 import { deleteRuntimeAsset, getImageGenConfig, getPagedRecords } from '../../services/api';
-import { firstImageOf, imageUrl, saveImageToAlbum, stashRegenerate, wallTime } from '../../services/imageGen';
+import {
+  firstImageOf, imageUrl, saveImageToAlbum, shareThumbUrl, stashDetailAsset, stashRegenerate, takeWorksDirty,
+  wallTime,
+} from '../../services/imageGen';
 import { confirmDialog, toast } from '../../utils/feedback';
 import { shareTargets } from '../../utils/share';
 
 /**
- * 「我的作品」—— AI全能设计 的生成记录墙（P1）。
+ * 「我的作品」—— AI全能设计 的生成记录墙（P1 + P2）。
  *
  * 数据源就是**资产库里的图片资产**（`category=image`），不另立一张表：
  * 网页端、小程序端、别处生成的图片资产全都在这一个池子里，天然跨端可见。
  *
  * 版式：两列瀑布（图片 mode='widthFix' 保持原比例）。不做真测量排版 —— 按奇偶分列已经够看，
  * 真要等高得先拿全部图片尺寸，收益不抵复杂度。
+ *
+ * P2 增补：点卡片进详情页、「管理」批量删除、分享卡带作品图。
  */
 const PAGE_SIZE = 20;
 const GEN_PAGE = '/pages/image-gen/index';
@@ -26,10 +33,6 @@ type Row = Record<string, unknown>;
 
 export default function ImageGenHistoryPage() {
   const { pageStyle } = useThemePage();
-  // 转发/分享：hook 必须写在页面源码里 —— Taro 逐页扫源码决定是否开启转发（见 utils/share.ts）
-  const share = shareTargets({ title: '我的作品' });
-  useShareAppMessage(() => share.app);
-  useShareTimeline(() => share.timeline);
 
   // 模型筛选直接复用生图配置：chip 上的文案与后台模型名永远一致
   const configState = useLoad(getImageGenConfig, []);
@@ -42,6 +45,21 @@ export default function ImageGenHistoryPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
+  // 批量管理：打开后点卡片是「选中」而不是「看详情」
+  const [manageMode, setManageMode] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  // 分享卡配图用最近一张作品（比裸卡片好看）；落地页固定创作页
+  // （好友看不到别人的资产，落详情页只会见到「作品不存在」）。
+  const newestImage = items.length ? firstImageOf(items[0]) : '';
+  const share = shareTargets({
+    title: '我的作品',
+    imageUrl: newestImage ? shareThumbUrl(newestImage) : '',
+    path: GEN_PAGE,
+  });
+  useShareAppMessage(() => share.app);
+  useShareTimeline(() => share.timeline);
 
   const load = useCallback(async (targetPage: number, mode: 'reset' | 'append') => {
     if (mode === 'reset') { setLoading(true); setError(''); }
@@ -64,6 +82,14 @@ export default function ImageGenHistoryPage() {
   }, [filter]);
 
   useEffect(() => { void load(1, 'reset'); }, [load]);
+  /**
+   * 从详情页返回时，若那边删掉了作品就重拉一次。
+   * ⚠️ 只在「有标记」时重拉 —— 无条件 onShow 重拉会把滚动位置和已加载的分页全清掉。
+   * 标记是一次性的（takeWorksDirty 读完即删），所以不会连续触发。
+   */
+  useDidShow(() => {
+    if (takeWorksDirty()) void load(1, 'reset');
+  });
   usePullDownRefresh(async () => { await load(1, 'reset'); Taro.stopPullDownRefresh(); });
   useReachBottom(() => {
     if (loading || loadingMore || page >= totalPages) return;
@@ -134,15 +160,66 @@ export default function ImageGenHistoryPage() {
   };
 
   const openActions = async (item: Row) => {
-    const choices = ['保存到相册', '再次生成', '删除'];
+    const choices = ['查看大图', '保存到相册', '再次生成', '删除'];
     try {
       const result = await Taro.showActionSheet({ itemList: choices });
-      if (result.tapIndex === 0) await saveRow(item);
-      else if (result.tapIndex === 1) await regenerate(item);
-      else if (result.tapIndex === 2) await deleteRow(item);
+      if (result.tapIndex === 0) previewRow(item);
+      else if (result.tapIndex === 1) await saveRow(item);
+      else if (result.tapIndex === 2) await regenerate(item);
+      else if (result.tapIndex === 3) await deleteRow(item);
     } catch {
       // 用户取消
     }
+  };
+
+  /** 点卡片：管理模式下是选中/取消，非管理模式进详情页 */
+  const openRow = (item: Row) => {
+    const id = String(item.id || '');
+    if (!id) return;
+    if (manageMode) {
+      setSelected((prev) => (prev.includes(id) ? prev.filter((entry) => entry !== id) : [...prev, id]));
+      return;
+    }
+    // 详情页要用整条记录（提示词可能 2000 字，塞不进 URL）：先快照，再只带 id 跳转
+    stashDetailAsset(item);
+    void Taro.navigateTo({ url: `/pages/image-gen/detail?id=${encodeURIComponent(id)}` });
+  };
+
+  const toggleManage = () => {
+    setManageMode((prev) => !prev);
+    setSelected([]);
+  };
+
+  const allSelected = items.length > 0 && selected.length === items.length;
+  const toggleAll = () => {
+    setSelected(allSelected ? [] : items.map((item) => String(item.id)));
+  };
+
+  /**
+   * 批量删除：**串行**逐条删。
+   * 服务端没有批量接口，而资产是「一个用户一个 JSON 数组」整把读改写 ——
+   * 并发删除会互相覆盖（后写的把先写的复活），所以必须一条 await 到底再下一条。
+   */
+  const deleteSelected = async () => {
+    if (!selected.length || busy) return;
+    const ok = await confirmDialog({
+      title: '批量删除',
+      content: `确定删除选中的 ${selected.length} 张作品？删除后不可恢复。`,
+      confirmText: '删除',
+      cancelText: '取消',
+    });
+    if (!ok) return;
+    setBusy(true);
+    let failed = 0;
+    for (const id of selected) {
+      try { await deleteRuntimeAsset(id); } catch { failed += 1; }
+    }
+    setBusy(false);
+    if (failed) toast(`${failed} 张删除失败，请重试`, 'error');
+    else toast(`已删除 ${selected.length} 张`, 'success');
+    setManageMode(false);
+    setSelected([]);
+    await load(1, 'reset');
   };
 
   const goCreate = async () => {
@@ -153,10 +230,15 @@ export default function ImageGenHistoryPage() {
     }
   };
 
-  return <View className='page gen-history-page' style={pageStyle}>
-    <View className='mini-page-topbar'>
-      <Text className='mini-page-heading'>我的作品</Text>
-      <Text className='mini-page-caption'>生成的图片都收在这里，可保存、可再生成</Text>
+  return <View className={`page gen-history-page ${manageMode ? 'gen-history-page-manage' : ''}`} style={pageStyle}>
+    <View className='gen-history-head'>
+      <View className='gen-history-head-main'>
+        <Text className='mini-page-heading'>我的作品</Text>
+        <Text className='mini-page-caption'>生成的图片都收在这里，可保存、可再生成</Text>
+      </View>
+      {items.length > 0 && (
+        <Text className='gen-history-manage' onClick={toggleManage}>{manageMode ? '完成' : '管理'}</Text>
+      )}
     </View>
 
     {models.length > 0 && (
@@ -197,21 +279,35 @@ export default function ImageGenHistoryPage() {
       <View className='gen-work-cols'>
         {columns.map((column, columnIndex) => (
           <View key={`col-${columnIndex}`} className='gen-work-col'>
-            {column.map((item) => (
-              <View key={String(item.id)} className='gen-work-card'>
-                <Image
-                  className='gen-work-img'
-                  src={imageUrl(firstImageOf(item))}
-                  mode='widthFix'
-                  lazyLoad
-                  onClick={() => previewRow(item)}
-                />
-                <View className='gen-work-bar'>
-                  <Text className='gen-work-time'>{wallTime(item.createdAt)}</Text>
-                  <Text className='gen-work-more' onClick={() => void openActions(item)}>⋯</Text>
+            {column.map((item) => {
+              const id = String(item.id);
+              const isSelected = selected.includes(id);
+              return (
+                <View
+                  key={id}
+                  className={`gen-work-card ${manageMode && isSelected ? 'gen-work-card-active' : ''}`}
+                  onClick={() => openRow(item)}
+                >
+                  <Image className='gen-work-img' src={imageUrl(firstImageOf(item))} mode='widthFix' lazyLoad />
+                  {manageMode && (
+                    <View className={`gen-work-check ${isSelected ? 'gen-work-check-on' : ''}`}>
+                      <Text className='gen-work-check-text'>{isSelected ? '✓' : ''}</Text>
+                    </View>
+                  )}
+                  {!manageMode && (
+                    <View className='gen-work-bar'>
+                      <Text className='gen-work-time'>{wallTime(item.createdAt)}</Text>
+                      <Text
+                        className='gen-work-more'
+                        onClick={(event) => { event.stopPropagation(); void openActions(item); }}
+                      >
+                        ⋯
+                      </Text>
+                    </View>
+                  )}
                 </View>
-              </View>
-            ))}
+              );
+            })}
           </View>
         ))}
       </View>
@@ -220,6 +316,22 @@ export default function ImageGenHistoryPage() {
     {items.length > 0 && (loadingMore || page >= totalPages) && (
       <View className='gen-work-more-hint'>
         <Text>{loadingMore ? '加载中…' : '没有更多了'}</Text>
+      </View>
+    )}
+
+    {manageMode && (
+      <View className='gen-manage-bar'>
+        <View className='gen-manage-all' onClick={toggleAll}>
+          <Text className='gen-manage-all-text'>{allSelected ? '取消全选' : '全选'}</Text>
+        </View>
+        <Button
+          className='gen-manage-delete'
+          disabled={!selected.length || busy}
+          loading={busy}
+          onClick={deleteSelected}
+        >
+          {selected.length ? `删除 (${selected.length})` : '删除'}
+        </Button>
       </View>
     )}
 
