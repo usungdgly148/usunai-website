@@ -2670,10 +2670,19 @@ function serveStatic(req, res, urlPath) {
     res.end('forbidden');
     return;
   }
+  // 2026-10-18 修复 SPA 路由 /assets 刷新 404：
+  //   `/assets` 是真实前端路由（资产库页，frontend/src/App.jsx 的 <Route path="/assets">），
+  //   而 Vite 产物目录也叫 dist/assets —— 两者同名。
+  //   旧判据 `normalized === 'assets' || normalized.startsWith('assets/')` 把 `/assets` 与 `/assets/`
+  //   一起当成静态资源 → 在资产库页按 F5 直接 404（`/profile`、`/orders` 都正常）。
+  //   新判据：先剥掉尾部斜杠，再要求 assets 后面**还有一级**才算是 Vite 产物；
+  //   `/assets`、`/assets/` 一律走 SPA 回退，`/assets/index-<hash>.js` 仍然严格 404（不能回退成 HTML）。
+  const assetSubPath = normalized.replace(/[/\\]+$/, '');
+  const isViteAsset = assetSubPath.startsWith('assets/') || assetSubPath.startsWith('assets\\');
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     // Hashed Vite assets must never fall back to index.html. Returning HTML for a
     // missing JavaScript chunk makes an already-open mobile tab crash after a deploy.
-    if (normalized === 'assets' || normalized.startsWith(`assets${path.sep}`)) {
+    if (isViteAsset) {
       res.statusCode = 404;
       res.setHeader('Cache-Control', 'no-store');
       res.end('not found');
@@ -2683,12 +2692,15 @@ function serveStatic(req, res, urlPath) {
     const fallback = path.resolve(distRoot, 'index.html');
     if (!fallback.startsWith(distRoot + path.sep)) { res.statusCode = 403; res.end('forbidden'); return; }
     res.setHeader('Content-Type', MIME['.html'] || 'text/html');
+    // 深链回退出来的同样是 SPA 入口：必须 no-cache，否则发版后浏览器可能拿旧 HTML
+    // 去引用已经不存在的旧 chunk（白屏）。与下面直出 index.html 的口径保持一致。
+    res.setHeader('Cache-Control', 'no-cache');
     res.end(fs.readFileSync(fallback));
     return;
   }
   const ext = path.extname(file);
   res.setHeader('Content-Type', MIME[ext] || 'application/octet-stream');
-  if (normalized === 'assets' || normalized.startsWith(`assets${path.sep}`)) {
+  if (isViteAsset) {
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   } else if (ext === '.html') {
     res.setHeader('Cache-Control', 'no-cache');
