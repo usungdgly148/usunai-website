@@ -104,6 +104,14 @@ export function Sidebar() {
             </div>
           </Link>
 
+          {/* AI 生图：独立功能页。不挂在分类下 —— 分类点击是 `?category=` 筛选，不是路由跳转 */}
+          <Link to="/image-gen" onClick={() => { setSidebarOpen(false); if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'auto' }); }}>
+            <div className={homeItemClass(location.pathname === '/image-gen')}>
+              <Image size={22} strokeWidth={1.8} className="transition-transform duration-200 group-hover:scale-110 motion-reduce:group-hover:scale-100" />
+              <span>AI 生图</span>
+            </div>
+          </Link>
+
           {/* 分组 */}
           <div className="mt-2 space-y-0">
             {groupEntries.map((group, gIdx) => (

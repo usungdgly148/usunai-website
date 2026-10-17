@@ -15,6 +15,7 @@ const AgentList = lazy(() => import('./pages/AgentList.jsx'));
 const Chat = lazy(() => import('./pages/Chat.jsx'));
 const Workflow = lazy(() => import('./pages/Workflow.jsx'));
 const History = lazy(() => import('./pages/History.jsx'));
+const ImageGen = lazy(() => import('./pages/ImageGen.jsx'));
 const Profile = lazy(() => import('./pages/Profile.jsx'));
 const Assets = lazy(() => import('./pages/Assets.jsx'));
 const Orders = lazy(() => import('./pages/Orders.jsx'));
@@ -73,6 +74,7 @@ function FrontLayout() {
               <Route path="/chat/:id" element={<Chat />} />
               <Route path="/workflow/:id" element={<Workflow />} />
               <Route path="/history" element={<History />} />
+              <Route path="/image-gen" element={<ImageGen />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/assets" element={<Assets />} />
