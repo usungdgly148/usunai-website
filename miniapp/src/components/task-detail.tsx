@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Image, ScrollView, Text, Video, View } from '@tarojs/components';
 import { TdIcon } from './td-icon';
 import { formatAssetCost, formatAssetSource, formatDuration, formatTime, mediaFromAssetContent } from '../utils/asset-format';
+import { toMiniappUrl } from '../utils/entity-visual';
 
 /**
  * 任务详情弹窗：与网页端「我的资产 → 任务详情」Modal 结构对齐。
@@ -35,10 +36,16 @@ export function TaskDetail({ asset, visible, onClose }: {
     .filter(([, v]) => v !== '');
 
   const media = mediaFromAssetContent(content);
-  const ownImages = Array.isArray(asset?.images) ? asset.images.map(String) : [];
-  const ownVideos = Array.isArray(asset?.videos) ? asset.videos.map(String) : [];
-  const images = [...new Set([...ownImages, ...media.images])];
-  const videos = [...new Set([...ownVideos, ...media.videos])];
+  /**
+   * ⚠️ 必须补绝对域名：服务端存的是**相对路径**（`/api/blob/serve?key=…`，见 `generateAndStoreImage`），
+   * 网页端同源能直接显示，但小程序的 `<Image>` / `<Video>` **不接受相对路径** —— 会渲染成一个空灰框。
+   * 这里是资产库唯一的图片渲染出口，统一过一遍 `toMiniappUrl`：
+   * 绝对路径原样返回，因此**老记录（已存成相对路径的）也随之修好**，不用改历史数据。
+   */
+  const ownImages = (Array.isArray(asset?.images) ? asset.images.map(String) : []).map(toMiniappUrl);
+  const ownVideos = (Array.isArray(asset?.videos) ? asset.videos.map(String) : []).map(toMiniappUrl);
+  const images = [...new Set([...ownImages, ...media.images.map(toMiniappUrl)])];
+  const videos = [...new Set([...ownVideos, ...media.videos.map(toMiniappUrl)])];
 
   const onCopy = () => {
     Taro.setClipboardData({ data: content })

@@ -479,4 +479,34 @@ AI全能设计（page /pages/image-gen/index）   ← 入口在这里
 - 产物断言：「AI全能设计」入口块已不在 `profile` 产物里；`gen-detail-value-link` 在 `detail` 产物里；
   `pages/compute/index` 出现在 `detail.js`。
 
+---
+
+## 11. 修复：资产库「任务详情」图片不显示（2026-10-17）
+
+**现象**：小程序「我的资产 → 图片」里点开 AI 全能设计生成的记录，「运行结果」区是一个空白灰框，图片加载不出来。
+
+**根因**：服务端生成的图片地址是**相对路径** —— `generateAndStoreImage` 返回
+`url: /api/blob/serve?key=…`（`server/index.mjs`），写进资产时 `buildImageAsset` 原样存进 `images[]`。
+网页端与接口同源，相对路径能直接显示；但**小程序的 `<Image>` / `<Video>` 只认绝对地址**，
+拿到 `/api/...` 会渲染成一个空框，不报错也不提示。
+
+**为什么只有资产库出问题**：生图链路自己渲染时都过了 `imageUrl()`（即 `toMiniappUrl`）——
+创作页结果卡、作品墙、详情页都正常；只有资产库的通用弹窗
+`components/task-detail.tsx` 直接用了 `asset.images` 原值，漏了这一步。
+
+**修法**：在 `task-detail.tsx` 里把 `images` / `videos`（含从正文里抽出的媒体）统一过 `toMiniappUrl`。
+
+```ts
+const ownImages = (Array.isArray(asset?.images) ? asset.images.map(String) : []).map(toMiniappUrl);
+const images = [...new Set([...ownImages, ...media.images.map(toMiniappUrl)])];
+```
+
+**为什么不改写入侧**：① 相对路径对网页端更可移植（换域名不用洗数据）；
+② 渲染侧归一化能**同时修好已经存在的老记录**，改写入侧只管新数据。
+`toMiniappUrl` 对绝对 / `data:` / `blob:` 原样返回，所以两种数据混着也不会二次拼接。
+
+**验证**：`tsc` 干净；正式档 `0.1.12`；产物断言「`task-detail` 所在 chunk 含 `mini-task-detail-image`
+且同 chunk 有 `usunai.top` 域名补全」通过。
+
+
 
