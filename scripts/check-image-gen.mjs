@@ -191,12 +191,15 @@ check('老配置迁移成单模型单档', legacyModels.length === 1 && legacyMo
 
 // 新接入的模型必须自动出现在后台配置表（未上架、无价），否则后台永远看不到它
 const withCandidates = normalizeImageModels(null, { legacyModel: 'gemini-nano-banana-2.1', legacyPrice: 30 });
-check('候选清单含 gemini-2.5-flash-image', IMAGE_MODEL_CANDIDATES.includes('gemini-2.5-flash-image'), IMAGE_MODEL_CANDIDATES.join(','));
+check('候选清单含 gpt-image-2.5-flare', IMAGE_MODEL_CANDIDATES.includes('gpt-image-2.5-flare'), IMAGE_MODEL_CANDIDATES.join(','));
 check(
   '新模型自动补进配置表且未上架',
-  withCandidates.some((item) => item.id === 'gemini-2.5-flash-image' && item.enabled === false && Object.keys(item.prices).length === 0),
+  withCandidates.some((item) => item.id === 'gpt-image-2.5-flare' && item.enabled === false && Object.keys(item.prices).length === 0),
   JSON.stringify(withCandidates.map((item) => item.id)),
 );
+// 主人 2026-10-17 要求移除：该模型上游无可用渠道，不再出现在候选/后台表/前端兜底里
+check('候选清单已移除 gemini-2.5-flash-image', !IMAGE_MODEL_CANDIDATES.includes('gemini-2.5-flash-image'));
+check('配置表不再补出 gemini-2.5-flash-image', !withCandidates.some((item) => item.id === 'gemini-2.5-flash-image'));
 check('候选补齐不影响原模型价格', withCandidates.find((item) => item.id === 'gemini-nano-banana-2.1').prices['1K'] === 30);
 check('候选补齐不会顺带把模型上架', withCandidates.filter((item) => item.enabled !== false).length === 1);
 
@@ -241,7 +244,10 @@ check('后台页有 1K/2K/4K 三档价格输入', adminPageSrc.includes("const R
 check('后台页能从中转站拉模型列表', adminPageSrc.includes('fetchRelayModels'));
 check('后台页保存配置到 settings 接口', adminPageSrc.includes("adminFetch('/api/admin/image-gen/settings'"));
 check('后台页透传分辨率', adminPageSrc.includes('resolution, aspectRatio: aspect'));
-check('后台页候选含 gemini-2.5-flash-image', adminPageSrc.includes("'gemini-2.5-flash-image'"));
+check('后台页兜底模型已移除 gemini-2.5-flash-image', !adminPageSrc.includes("'gemini-2.5-flash-image'"));
+// 凭证选择必须能保存：旧写法 draft.providerId 优先 ⇒ 下拉框改了永远存不进去
+check('后台页保存时以「生图凭证」下拉为准', adminPageSrc.includes('providerId: providerId || draft.providerId'));
+check('后台页加载时回显已保存的凭证', adminPageSrc.includes('if (data.settings.providerId) setProviderId(data.settings.providerId)'));
 
 // ===== 11. 名称统一为「AI全能设计」+ 入口归位「AI 创作」组 =====
 const sidebarSrc = read('frontend/src/components.jsx');

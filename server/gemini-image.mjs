@@ -43,7 +43,6 @@ export const DEFAULT_IMAGE_RESOLUTION = '1K';
 //    gpt-image-2.5-flare、-sunburst 就是典型反例（/v1/models 有，调用 503 No available channel）。
 export const IMAGE_MODEL_CANDIDATES = [
   'gemini-nano-banana-2.1',
-  'gemini-2.5-flash-image',
   'gpt-image-2.5-flare',
   'gpt-image-2.5-sunburst',
 ];

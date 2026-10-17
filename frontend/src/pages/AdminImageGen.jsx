@@ -10,8 +10,8 @@ import RefImagePicker, { toApiImages } from '../RefImagePicker.jsx';
 const ASPECTS = ['1:1', '16:9', '9:16', '4:3', '3:4'];
 const RESOLUTIONS = ['1K', '2K', '4K'];
 // 与服务端 server/gemini-image.mjs 的 IMAGE_MODEL_CANDIDATES 保持一致（那边是唯一实现）。
-// gemini-2.5-flash-image：2026-10-17 接入，文档端点/payload 与现有一致，但该令牌下暂无可用渠道（503）。
-const MODEL_FALLBACKS = ['gemini-nano-banana-2.1', 'gemini-2.5-flash-image', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
+// gemini-2.5-flash-image 已按主人要求移除（该模型上游无渠道，不再展示）。
+const MODEL_FALLBACKS = ['gemini-nano-banana-2.1', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
 
 const inputCls = 'w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-500';
 const priceCls = 'w-20 px-2 py-1.5 border border-slate-300 rounded-lg text-sm text-center focus:outline-none focus:border-blue-500';
@@ -87,6 +87,9 @@ export default function AdminImageGen() {
       }
       setDraft(toDraft(data.settings));
       setCaps(toCaps(data.settings));
+      // 下拉框必须回显「已保存的凭证」，否则页面默认选中第一条（可能是对话专用凭证）：
+      // 既会误导测试，也会在保存时把凭证改错。
+      if (data.settings.providerId) setProviderId(data.settings.providerId);
       if (data.settings.defaultModel) setModel(data.settings.defaultModel);
       if (data.settings.defaultResolution) setResolution(data.settings.defaultResolution);
     } catch (e) {
@@ -159,7 +162,9 @@ export default function AdminImageGen() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          providerId: draft.providerId || providerId,
+          // 凭证以页面上"授权凭证"下拉为准：它既是测试用的凭证，也是用户生成时真正使用的凭证。
+          // （旧写法 draft.providerId 优先 ⇒ 下拉框改了也永远保存不进去，等于切不了凭证）
+          providerId: providerId || draft.providerId,
           models: draft.models.map((item) => ({ id: item.id, label: item.label, enabled: !!item.enabled, prices: item.prices })),
           defaultModel: draft.defaultModel,
           defaultResolution: draft.defaultResolution,
@@ -171,6 +176,7 @@ export default function AdminImageGen() {
       if (!res.ok || !data.ok) throw new Error(data.error || `保存失败（HTTP ${res.status}）`);
       setDraft(toDraft(data.settings));
       setCaps(toCaps(data.settings));
+      if (data.settings.providerId) setProviderId(data.settings.providerId);
       setSettingsMsg({ ok: true, msg: '已保存，用户页刷新即生效（无需发版）' });
     } catch (e) {
       setSettingsMsg({ ok: false, msg: String(e.message || e) });
@@ -365,6 +371,9 @@ export default function AdminImageGen() {
               <option value="">请选择授权凭证</option>
               {relays.map((p) => <option key={p.id} value={p.id}>{p.name}（{p.baseUrl}）</option>)}
             </select>
+            <p className="text-xs text-slate-400 mt-1">
+              这条凭证既是本页测试用的，也是用户生成时真正使用的 —— 改完要点「保存配置」才会生效。
+            </p>
             {!relays.length && (
               <p className="text-xs text-amber-600 mt-1">还没有中转站凭证，请先到「授权中心」新增一条。</p>
             )}
