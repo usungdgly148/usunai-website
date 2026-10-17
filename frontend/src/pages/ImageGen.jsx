@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Wand2, Download, Image as ImageIcon, AlertCircle, Coins, Loader2 } from 'lucide-react';
 import { useStore } from '../store.jsx';
 import { apiFetch } from '../authFetch.js';
+import RefImagePicker, { MAX_REF_IMAGES, toApiImages } from '../RefImagePicker.jsx';
 
 // 宽高比与服务端 server/gemini-image.mjs 的 IMAGE_ASPECT_RATIOS 保持一致。
 const ASPECTS = [
@@ -12,17 +13,32 @@ const ASPECTS = [
   { value: '4:3', label: '横版', hint: '4:3' },
   { value: '3:4', label: '竖版', hint: '3:4' },
 ];
-// 仅用于展示「本次大约消耗多少」，真实扣点以服务端 imageGenSettings 为准。
-const PRICE_HINT = 20;
+// 真实价格从 /api/image-gen/config 取（后台改 KV 即生效），这里只是接口未返回前的兜底。
+const PRICE_FALLBACK = 30;
 
 export default function ImageGen() {
   const { user, openRechargeModal, refreshCurrentUserCompute } = useStore();
   const [prompt, setPrompt] = useState('');
   const [aspect, setAspect] = useState('1:1');
+  const [refs, setRefs] = useState([]);
+  const [price, setPrice] = useState(PRICE_FALLBACK);
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+
+  // 价格/张数上限由服务端下发，避免前端硬编码与服务端脱节（后台改 KV 后刷新即生效）
+  useEffect(() => {
+    let alive = true;
+    apiFetch('/api/image-gen/config')
+      .then((res) => res.json())
+      .then((data) => {
+        const value = Math.ceil(Number(data && data.pricePoints));
+        if (alive && Number.isFinite(value) && value > 0) setPrice(value);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   // 单张实测 20~23 秒，没有进度可拿，显示已等待秒数避免用户以为卡死
   useEffect(() => {
@@ -43,7 +59,12 @@ export default function ImageGen() {
       const res = await apiFetch('/api/image-gen', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: text, aspectRatio: aspect, requestId: `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` }),
+        body: JSON.stringify({
+          prompt: text,
+          aspectRatio: aspect,
+          images: toApiImages(refs),
+          requestId: `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        }),
       });
       let data = {};
       try { data = await res.json(); } catch { data = {}; }
@@ -76,7 +97,7 @@ export default function ImageGen() {
           <Wand2 size={22} className="text-brand-600" /> AI 生图
         </h1>
         <p className="text-sm text-slate-500 mt-1.5">
-          描述你想要的画面，约 20 秒出图。每次生成消耗约 {PRICE_HINT} 点算力，生成失败会自动退回。
+          描述画面即可生成，也可以上传参考图让模型「照着改」。每次消耗 {price} 点算力，生成失败自动退回。
         </p>
       </div>
 
@@ -104,6 +125,10 @@ export default function ImageGen() {
           placeholder="例如：一张产品海报，暖色木桌，柔和窗光，浅景深"
         />
         <div className="text-right text-xs text-slate-400 mt-1">{prompt.length}/2000</div>
+
+        <div className="mt-4 pt-4 border-t border-slate-100">
+          <RefImagePicker value={refs} onChange={setRefs} disabled={busy} />
+        </div>
 
         <div className="mt-3">
           <div className="text-sm font-medium text-slate-700 mb-2">画面比例</div>
@@ -151,7 +176,9 @@ export default function ImageGen() {
         {busy && (
           <div className="flex flex-col items-center justify-center gap-2 py-20 text-slate-400">
             <Wand2 size={36} className="animate-pulse" />
-            <p className="text-sm">正在生成，通常 20 秒左右…</p>
+            <p className="text-sm">
+              {refs.length ? `正在生成，带 ${refs.length} 张参考图通常需要 30~45 秒…` : '正在生成，通常 20 秒左右…'}
+            </p>
           </div>
         )}
 
@@ -161,6 +188,7 @@ export default function ImageGen() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
                 <span>{result.aspectRatio || aspect}</span>
+                {result.refImageCount > 0 && <span>参考图 {result.refImageCount}/{MAX_REF_IMAGES}</span>}
                 <span>{Math.round((Number(result.size) || 0) / 1024)} KB</span>
                 {typeof result.chargedPoints === 'number' && <span>消耗 {result.chargedPoints} 点</span>}
                 {typeof result.points === 'number' && <span>余额 {result.points} 点</span>}

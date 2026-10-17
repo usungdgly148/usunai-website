@@ -9,6 +9,7 @@
 //   · CDN 可直接 GET 下载，无需 Authorization；1:1 → 1024×1024 / 852KB，16:9 → 1376×768 / 647KB；
 //   · 单张耗时 20~23 秒，candidatesTokenCount ≈ 1377~1441（⇒ 按 token 计价会亏，必须按张计费）;
 //   · `generationConfig.imageConfig.aspectRatio` 确实生效。
+//   · **图生图不需要单独接口** —— 参考图塞进 parts 的 inlineData 即可，见下方 IMAGE_MAX_REF_IMAGES 段。
 // ⚠️ CDN 地址含日期目录（/easy88ai-media/10/17/…），不保证长期有效 ⇒ **必须立刻转存本站**，
 //    绝不能把上游 URL 直接交给前端。
 
@@ -20,12 +21,31 @@ export const IMAGE_MODEL_DEFAULT = 'gemini-nano-banana-2.1';
 export const IMAGE_ASPECT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4'];
 
 // 单张扣点默认值（可在 KV `imageGenSettings.pricePoints` 覆盖）。
-export const DEFAULT_IMAGE_PRICE_POINTS = 20;
+// 2026-10-17 主人定价：统一 30 点/张（不再区分文生图 / 带参考图）。
+export const DEFAULT_IMAGE_PRICE_POINTS = 30;
 
-// 上游单张耗时实测 20~23 秒，留足余量。
+// 上游单张耗时实测 20~23 秒（带 3 张参考图 42 秒），留足余量。
 export const IMAGE_TIMEOUT_MS = 150000;
 // 下载上限：实测最大 852KB，给 20MB 余量（换更高分辨率模型也不至于被卡）。
 export const IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+
+// ===== 参考图（图生图）=====
+// 实测（2026-10-17，同一端点、同一模型）：把参考图放进 `parts[].inlineData` 就能被读取，
+// 证据是响应的 `usageMetadata.promptTokensDetails` 里出现 `{ modality:'IMAGE', tokenCount:N }`：
+//   1 张 → IMAGE 282 tok / 26.8s / 输出 1024×1024
+//   2 张 → IMAGE 574 tok / 36.7s / 输出 1024×1024
+//   3 张 → IMAGE 853 tok / 42.2s / 输出 **1792×592**
+// ⚠️ 两个必须记住的副作用：① 参考图会拉高上游 token（成本 + 耗时）；
+//    ② 参考图数量/比例会**带偏输出尺寸** —— aspectRatio 不再是唯一决定因素。
+// ⚠️ 只实测到 3 张，所以上限就钉在 3 张：没验过的区间不开放。
+export const IMAGE_MAX_REF_IMAGES = 3;
+// 单张解码后上限 2MB。前端会先压到 ~1024px 的 JPEG（实测 150~350KB），这里留足余量。
+export const IMAGE_REF_MAX_BYTES = 2 * 1024 * 1024;
+// 生图路由**专用**的请求体上限：3 张 ×（2MB → base64 约 2.73MB）+ prompt，给 12MB 让得开。
+// ⚠️ 绝不能用全局 MAX_JSON_BODY_BYTES（1MB）—— 那会把所有带参考图的请求直接 413 掉。
+export const IMAGE_REF_BODY_LIMIT = 12 * 1024 * 1024;
+// 实测驼峰 inlineData 可用。png/jpeg 是 Gemini 原生支持格式，webp 也在官方支持列表内。
+export const IMAGE_REF_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 /**
  * 把中转站 Base URL 归一化成 Gemini 原生接口的根路径。
@@ -56,14 +76,64 @@ export function imageEndpoint(baseUrl, model) {
   return { hostname, port, model: name, path: `${root}/v1beta/models/${name}:generateContent` };
 }
 
-/** 构造请求体。aspectRatio 为空则不传 imageConfig（走上游默认）。 */
-export function buildImagePayload({ prompt, aspectRatio } = {}) {
+/**
+ * 校验并归一化参考图。返回 `[{ mimeType, data }]`，data 是**纯 base64**（剥掉 data:...;base64, 前缀）。
+ * 这里是硬校验 —— 前端压缩只是体验优化，**不能当成信任边界**（任何人都能直接打接口）。
+ * 出错抛 Error，并带 code 便于前端区分文案。
+ */
+export function prepareReferenceImages(list) {
+  if (list == null) return [];
+  if (!Array.isArray(list)) {
+    throw Object.assign(new Error('参考图参数格式不正确'), { code: 'IMAGE_REF_INVALID' });
+  }
+  if (list.length > IMAGE_MAX_REF_IMAGES) {
+    throw Object.assign(new Error(`参考图最多 ${IMAGE_MAX_REF_IMAGES} 张`), { code: 'IMAGE_REF_TOO_MANY' });
+  }
+  const out = [];
+  for (const item of list) {
+    const rawMime = String((item && item.mimeType) || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^image\/jpg$/, 'image/jpeg');
+    if (!IMAGE_REF_MIME_TYPES.includes(rawMime)) {
+      throw Object.assign(new Error('参考图只支持 JPG / PNG / WebP'), { code: 'IMAGE_REF_BAD_TYPE' });
+    }
+    let data = String((item && (item.data || item.base64)) || '').trim();
+    if (/^data:/i.test(data)) {
+      const marker = data.indexOf('base64,');
+      data = marker >= 0 ? data.slice(marker + 7) : '';
+    }
+    data = data.replace(/\s+/g, '');
+    if (!data) throw Object.assign(new Error('参考图内容为空'), { code: 'IMAGE_REF_EMPTY' });
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(data)) {
+      throw Object.assign(new Error('参考图编码不正确'), { code: 'IMAGE_REF_INVALID' });
+    }
+    const bytes = Math.floor((data.replace(/=+$/, '').length * 3) / 4);
+    if (bytes > IMAGE_REF_MAX_BYTES) {
+      throw Object.assign(
+        new Error(`单张参考图不能超过 ${Math.round(IMAGE_REF_MAX_BYTES / 1024 / 1024)}MB`),
+        { code: 'IMAGE_REF_TOO_LARGE' },
+      );
+    }
+    out.push({ mimeType: rawMime, data });
+  }
+  return out;
+}
+
+/**
+ * 构造请求体。aspectRatio 为空则不传 imageConfig（走上游默认）。
+ * 有参考图时：text 在前、图在后，全部平铺在同一个 parts 数组里（实测上游按顺序读）。
+ */
+export function buildImagePayload({ prompt, aspectRatio, images } = {}) {
   const text = String(prompt == null ? '' : prompt).trim();
   if (!text) throw new Error('请填写画面描述');
+  const refs = prepareReferenceImages(images);
+  const parts = [{ text }];
+  for (const image of refs) parts.push({ inlineData: { mimeType: image.mimeType, data: image.data } });
   const generationConfig = { responseModalities: ['IMAGE'] };
   const ratio = String(aspectRatio == null ? '' : aspectRatio).trim();
   if (ratio) generationConfig.imageConfig = { aspectRatio: ratio };
-  return { contents: [{ role: 'user', parts: [{ text }] }], generationConfig };
+  return { contents: [{ role: 'user', parts }], generationConfig };
 }
 
 /**

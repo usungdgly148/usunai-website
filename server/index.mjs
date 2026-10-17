@@ -49,11 +49,14 @@ import { DEEPSEEK_PLATFORM, RELAY_PLATFORM, isNativePlatform } from './native-pl
 import {
   DEFAULT_IMAGE_PRICE_POINTS,
   IMAGE_ASPECT_RATIOS,
+  IMAGE_MAX_REF_IMAGES,
   IMAGE_MODEL_DEFAULT,
+  IMAGE_REF_BODY_LIMIT,
   buildImagePayload,
   downloadImage,
   extractImageResult,
   makeImageStorageKey,
+  prepareReferenceImages,
   requestGeminiImage,
 } from './gemini-image.mjs';
 import {
@@ -1311,8 +1314,11 @@ async function loadImageGenSettings() {
 
 // 生成 + 落盘。**上游返回的是第三方 CDN 链接（实测不是 base64）**，必须立刻下载转存本站：
 // 那个链接带日期目录、不保证长期有效，也绝不能直接交给前端（会暴露上游域名且随时失效）。
-async function generateAndStoreImage({ provider, prompt, aspectRatio, model }) {
-  const payload = buildImagePayload({ prompt, aspectRatio });
+async function generateAndStoreImage({ provider, prompt, aspectRatio, model, images }) {
+  // images 是前端传来的参考图（可空）。校验在 buildImagePayload → prepareReferenceImages 里做，
+  // 但用户侧路由会**先校验再预扣**，避免「参数不合法还先扣钱再退钱」。
+  const refs = prepareReferenceImages(images);
+  const payload = buildImagePayload({ prompt, aspectRatio, images: refs });
   const json = await requestGeminiImage({ baseUrl: provider.baseUrl, apiKey: provider.apiKey, payload, model });
   const extracted = extractImageResult(json);
   if (!extracted.ok) {
@@ -1348,6 +1354,7 @@ async function generateAndStoreImage({ provider, prompt, aspectRatio, model }) {
     model: String(model || '').trim() || IMAGE_MODEL_DEFAULT,
     prompt,
     aspectRatio: String(aspectRatio || '').trim() || null,
+    refImageCount: refs.length,
   };
 }
 
@@ -2791,10 +2798,30 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     // ============ Gemini 原生图片生成 ============
+    // 生图参数下发：价格 / 张数上限 / 宽高比。前端不再硬编码价格（改 KV 即生效）。
+    // 不含凭证与密钥，未登录也允许读 —— 未登录时页面同样要显示「本次消耗多少点」。
+    if (p === '/api/image-gen/config' && req.method === 'GET') {
+      res.setHeader('Content-Type', 'application/json');
+      try {
+        const settings = await loadImageGenSettings();
+        res.end(JSON.stringify({
+          ok: true,
+          pricePoints: settings.pricePoints,
+          aspectRatio: settings.aspectRatio,
+          aspectRatios: IMAGE_ASPECT_RATIOS,
+          maxRefImages: IMAGE_MAX_REF_IMAGES,
+        }));
+      } catch (error) {
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, error: String(error.message || error) }));
+      }
+      return;
+    }
     // 后台测试页：管理员自用，**不扣算力**。
     if (p === '/api/admin/image-gen' && req.method === 'POST') {
       if (!requireAdmin(req, res)) return;
-      const body = await readBody(req);
+      // 带参考图时请求体远超全局 1MB 上限，这条路由单独放宽（内部按张/按字节硬校验）。
+      const body = await readBody(req, IMAGE_REF_BODY_LIMIT);
       res.setHeader('Content-Type', 'application/json');
       try {
         const settings = await loadImageGenSettings();
@@ -2806,6 +2833,7 @@ const server = http.createServer(async (req, res) => {
           prompt: body.prompt,
           aspectRatio: body.aspectRatio,
           model: String(body.model || '').trim() || settings.model,
+          images: body.images,
         });
         res.end(JSON.stringify({ ok: true, ...result }));
       } catch (error) {
@@ -2821,7 +2849,8 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/image-gen' && req.method === 'POST') {
       const session = requireUser(req, res, '未登录，无法生成图片');
       if (!session) return;
-      const body = await readBody(req);
+      // 与后台页同理：带参考图的请求体必然超过全局 1MB 上限。
+      const body = await readBody(req, IMAGE_REF_BODY_LIMIT);
       const requestId = (String(body.requestId || '').trim() || `img_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`).slice(0, 80);
       res.setHeader('Content-Type', 'application/json');
       let charged = null;
@@ -2834,6 +2863,8 @@ const server = http.createServer(async (req, res) => {
         const prompt = String(body.prompt || '').trim();
         if (!prompt) throw Object.assign(new Error('请填写画面描述'), { code: 'IMAGE_PROMPT_REQUIRED', status: 400 });
         if (prompt.length > 2000) throw Object.assign(new Error('画面描述过长（上限 2000 字）'), { code: 'IMAGE_PROMPT_TOO_LONG', status: 400 });
+        // 参考图**先校验再预扣**：参数不合法（超张数/超体积/格式不对）就别去动用户算力。
+        const refImages = prepareReferenceImages(body.images);
         const model = String(body.model || '').trim() || settings.model;
         const askedRatio = String(body.aspectRatio || '').trim();
         const aspectRatio = IMAGE_ASPECT_RATIOS.includes(askedRatio) ? askedRatio : settings.aspectRatio;
@@ -2846,7 +2877,7 @@ const server = http.createServer(async (req, res) => {
           amount: price,
           requestId,
           allowPartial: false,
-          computeRecord: { id: computeId, type: 'consume', amount: price, reason: 'AI 生图', meta: { model, aspectRatio, promptLength: prompt.length }, createdAt: startedAt, source: 'server-image' },
+          computeRecord: { id: computeId, type: 'consume', amount: price, reason: 'AI 生图', meta: { model, aspectRatio, promptLength: prompt.length, refImageCount: refImages.length }, createdAt: startedAt, source: 'server-image' },
           metricRecord: { id: metricId, requestId, providerId: settings.providerId, model, aspectRatio, ok: true, createdAt: startedAt },
         });
         if (!charge.ok) {
@@ -2859,7 +2890,7 @@ const server = http.createServer(async (req, res) => {
           return;
         }
         charged = charge;
-        const result = await generateAndStoreImage({ provider, prompt, aspectRatio, model });
+        const result = await generateAndStoreImage({ provider, prompt, aspectRatio, model, images: refImages });
         res.end(JSON.stringify({
           ok: true,
           ...result,

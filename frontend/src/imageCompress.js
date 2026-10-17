@@ -4,6 +4,7 @@ export async function compressImage(file, {
   maxWidth = 1600,
   maxHeight = 1600,
   quality = 0.82,
+  mimeType = 'image/webp',
 } = {}) {
   if (!file || !file.type.startsWith('image/')) return file;
   if (file.type === 'image/gif' || file.type === 'image/svg+xml') return file;
@@ -18,12 +19,18 @@ export async function compressImage(file, {
     canvas.height = height;
     const ctx = canvas.getContext('2d');
     if (!ctx) return file;
+    // JPEG 没有透明通道，直接画会把透明区域变黑底，先铺白底
+    if (mimeType === 'image/jpeg') {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, width, height);
+    }
     ctx.drawImage(img, 0, 0, width, height);
 
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', quality));
-    if (!blob || blob.type !== 'image/webp') return file;
-    const name = `${(file.name || 'image').replace(/\.[^.]+$/, '')}.webp`;
-    return new File([blob], name, { type: 'image/webp', lastModified: Date.now() });
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, quality));
+    if (!blob || blob.type !== mimeType) return file;
+    const ext = mimeType === 'image/jpeg' ? 'jpg' : mimeType === 'image/png' ? 'png' : 'webp';
+    const name = `${(file.name || 'image').replace(/\.[^.]+$/, '')}.${ext}`;
+    return new File([blob], name, { type: mimeType, lastModified: Date.now() });
   } catch {
     return file;
   }

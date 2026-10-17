@@ -3,6 +3,7 @@ import { Wand2, Download, Image as ImageIcon, AlertCircle } from 'lucide-react';
 import { useStore } from '../store.jsx';
 import { adminFetch } from '../authFetch.js';
 import { AdminPageHeader, Card, PrimaryButton } from '../adminUI.jsx';
+import RefImagePicker, { toApiImages } from '../RefImagePicker.jsx';
 
 // 与 server/gemini-image.mjs 的 IMAGE_ASPECT_RATIOS 保持一致（那边是唯一实现）。
 const ASPECTS = ['1:1', '16:9', '9:16', '4:3', '3:4'];
@@ -25,6 +26,7 @@ export default function AdminImageGen() {
   const [model, setModel] = useState(MODELS[0]);
   const [aspect, setAspect] = useState('1:1');
   const [prompt, setPrompt] = useState('');
+  const [refs, setRefs] = useState([]);
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [result, setResult] = useState(null);
@@ -53,7 +55,7 @@ export default function AdminImageGen() {
       const res = await adminFetch('/api/admin/image-gen', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ authProviderId: providerId, model, aspectRatio: aspect, prompt: text }),
+        body: JSON.stringify({ authProviderId: providerId, model, aspectRatio: aspect, prompt: text, images: toApiImages(refs) }),
       });
       // adminFetch 对非 2xx 不抛错，必须自己解析出服务端文案，否则前端只剩一句「生成失败」
       let data = {};
@@ -71,7 +73,7 @@ export default function AdminImageGen() {
     <div>
       <AdminPageHeader
         title="AI 生图"
-        subtitle="调用 Gemini 原生图片模型。此页为后台测试用，不扣用户算力。"
+        subtitle="调用 Gemini 原生图片模型，支持文生图与上传参考图（图生图）。此页为后台测试用，不扣用户算力。"
       />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
         <Card className="p-5 space-y-4">
@@ -114,6 +116,8 @@ export default function AdminImageGen() {
             <p className="text-xs text-slate-400 mt-1">{prompt.length}/2000</p>
           </div>
 
+          <RefImagePicker value={refs} onChange={setRefs} disabled={busy} />
+
           <PrimaryButton onClick={generate} disabled={busy} className="w-full justify-center">
             {busy ? `生成中… 已等待 ${elapsed}s` : '开始生成'}
           </PrimaryButton>
@@ -125,8 +129,10 @@ export default function AdminImageGen() {
             </p>
           )}
 
-          <p className="text-xs text-slate-400">
-            实测单张约 20~23 秒。上游返回的是临时 CDN 链接，服务端会自动转存到本站图床再回给这里，所以这里拿到的地址不会失效。
+          <p className="text-xs text-slate-400 leading-relaxed">
+            实测：文生图约 20~23 秒；带 1 张参考图约 27 秒、3 张约 42 秒。<br />
+            上游返回临时 CDN 链接，服务端会自动转存本站图床，所以这里拿到的地址不会失效。<br />
+            带参考图时输出尺寸会受参考图比例影响（实测 3 张时出 1792×592），宽高比不再是唯一决定因素。
           </p>
         </Card>
 
@@ -153,6 +159,7 @@ export default function AdminImageGen() {
               <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
                 <span>{result.model}</span>
                 <span>{result.mimeType}</span>
+                {result.refImageCount > 0 && <span>参考图 {result.refImageCount} 张</span>}
                 <span>{Math.round((Number(result.size) || 0) / 1024)} KB</span>
                 {result.aspectRatio && <span>{result.aspectRatio}</span>}
               </div>
