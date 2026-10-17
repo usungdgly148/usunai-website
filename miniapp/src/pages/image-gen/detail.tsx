@@ -141,12 +141,17 @@ export default function ImageGenDetailPage() {
     }
   };
 
-  const rows: Array<{ key: string; value: string }> = asset ? [
+  // 消耗算力这一行可点进「算力明细」（P5）：用户看到扣了 30 点，下一个念头就是「扣在哪了」
+  const rows: Array<{ key: string; value: string; to?: string }> = asset ? [
     { key: '模型', value: models.find((item) => item.id === sourceId)?.label || sourceId || '-' },
     { key: '清晰度', value: String(asset.resolution || '-') },
     { key: '画面比例', value: String(asset.aspectRatio || '-') },
     { key: '体积', value: formatFileSize(asset.size) },
-    { key: '消耗算力', value: asset.points ? `${String(asset.points)} 点` : '-' },
+    {
+      key: '消耗算力',
+      value: asset.points ? `${String(asset.points)} 点` : '-',
+      to: asset.points ? '/pages/compute/index' : '',
+    },
     { key: '生成时间', value: wallTime(asset.createdAt) || '-' },
   ] : [];
 
@@ -159,9 +164,15 @@ export default function ImageGenDetailPage() {
 
       <View className='gen-card'>
         {rows.map((row) => (
-          <View key={row.key} className='gen-detail-row'>
+          <View
+            key={row.key}
+            className='gen-detail-row'
+            onClick={row.to ? () => { void Taro.navigateTo({ url: row.to as string }); } : undefined}
+          >
             <Text className='gen-detail-key'>{row.key}</Text>
-            <Text className='gen-detail-value'>{row.value}</Text>
+            <Text className={`gen-detail-value ${row.to ? 'gen-detail-value-link' : ''}`}>
+              {row.value}{row.to ? ' ›' : ''}
+            </Text>
           </View>
         ))}
 

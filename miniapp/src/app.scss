@@ -1409,25 +1409,6 @@ button::after { border: 0; }
 .gen-empty-title { display: block; color: var(--mini-ink); font-size: 28px; font-weight: 650; }
 .gen-empty-desc { display: block; margin-top: 8px; color: var(--mini-subtle); font-size: 23px; }
 
-/* ===== 「我的」页的 AI 创作入口（不是第 6 个 tab：底部 5 等分玻璃胶囊不能再挤） ===== */
-.mini-design-entry {
-  display: flex; align-items: center; gap: 18px;
-  margin-top: 26px; padding: 24px 26px;
-  border: 1px solid var(--mini-primary-border); border-radius: 26px;
-  background: linear-gradient(135deg, var(--mini-primary-pale), var(--mini-primary-soft));
-}
-.mini-design-entry-badge {
-  display: flex; width: 76px; height: 76px; flex-shrink: 0;
-  align-items: center; justify-content: center; border-radius: 24px;
-  background: linear-gradient(135deg, #2f69ec, #785de7);
-  box-shadow: 0 8px 18px rgba(48, 92, 224, .22);
-}
-.mini-design-entry-badge-text { color: #fff; font-size: 28px; font-weight: 750; letter-spacing: .5px; }
-.mini-design-entry-main { flex: 1; min-width: 0; }
-.mini-design-entry-title { display: block; color: var(--mini-ink); font-size: 30px; font-weight: 700; }
-.mini-design-entry-desc { display: block; margin-top: 6px; color: var(--mini-subtle); font-size: 22px; }
-.mini-design-entry-arrow { color: var(--mini-subtle-2); font-size: 34px; }
-
 /* ===== AI全能设计 · 参考图（P1） ===== */
 .gen-sub-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .gen-sub-row .gen-caption { margin-top: 0; }
@@ -1483,6 +1464,7 @@ button::after { border: 0; }
 }
 .gen-detail-key { flex-shrink: 0; color: var(--mini-subtle); font-size: 24px; }
 .gen-detail-value { flex: 1; min-width: 0; color: var(--mini-ink); font-size: 25px; text-align: right; word-break: break-all; }
+.gen-detail-value-link { color: var(--mini-primary-strong); }
 .gen-detail-prompt-head { display: flex; align-items: center; justify-content: space-between; margin: 24px 0 12px; }
 .gen-detail-copy { color: var(--mini-primary-strong); font-size: 23px; }
 .gen-detail-prompt { display: block; color: var(--mini-text-2); font-size: 25px; line-height: 1.72; white-space: pre-wrap; word-break: break-word; }

@@ -413,3 +413,70 @@ P1 未绑手机号 → P7 绑定 ──成功──→ 回 P1（自动续跑生�
 2. 批量管理：点「管理」→ 多选 / 全选 → 删除 → 列表真的少了这些（串行删除是否全成功）。
 3. 转发卡片：右上角转发 → 卡片带作品缩略图 → 好友点开落在**创作页**而不是「作品不存在」。
 
+---
+
+## 10. 「我的」入口移除 与 P3–P9 复核（2026-10-17）
+
+### 10.1 先澄清编号口径（重要）
+
+本文档里 **P1–P9 是「页面编号」**（见 §1.1 页面总表），**不是阶段编号**。
+阶段只有 §6 里的 **P0 / P1 / P2** 三个阶段，且三个阶段均已完成。
+
+所以不存在「P3 规划任务」这一待办：P3 就是「作品详情页」，该页已在 P2 轮次里实现并构建验证。
+同理 P4–P9 也不是新任务，而是「**复用既有页面**」的验收项 —— 本轮逐条核实并给出证据。
+
+### 10.2 移除「我的」页入口
+
+| 改动 | 内容 |
+|---|---|
+| `miniapp/src/pages/profile/index.tsx` | 删掉「模块①½ AI 创作入口」整块（`.mini-design-entry` 结构 + 说明注释） |
+| `miniapp/src/app.scss` | 同步删掉 6 条 `.mini-design-entry*` 规则（含分组注释） |
+
+**残留引用排查（逐项结论）**：
+
+| 引用位置 | 处理 | 原因 |
+|---|---|---|
+| `app.config.ts` 的 3 条页面路由 | **保留** | 页面本身还在，删路由 = 白屏 / 分享链接失效 |
+| 创作页顶部「我的作品 ›」 | **保留** | 是生图链路内部跳转，与「我的」页无关 |
+| 首页 `tool-cards` 工具卡 | **保留（且线上已配）** | 见 10.3，这是移除「我的」入口后**唯一**的常驻入口 |
+| `server/miniapp-layout.mjs` 白名单 `/pages/image-gen/index` | **保留** | 后台「点击链接→小程序页面」下拉 + 保存校验（`INTERNAL_PAGE_PATHS.has`）的唯一事实源，删了后台就配不出这个链接 |
+| `frontend/src/miniapp-preview/index.jsx` 的 `PAGE_LABELS` | **保留** | 后台预览面板的页面名，纯展示 |
+| `frontend` 的 `/image-gen`、`/admin/image-gen` | **保留** | 网页版功能与后台配置页，不是小程序入口 |
+
+全仓库 `grep mini-design-entry` 已 **0 命中**（样式与结构一起清干净，不留孤儿 CSS）。
+
+### 10.3 移除后还有入口吗（线上实证）
+
+查线上 `GET /api/miniapp/v1/layout?page=home` 的 `tool-cards` 块，实际配置了 4 张卡：
+
+```
+抖音视频文案（workflow 1785124403937）
+小红书图文笔记（workflow 1785331404519）
+AI全能设计（page /pages/image-gen/index）   ← 入口在这里
+抖音视频下载（workflow 1791899449580）
+```
+
+**结论**：首页工具卡仍在，页面可达。另有两个入口天然存在：分享卡片（落创作页）与后台配的任意链接。
+
+### 10.4 P3–P9 逐条复核
+
+| 编号 | 页面 | 状态 | 证据 / 结论 |
+|---|---|---|---|
+| **P3** | 作品详情 | ✅ 已完成 | `pages/image-gen/detail.tsx` + `.config.ts` 已建、已注册、已进产物；`verify-miniapp-dist` 21 页全 PASS |
+| **P4** | 我的资产 | ✅ 已满足 | 复用 `/pages/assets/index`（6 个分类 tab 含「图片」）；创作页结果卡有「已加入『图片』资产库，去我的资产查看 ›」跳转 |
+| **P5** | 算力明细 | ✅ 已满足（本轮补一处） | 创作页顶部算力胶囊可点进 `/pages/compute/index`；本轮把**详情页「消耗算力」这一行**也做成可点（`gen-detail-value-link`，仅当有扣点时显示 `›`） |
+| **P6** | 充值 | ✅ 已满足 | `utils/points-gate.ts` 的 `promptRecharge` → `navigateTo('/pages/recharge/index')`，`navigateTo` 失败（栈满）退 `redirectTo`；创作页 `handlePointsInsufficient` 已接 |
+| **P7** | 绑定账号 | ⚠️ 不适用（有意不做） | 服务端 `/api/image-gen` 只有 `requireUser`，**没有** `PHONE_BIND_REQUIRED` / `VIP_REQUIRED`；网页端 `/image-gen` 也无客户端门禁。小程序端若单独加会**两端不一致**，因此不接 |
+| **P8** | 首页 | ✅ 已完成（零代码） | 见 10.3，线上工具卡已配 `kind:'page'` |
+| **P9** | 我的 | ↩️ 已按指令回退 | 原「P0 加一行入口」的改动本轮移除（10.2） |
+
+> P3 与文档 §1.2 的一处**有意差异**：原设计底部有「加入资产库」按钮。实际实现里生成成功时资产**已经直接写进资产库**
+> （`buildImageAsset` + `saveRuntimeAsset`），所以详情页不需要这个按钮 —— 保留会让用户以为「还没存」。
+
+### 10.5 构建与验证
+
+- `tsc --noEmit` 干净；正式档 → `0.1.11`（21 页，12/12 PASS）。
+- 产物断言：「AI全能设计」入口块已不在 `profile` 产物里；`gen-detail-value-link` 在 `detail` 产物里；
+  `pages/compute/index` 出现在 `detail.js`。
+
+
