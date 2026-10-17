@@ -15,9 +15,16 @@ import {
   IMAGE_REF_BODY_LIMIT,
   IMAGE_REF_MAX_BYTES,
   IMAGE_RESOLUTIONS,
+  OPENAI_IMAGE_SIZES,
   buildImagePayload,
+  buildOpenAIImagePayload,
+  extractOpenAIImageResult,
+  imageApiStyle,
+  imageEndpoint,
+  imageModelSupportsRefs,
   normalizeImageModels,
   normalizeResolution,
+  openAIImageSize,
   prepareReferenceImages,
   resolveImageSelection,
 } from '../server/gemini-image.mjs';
@@ -224,7 +231,7 @@ check('配置下发默认分辨率', configRoute.includes('defaultResolution: se
 check('配置下发已上架模型清单', configRoute.includes('models,') && configRoute.includes('resolutions:'));
 check('后台配置读写路由都存在', serverSrc.includes("'/api/admin/image-gen/settings' && req.method === 'GET'") && serverSrc.includes("'/api/admin/image-gen/settings' && req.method === 'POST'"));
 check('保存配置走 KV（不发版即可改价）', serverSrc.includes("await KV.kvPut('imageGenSettings', next)"));
-check('保存后回吐最新配置', serverSrc.includes('settings: await loadImageGenSettings()'));
+check('保存后回吐最新配置', serverSrc.includes('settings: withRefSupport(await loadImageGenSettings())'));
 
 // ===== 10. 前端接线（模型/清晰度选择）=====
 check('用户页提交 model 与 resolution', /model,\s*\n\s*resolution,/.test(userPageSrc));
@@ -251,6 +258,89 @@ check('分类「AI 生图」保持原样（不与入口混用）', read('fronten
 check('已删「描述画面即可生成…」', !userPageSrc.includes('描述画面即可生成'));
 check('已删「清晰度越高越慢…」', !userPageSrc.includes('清晰度越高越慢'));
 check('用户页关闭参考图说明（不带到页面）', userPageSrc.includes('showHint={false}'));
+
+// ===== 13. gpt-image-* 走 OpenAI 兼容 /v1/images/generations（2026-10-17 接入）=====
+// 两套风格必须互不干扰：gemini-* 走 :generateContent（imageConfig + inlineData），
+// gpt-image-* 走 /v1/images/generations（size + quality，无参考图入口）。
+check('gpt-image-* 判为 openai-images', imageApiStyle('gpt-image-2.5-flare') === 'openai-images');
+check('gemini-* 判为 gemini-native', imageApiStyle('gemini-nano-banana-2.1') === 'gemini-native');
+check('空模型名退化为 gemini-native', imageApiStyle('') === 'gemini-native');
+check('gpt-image-* 不吃参考图', imageModelSupportsRefs('gpt-image-2.5-flare') === false);
+check('gemini 吃参考图', imageModelSupportsRefs('gemini-nano-banana-2.1') === true);
+
+const epFlare = imageEndpoint('https://api.easy88ai.com/v1', 'gpt-image-2.5-flare');
+check('flare 端点路径为 /v1/images/generations', epFlare.path === '/v1/images/generations', epFlare.path);
+check('flare 端点不重复拼 /v1', !epFlare.path.includes('/v1/v1'), epFlare.path);
+check('flare 端点带样式标记', epFlare.style === 'openai-images', epFlare.style);
+const epGemini = imageEndpoint('https://api.easy88ai.com/v1', 'gemini-nano-banana-2.1');
+check('gemini 端点保持不变', epGemini.path === '/v1beta/models/gemini-nano-banana-2.1:generateContent', epGemini.path);
+const epProxy = imageEndpoint('https://api.easy88ai.com/proxy/v1', 'gpt-image-2.5-flare');
+check('带子路径的 Base URL 只剥末尾 /v1', epProxy.path === '/proxy/v1/images/generations', epProxy.path);
+
+// size 换算表必须满足文档硬约束：两边都是 16 的倍数、单边 ≤3840、长宽比 ≤3:1、总像素 655,360~8,294,400
+const sizeViolations = [];
+for (const [level, table] of Object.entries(OPENAI_IMAGE_SIZES)) {
+  for (const [ratio, size] of Object.entries(table)) {
+    const m = /^(\d+)x(\d+)$/.exec(size);
+    if (!m) { sizeViolations.push(`${level}/${ratio}=${size}（格式）`); continue; }
+    const w = Number(m[1]);
+    const h = Number(m[2]);
+    if (w % 16 !== 0 || h % 16 !== 0) sizeViolations.push(`${level}/${ratio}=${size}（非16倍数）`);
+    if (w > 3840 || h > 3840) sizeViolations.push(`${level}/${ratio}=${size}（超单边）`);
+    if (Math.max(w, h) / Math.min(w, h) > 3.0001) sizeViolations.push(`${level}/${ratio}=${size}（超3:1）`);
+    const px = w * h;
+    if (px < 655360 || px > 8294400) sizeViolations.push(`${level}/${ratio}=${size}（像素${px}）`);
+    const [rw, rh] = ratio.split(':').map(Number);
+    if (Math.abs(w / h - rw / rh) > 0.06) sizeViolations.push(`${level}/${ratio}=${size}（比例偏太多）`);
+  }
+}
+check('五档比例 × 三档清晰度的 size 全部合法', sizeViolations.length === 0, sizeViolations.join(', '));
+check('4K 1:1 用 2880x2880（3840 会超像素上限）', openAIImageSize('1:1', '4K') === '2880x2880', openAIImageSize('1:1', '4K'));
+check('4K 16:9 用 3840x2160', openAIImageSize('16:9', '4K') === '3840x2160');
+check('1K 16:9 用 1280x720（1024x576 低于像素下限）', openAIImageSize('16:9', '1K') === '1280x720');
+check('未知比例退回该档 1:1', openAIImageSize('7:3', '2K') === '2048x2048');
+check('未指定清晰度则不传 size', openAIImageSize('1:1', '') === '');
+check('未指定清晰度时 payload 不含 size', !('size' in buildOpenAIImagePayload({ prompt: '猫', model: 'gpt-image-2.5-flare' })));
+
+const flarePayload = buildOpenAIImagePayload({ prompt: '  一只猫  ', aspectRatio: '16:9', resolution: '2K', model: 'gpt-image-2.5-flare' });
+check('flare payload 带 model', flarePayload.model === 'gpt-image-2.5-flare', flarePayload.model);
+check('flare payload prompt 去空白', flarePayload.prompt === '一只猫');
+check('flare payload n 固定 1', flarePayload.n === 1);
+check('flare payload 带 quality', flarePayload.quality === 'high', String(flarePayload.quality));
+check('flare payload 带 output_format=png', flarePayload.output_format === 'png');
+check('flare payload size 按档位换算', flarePayload.size === '2048x1152', String(flarePayload.size));
+check('flare payload 没有 Gemini 的 contents 字段', !('contents' in flarePayload));
+expectThrow(
+  'flare 传参考图必须报错（不能静默忽略）',
+  () => buildOpenAIImagePayload({ prompt: '猫', model: 'gpt-image-2.5-flare', images: one }),
+  'IMAGE_REF_UNSUPPORTED',
+);
+
+const openaiB64 = extractOpenAIImageResult({ data: [{ b64_json: tiny }] });
+check('flare 响应 b64_json 可解析', openaiB64.ok && openaiB64.inline.base64 === tiny);
+const openaiUrl = extractOpenAIImageResult({ data: [{ url: 'https://res.easy88ai.com/a.png' }] });
+check('flare 响应 url 可解析', openaiUrl.ok && openaiUrl.file.url === 'https://res.easy88ai.com/a.png');
+check('flare 响应为空时判失败', extractOpenAIImageResult({ data: [] }).ok === false);
+check('flare 响应带 error 时透出原因', String(extractOpenAIImageResult({ error: { message: 'blocked' } }).text).includes('blocked'));
+
+// 接线断言：服务端按风格分流、参考图在扣费前就被拒、前端按模型能力隐藏上传区
+check('服务端按风格构造 payload', serverSrc.includes('buildOpenAIImagePayload({ prompt, aspectRatio, resolution, images: refs, model })'));
+check('服务端按风格解析响应', serverSrc.includes('extractOpenAIImageResult(json)'));
+check('用户路由在扣费前拒绝不支持的参考图', (() => {
+  // 必须只在**用户生图路由**里判断先后：别的路由（对话计费）也会出现 kvRecordNativeUsage
+  const routeAt = serverSrc.indexOf("if (p === '/api/image-gen' && req.method === 'POST')");
+  if (routeAt < 0) return false;
+  const routeSrc = serverSrc.slice(routeAt);
+  const guard = routeSrc.indexOf("code: 'IMAGE_REF_UNSUPPORTED'");
+  const charge = routeSrc.indexOf('kvRecordNativeUsage({');
+  return guard > 0 && charge > 0 && guard < charge;
+})());
+check('config 下发 supportsRefs', serverSrc.includes('supportsRefs: imageModelSupportsRefs(item.id)'));
+check('后台 settings 下发带 supportsRefs 的副本', serverSrc.includes('withRefSupport(settings)'));
+check('大响应体上限按风格放大（b64 图不能按 8MB 判）', serverSrc.includes('withRefSupport') && read('server/gemini-image.mjs').includes('48 * 1024 * 1024'));
+check('用户页按 supportsRefs 隐藏参考图', userPageSrc.includes('refsSupported') && userPageSrc.includes('{refsSupported &&'));
+check('用户页换到不吃图的模型会清空已选参考图', userPageSrc.includes('if (entry && entry.supportsRefs === false) setRefs([])'));
+check('后台页按 caps 隐藏参考图', adminPageSrc.includes('caps[model] !== false'));
 
 // ===== 结果 =====
 const total = pass + failures.length;

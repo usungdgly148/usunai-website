@@ -35,6 +35,8 @@ export default function AdminImageGen() {
   const [elapsed, setElapsed] = useState(0);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  // 模型 → 是否支持参考图（服务端下发；gpt-image-* 为 false）
+  const [caps, setCaps] = useState({});
 
   // 配置草稿（模型 × 清晰度 → 点数）。真实计费完全以此为准，代码里没有任何写死价格。
   const [draft, setDraft] = useState(null);
@@ -68,6 +70,13 @@ export default function AdminImageGen() {
     aspectRatio: settings.aspectRatio || '1:1',
   });
 
+  // 哪些模型吃参考图：由服务端 withRefSupport() 下发（gpt-image-* 走 OpenAI 创建接口，没有参考图入口）
+  const toCaps = (settings) => {
+    const map = {};
+    (settings.models || []).forEach((item) => { map[item.id] = item.supportsRefs !== false; });
+    return map;
+  };
+
   const loadSettings = async () => {
     try {
       const res = await adminFetch('/api/admin/image-gen/settings');
@@ -77,6 +86,7 @@ export default function AdminImageGen() {
         return;
       }
       setDraft(toDraft(data.settings));
+      setCaps(toCaps(data.settings));
       if (data.settings.defaultModel) setModel(data.settings.defaultModel);
       if (data.settings.defaultResolution) setResolution(data.settings.defaultResolution);
     } catch (e) {
@@ -160,6 +170,7 @@ export default function AdminImageGen() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) throw new Error(data.error || `保存失败（HTTP ${res.status}）`);
       setDraft(toDraft(data.settings));
+      setCaps(toCaps(data.settings));
       setSettingsMsg({ ok: true, msg: '已保存，用户页刷新即生效（无需发版）' });
     } catch (e) {
       setSettingsMsg({ ok: false, msg: String(e.message || e) });
@@ -362,7 +373,7 @@ export default function AdminImageGen() {
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-3 sm:col-span-1">
               <label className="block text-sm font-medium text-slate-700 mb-1.5">模型</label>
-              <select value={model} onChange={(e) => setModel(e.target.value)} className={inputCls}>
+              <select value={model} onChange={(e) => { setModel(e.target.value); if (caps[e.target.value] === false) setRefs([]); }} className={inputCls}>
                 {modelOptions.map((id) => <option key={id} value={id}>{id}</option>)}
               </select>
             </div>
@@ -393,7 +404,11 @@ export default function AdminImageGen() {
             <p className="text-xs text-slate-400 mt-1">{prompt.length}/2000</p>
           </div>
 
-          <RefImagePicker value={refs} onChange={setRefs} disabled={busy} />
+          {/* 参考图只对 Gemini 原生通道有效；gpt-image-* 走 OpenAI 创建接口，没有参考图入口 */}
+          {caps[model] !== false && <RefImagePicker value={refs} onChange={setRefs} disabled={busy} />}
+          {caps[model] === false && (
+            <p className="text-xs text-slate-400">当前模型（{model}）不支持参考图，参考图入口已隐藏。</p>
+          )}
 
           <PrimaryButton onClick={generate} disabled={busy} className="w-full justify-center">
             {busy ? `生成中… 已等待 ${elapsed}s` : '开始生成'}

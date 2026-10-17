@@ -51,6 +51,8 @@ export default function ImageGen() {
   // 当前模型的可用档位（每个档位自带点数，直接标在按钮上）
   const currentModel = models.find((item) => item.id === model) || models[0] || null;
   const resolutions = (currentModel && currentModel.resolutions) || [];
+  // 参考图能力由服务端下发（gpt-image-* 系列走 OpenAI 创建接口，没有参考图入口）
+  const refsSupported = !currentModel || currentModel.supportsRefs !== false;
 
   // 换模型时，若当前分辨率不被支持就自动落到该模型的第一档
   const pickModel = (nextModelId) => {
@@ -60,6 +62,8 @@ export default function ImageGen() {
     if (!options.some((item) => item.value === resolution)) {
       setResolution((options[0] || {}).value || '');
     }
+    // 新模型不吃参考图就把已选的图清掉，避免「传了图却没生效」还照样扣点
+    if (entry && entry.supportsRefs === false) setRefs([]);
   };
 
   // 单张实测 20~23 秒，没有进度可拿，显示已等待秒数避免用户以为卡死
@@ -147,9 +151,11 @@ export default function ImageGen() {
         />
         <div className="text-right text-xs text-slate-400 mt-1">{prompt.length}/2000</div>
 
-        <div className="mt-4 pt-4 border-t border-slate-100">
-          <RefImagePicker value={refs} onChange={setRefs} disabled={busy} showHint={false} />
-        </div>
+        {refsSupported && (
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            <RefImagePicker value={refs} onChange={setRefs} disabled={busy} showHint={false} />
+          </div>
+        )}
 
         {/* 模型 + 清晰度：只列后台已上架的组合，点数随组合变化（前端不写死任何价格） */}
         <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">

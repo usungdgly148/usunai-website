@@ -1,8 +1,10 @@
-// Gemini 原生图片生成（零依赖）。
+// Gemini 原生图片生成 + OpenAI 兼容图片生成（零依赖）。
 //
 // 为什么单独一个模块：凭证与 relay 通道共用（同一个中转站、同一个 Base URL），
-// 但**接口根路径不同** —— relay 走 OpenAI 兼容的 `/v1/...`，Gemini 原生走 `/v1beta/models/{model}:generateContent`。
+// 但**接口根路径不同** —— relay 走 OpenAI 兼容的 `/v1/chat/completions`，
+// Gemini 原生走 `/v1beta/models/{model}:generateContent`，gpt-image-* 走 `/v1/images/generations`。
 // 直接复用 relayEndpointUrl() 会拼成 `/v1/v1beta/...` → 404，所以这里自己推导根路径。
+// 两套风格的差异见文件中部「两套上游接口风格」段（imageApiStyle / imageEndpoint）。
 //
 // 实测（2026-10-17，easy88ai / gemini-nano-banana-2.1）：
 //   · 响应 **不含 base64**，图片以 `fileData.fileUri`（第三方 CDN）返回，响应体仅 ~537 字节；
@@ -27,26 +29,73 @@ export const IMAGE_ASPECT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4'];
 //   2K   → **2048×2048** / 5.40MB / 36.6s / 2037
 //   4K   → **4096×4096** / 18.46MB / 47.4s / 3040
 // ⇒ 分辨率是真生效的，且 4K 的 token 是 1K 的 5.4 倍（成本确实上升，必须按档位定价）。
-// ⚠️ 另外两个模型（gpt-image-2.5-flare / -sunburst）当前走不通：前者连不传分辨率都回 503，
-//    后者报「No available channel … under group」，所以**它们是否支持 imageSize 无法判定**，
-//    后台默认不上架，等上游有渠道了再开。
+// ⚠️ **以下实测只针对 Gemini 原生通道**。gpt-image-2.5-flare / -sunburst 走的是另一套接口
+//    （/v1/images/generations + `size` 字符串，见下方 OPENAI_IMAGE_SIZES），实测方式完全不同；
+//    2026-10-17 实测这两个模型在「0.17x生图」分组下**没有可用渠道**（503 No available channel），
+//    所以它们的真实出图效果/耗时尚未验过，后台默认不上架，等中转站开渠道后再开。
 export const IMAGE_RESOLUTIONS = ['1K', '2K', '4K'];
 export const DEFAULT_IMAGE_RESOLUTION = '1K';
 
 // 已接入的图片模型候选清单。作用：**新接入的模型必须能出现在后台「模型与定价」表里**，
 // 否则一旦后台保存过配置，代码里新增的模型就永远补不进配置表（KV 里没有那一条）。
 // ⚠️ 这里只是「候选」，不决定上架与价格 —— 上架与价格完全由后台配置决定。
-// ⚠️ gemini-2.5-flash-image（2026-10-17 接入）：文档端点与 payload 与现有完全一致
-//    （POST /v1beta/models/gemini-2.5-flash-image:generateContent，parts.text + imageConfig.aspectRatio，
-//     返回 inlineData），但**当前该令牌下没有可用渠道**：三种 payload 全 503，
-//     报 `No available channel for model gemini-2.5-flash-image under group 0.17x生图`，
-//     且 /v1/models 里也没有它。⇒ 先把模型接入代码、后台可见可配；等中转站给它开渠道后再上架。
+// ⚠️ 接入前必须先确认「模型在该令牌所属分组下真的有渠道」：/v1/models 能看到 ≠ 能调用。
+//    gpt-image-2.5-flare、-sunburst 就是典型反例（/v1/models 有，调用 503 No available channel）。
 export const IMAGE_MODEL_CANDIDATES = [
   'gemini-nano-banana-2.1',
   'gemini-2.5-flash-image',
   'gpt-image-2.5-flare',
   'gpt-image-2.5-sunburst',
 ];
+
+// ===== 两套上游接口风格（同一个中转站、同一把 Key，但端点与请求体完全不同）=====
+// A. gemini-native（默认）：POST {root}/v1beta/models/{model}:generateContent
+//    contents[].parts[] + generationConfig.imageConfig.aspectRatio / imageSize；**支持参考图**（inlineData）。
+// B. openai-images（gpt-image-* 系列）：POST {root}/v1/images/generations
+//    文档：https://easy88ai.com/doc/docs/gpt-image-25-flare-create.html（2026-10-17 抓取）
+//    body = { model, prompt, n, size:'1024x1024', quality, output_format, background, output_compression }
+//    响应 = { created, data:[{ b64_json | url, revised_prompt }], size, quality, output_format, usage }
+//    ⚠️ 这套是「创建」接口，**没有参考图入口** —— 参考图走的是另一条 /v1/images/edits（multipart），
+//       文档里只有 gpt-image-2 的 edit 页、没有 flare 的 ⇒ 本模块对 openai-images **明确拒绝参考图**，
+//       绝不允许「用户传了图却被静默忽略还照样扣点」。
+//    ⚠️ 分辨率在这套里是 `size`（"宽x高"字符串），不是 1K/2K/4K 枚举 ⇒ 见 OPENAI_IMAGE_SIZES 换算表。
+export const IMAGE_API_STYLE_GEMINI = 'gemini-native';
+export const IMAGE_API_STYLE_OPENAI = 'openai-images';
+
+/** 判断模型走哪套接口。gpt-image-* 走 OpenAI 兼容的 /v1/images/generations，其余走 Gemini 原生。 */
+export function imageApiStyle(model) {
+  const id = String(model || '').trim().toLowerCase();
+  return /^gpt-image/.test(id) ? IMAGE_API_STYLE_OPENAI : IMAGE_API_STYLE_GEMINI;
+}
+
+/** 该模型能否吃参考图（只有 Gemini 原生通道实测支持 inlineData）。 */
+export function imageModelSupportsRefs(model) {
+  return imageApiStyle(model) === IMAGE_API_STYLE_GEMINI;
+}
+
+// OpenAI images 的 size 换算表：档位 × 比例 → "宽x高"。
+// 依据文档约束：两边都是 16 的倍数、单边 ≤3840、长宽比 ≤3:1、总像素 655,360~8,294,400。
+// ⚠️ 4K 的 1:1 / 4:3 **不能**是 3840×3840（14.7M）/ 3840×2880（11.1M）—— 超总像素上限，
+//    所以 1:1 取 2880×2880（正好 8,294,400 = 上限）、4:3 取 3264×2448（7.99M）。
+// ⚠️ 1K 的 16:9 不能取 1024×576（589,824 < 下限），所以用 1280×720（正好 16:9）。
+export const OPENAI_IMAGE_SIZES = {
+  '1K': { '1:1': '1024x1024', '16:9': '1280x720', '9:16': '720x1280', '4:3': '1024x768', '3:4': '768x1024' },
+  '2K': { '1:1': '2048x2048', '16:9': '2048x1152', '9:16': '1152x2048', '4:3': '2048x1536', '3:4': '1536x2048' },
+  '4K': { '1:1': '2880x2880', '16:9': '3840x2160', '9:16': '2160x3840', '4:3': '3264x2448', '3:4': '2448x3264' },
+};
+// 质量档：low / medium / high / xhigh / max（文档：直接影响输出 token 与成本）。
+// 这里固定 high —— 与文档示例一致；若哪天要按质量分价，改这里即可（前端无需改）。
+export const OPENAI_IMAGE_QUALITY = 'high';
+export const OPENAI_IMAGE_FORMAT = 'png';
+
+/** 把「档位 + 比例」换算成 OpenAI images 的 size 字符串；比例不认识就退回该档位的 1:1。 */
+export function openAIImageSize(aspectRatio, resolution) {
+  const size = normalizeResolution(resolution);
+  if (!size) return '';
+  const table = OPENAI_IMAGE_SIZES[size] || OPENAI_IMAGE_SIZES[DEFAULT_IMAGE_RESOLUTION];
+  const ratio = String(aspectRatio == null ? '' : aspectRatio).trim();
+  return table[ratio] || table['1:1'];
+}
 
 // 兜底单张扣点（各模型各档位应有自己的价；这个只在配置缺价时保底，可在 KV 里改）。
 export const DEFAULT_IMAGE_PRICE_POINTS = 30;
@@ -96,11 +145,15 @@ export function resolveGeminiRoot(baseUrl) {
   return { hostname: parsed.hostname, port: Number(parsed.port) || 443, root };
 }
 
-/** 拼出 :generateContent 的完整目标（hostname / port / path）。 */
+/** 拼出目标接口的完整信息（hostname / port / path）。两套风格分别对应不同路径。 */
 export function imageEndpoint(baseUrl, model) {
   const name = String(model || '').trim() || IMAGE_MODEL_DEFAULT;
   const { hostname, port, root } = resolveGeminiRoot(baseUrl);
-  return { hostname, port, model: name, path: `${root}/v1beta/models/${name}:generateContent` };
+  if (imageApiStyle(name) === IMAGE_API_STYLE_OPENAI) {
+    // OpenAI 兼容：{root}/v1/images/generations（root 已剥掉末尾的 /v1，不会拼成 /v1/v1）
+    return { hostname, port, model: name, path: `${root}/v1/images/generations`, style: IMAGE_API_STYLE_OPENAI };
+  }
+  return { hostname, port, model: name, path: `${root}/v1beta/models/${name}:generateContent`, style: IMAGE_API_STYLE_GEMINI };
 }
 
 /**
@@ -176,6 +229,51 @@ export function buildImagePayload({ prompt, aspectRatio, resolution, images } = 
 }
 
 /**
+ * 构造 OpenAI 风格（gpt-image-*）的请求体。
+ * 与 Gemini 的差别：分辨率用 `size`（"1024x1024"），质量用 `quality`，没有 contents/parts。
+ * ⚠️ 该接口没有参考图入口 —— 传了图必须报错，不能静默忽略（否则是「扣了钱没照图改」的坑）。
+ */
+export function buildOpenAIImagePayload({ prompt, aspectRatio, resolution, images, model } = {}) {
+  const text = String(prompt == null ? '' : prompt).trim();
+  if (!text) throw new Error('请填写画面描述');
+  const refs = prepareReferenceImages(images);
+  if (refs.length) {
+    throw Object.assign(
+      new Error('该模型不支持参考图（图生图），请去掉参考图或换用 Gemini 系列模型'),
+      { code: 'IMAGE_REF_UNSUPPORTED', status: 400 },
+    );
+  }
+  const payload = {
+    model: String(model || '').trim() || IMAGE_MODEL_DEFAULT,
+    prompt: text,
+    n: 1,
+    quality: OPENAI_IMAGE_QUALITY,
+    output_format: OPENAI_IMAGE_FORMAT,
+  };
+  const size = openAIImageSize(aspectRatio, resolution);
+  if (size) payload.size = size;
+  return payload;
+}
+
+/**
+ * 从 OpenAI 风格响应里取图。两种形态都要认：
+ *   · data[0].b64_json —— 文档主推形态；
+ *   · data[0].url —— 文档注明「部分上游会返回」。
+ * ⚠️ 200 也可能没图（被安全策略拦），必须显式判空。
+ */
+export function extractOpenAIImageResult(json) {
+  const list = Array.isArray(json && json.data) ? json.data : [];
+  const first = list[0] || {};
+  const b64 = String(first.b64_json || '').trim();
+  const url = String(first.url || '').trim();
+  const revisedPrompt = String(first.revised_prompt || '');
+  if (b64) return { ok: true, inline: { mimeType: 'image/png', base64: b64 }, file: null, text: revisedPrompt, finishReason: null, blockReason: null };
+  if (url) return { ok: true, inline: null, file: { mimeType: 'image/png', url }, text: revisedPrompt, finishReason: null, blockReason: null };
+  const reason = (json && json.error && (json.error.message || json.error.code)) || '';
+  return { ok: false, reason: 'no_image', blockReason: null, finishReason: null, text: String(reason) };
+}
+
+/**
  * 从上游响应里取图。两种形态都要认：
  *   · inlineData（base64）—— 部分模型/网关会这样回；
  *   · fileData.fileUri（CDN URL）—— 实测 gemini-nano-banana-2.1 走这条。
@@ -222,7 +320,11 @@ export function describeUpstreamError(statusCode, bodyText) {
     return { code: 'IMAGE_BAD_REQUEST', status: 502, message: `图片生成参数被上游拒绝${detail ? '（上游：' + detail + '）' : ''}` };
   }
   // 503 实测有两种成因（都用这一条覆盖）：模型服务临时不可用、或该分组下没有可用渠道。
-  // 2026-10-17 实测：gpt-image-2.5-flare 连不传分辨率都 503；-sunburst 报「No available channel …」。
+  // 2026-10-17 实测（走**正确的** OpenAI 端点 /v1/images/generations）：
+  //   gpt-image-2.5-flare / -sunburst 都回
+  //   `No available channel for model gpt-image-2.5-flare under group 0.17x生图`
+  //   —— 模型在 /v1/models 里能看到，但该令牌所属分组没给它开渠道。属**中转站侧分组权限**问题，
+  //     开渠道后无需改代码。
   if (statusCode === 503) {
     return { code: 'IMAGE_MODEL_UNAVAILABLE', status: 503, message: `该模型上游暂无可用渠道或服务暂时不可用，请换一个模型或稍后再试${detail ? '（上游：' + detail + '）' : ''}` };
   }
@@ -236,6 +338,10 @@ export function describeUpstreamError(statusCode, bodyText) {
 export function requestGeminiImage({ baseUrl, apiKey, payload, model, timeoutMs = IMAGE_TIMEOUT_MS }) {
   const target = imageEndpoint(baseUrl, model);
   const body = JSON.stringify(payload);
+  // 响应体上限分两条：Gemini 原生只回一个 CDN 链接（实测 ~537 字节），8MB 足够；
+  // OpenAI images 把整张图 base64 塞在 data[0].b64_json 里（4K PNG 18.5MB → base64 约 25MB），
+  // 沿用 8MB 会被误杀成「响应体过大」⇒ 这条给 48MB。
+  const maxBody = target.style === IMAGE_API_STYLE_OPENAI ? 48 * 1024 * 1024 : 8 * 1024 * 1024;
   return new Promise((resolve, reject) => {
     const req = https.request({
       hostname: target.hostname,
@@ -255,7 +361,7 @@ export function requestGeminiImage({ baseUrl, apiKey, payload, model, timeoutMs 
       response.on('data', (chunk) => {
         const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
         size += buffer.length;
-        if (size > 8 * 1024 * 1024) {
+        if (size > maxBody) {
           req.destroy();
           reject(Object.assign(new Error('图片生成响应体过大'), { code: 'IMAGE_RESPONSE_TOO_LARGE', status: 502 }));
           return;

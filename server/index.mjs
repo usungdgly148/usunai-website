@@ -55,13 +55,18 @@ import {
   IMAGE_REF_BODY_LIMIT,
   IMAGE_RESOLUTIONS,
   buildImagePayload,
+  buildOpenAIImagePayload,
   downloadImage,
   extractImageResult,
+  extractOpenAIImageResult,
+  imageApiStyle,
+  imageModelSupportsRefs,
   makeImageStorageKey,
   normalizeImageModels,
   prepareReferenceImages,
   requestGeminiImage,
   resolveImageSelection,
+  IMAGE_API_STYLE_OPENAI,
 } from './gemini-image.mjs';
 import {
   configureKnowledgeService,
@@ -1344,19 +1349,33 @@ async function loadImageGenSettings() {
   };
 }
 
+// 下发给前端的配置副本：给每个模型补 `supportsRefs`（只加在副本上，不写回 KV）。
+// 前端据此决定是否显示参考图上传区；KV 里只保留 id/label/enabled/prices 四个字段。
+function withRefSupport(settings) {
+  return {
+    ...settings,
+    models: (settings.models || []).map((item) => ({ ...item, supportsRefs: imageModelSupportsRefs(item.id) })),
+  };
+}
+
 // 生成 + 落盘。**上游返回的是第三方 CDN 链接（实测不是 base64）**，必须立刻下载转存本站：
 // 那个链接带日期目录、不保证长期有效，也绝不能直接交给前端（会暴露上游域名且随时失效）。
 async function generateAndStoreImage({ provider, prompt, aspectRatio, resolution, model, images }) {
   // images 是前端传来的参考图（可空）。校验在 buildImagePayload → prepareReferenceImages 里做，
   // 但用户侧路由会**先校验再预扣**，避免「参数不合法还先扣钱再退钱」。
   const refs = prepareReferenceImages(images);
-  const payload = buildImagePayload({ prompt, aspectRatio, resolution, images: refs });
+  // 两套上游风格：gpt-image-* 走 OpenAI 兼容 /v1/images/generations（size/quality，无参考图入口），
+  // 其余走 Gemini 原生 :generateContent（imageConfig，支持 inlineData 参考图）。
+  const openaiStyle = imageApiStyle(model) === IMAGE_API_STYLE_OPENAI;
+  const payload = openaiStyle
+    ? buildOpenAIImagePayload({ prompt, aspectRatio, resolution, images: refs, model })
+    : buildImagePayload({ prompt, aspectRatio, resolution, images: refs });
   const json = await requestGeminiImage({ baseUrl: provider.baseUrl, apiKey: provider.apiKey, payload, model });
-  const extracted = extractImageResult(json);
+  const extracted = openaiStyle ? extractOpenAIImageResult(json) : extractImageResult(json);
   if (!extracted.ok) {
     const detail = extracted.blockReason
       ? `图片被上游安全策略拦截（${extracted.blockReason}）`
-      : `图片没有生成出来${extracted.finishReason ? `（finishReason=${extracted.finishReason}）` : ''}`;
+      : `图片没有生成出来${extracted.finishReason ? `（finishReason=${extracted.finishReason}）` : ''}${extracted.text ? `：${String(extracted.text).slice(0, 200)}` : ''}`;
     throw Object.assign(new Error(detail), {
       code: extracted.reason === 'blocked' ? 'IMAGE_BLOCKED' : 'IMAGE_EMPTY',
       status: 502,
@@ -2843,6 +2862,8 @@ const server = http.createServer(async (req, res) => {
           .map((item) => ({
             id: item.id,
             label: item.label || item.id,
+            // 前端据此决定要不要显示参考图上传（gpt-image-* 的「创建」接口没有参考图入口）
+            supportsRefs: imageModelSupportsRefs(item.id),
             resolutions: IMAGE_RESOLUTIONS
               .filter((value) => Number(item.prices && item.prices[value]) > 0)
               .map((value) => ({ value, points: item.prices[value] })),
@@ -2875,7 +2896,8 @@ const server = http.createServer(async (req, res) => {
         const settings = await loadImageGenSettings();
         res.end(JSON.stringify({
           ok: true,
-          settings,
+          // supportsRefs 只加在**下发副本**上，不写回 KV（KV 里只存 id/label/enabled/prices）
+          settings: withRefSupport(settings),
           resolutions: IMAGE_RESOLUTIONS,
           maxRefImages: IMAGE_MAX_REF_IMAGES,
         }));
@@ -2934,7 +2956,7 @@ const server = http.createServer(async (req, res) => {
           updatedAt: new Date().toISOString(),
         };
         await KV.kvPut('imageGenSettings', next);
-        res.end(JSON.stringify({ ok: true, settings: await loadImageGenSettings() }));
+        res.end(JSON.stringify({ ok: true, settings: withRefSupport(await loadImageGenSettings()) }));
       } catch (error) {
         res.statusCode = error.status || 400;
         res.end(JSON.stringify({ ok: false, error: String(error.message || error), code: error.code || 'IMAGE_SETTINGS_INVALID' }));
@@ -2998,6 +3020,14 @@ const server = http.createServer(async (req, res) => {
         }
         const model = selection.model;
         const resolution = selection.resolution;
+        // 参考图能力按模型区分：gpt-image-*（OpenAI 创建接口）没有参考图入口，必须**扣费前**拒绝，
+        // 否则就是「收了钱却忽略用户上传的图」。前端也据此隐藏上传区，这里是硬边界。
+        if (refImages.length && !imageModelSupportsRefs(model)) {
+          throw Object.assign(
+            new Error('该模型不支持参考图（图生图），请去掉参考图或换用 Gemini 系列模型'),
+            { code: 'IMAGE_REF_UNSUPPORTED', status: 400 },
+          );
+        }
         const askedRatio = String(body.aspectRatio || '').trim();
         const aspectRatio = IMAGE_ASPECT_RATIOS.includes(askedRatio) ? askedRatio : settings.aspectRatio;
         const price = selection.points;
