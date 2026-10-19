@@ -105,11 +105,12 @@ export function InfoCard({ entity, type }) {
   return (
     <div className="h-full overflow-y-auto scrollbar-thin p-6">
       <div className="text-center">
-        <div className={`relative w-20 h-20 mx-auto mb-4 rounded-2xl ${entity.iconColor} flex items-center justify-center text-white shadow-pop`}>
+        {/* 2026-10-19：logo 右下角的「智能体 / 工作流」角标已按主人要求移除。
+            它是 absolute 定位、且故意溢出到容器外的装饰，删掉不影响 w-20 h-20 的占位与下方间距；
+            `relative` 原本只用来给那个角标做定位锚点，一并去掉，避免留下无用类名。
+            ⚠️ 不要因为"看起来少了点什么"而加回来；`type` 仍被「千 token / 次」那行使用，不能删参数。 */}
+        <div className={`w-20 h-20 mx-auto mb-4 rounded-2xl ${entity.iconColor} flex items-center justify-center text-white shadow-pop`}>
           <CategoryIcon name={entity.icon} size={32} avatar={entity.avatar} imgClassName="rounded-2xl" />
-          <span className="absolute -bottom-1.5 -right-1.5 px-2 py-0.5 rounded-full bg-white text-[10px] font-semibold text-slate-500 shadow-soft border border-slate-100">
-            {type === 'agent' ? '智能体' : '工作流'}
-          </span>
         </div>
         <h2 className="text-lg font-bold text-slate-900">{entity.name}</h2>
         <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">{entity.desc}</p>
