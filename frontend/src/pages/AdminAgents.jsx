@@ -1,8 +1,8 @@
 import { useStore } from '../store.jsx';
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Search, Plus, Edit2, ToggleLeft, ToggleRight, Eye, Trash2, ArrowUpDown, ChevronDown, Mic, Clapperboard, GripVertical } from 'lucide-react';
-import { AdminPageHeader, PrimaryButton, Card, renderIcon } from '../adminUI.jsx';
+import { Search, Plus, Edit2, ToggleLeft, ToggleRight, Eye, Trash2, ArrowUpDown, ChevronDown, ChevronUp, Mic, Clapperboard, GripVertical } from 'lucide-react';
+import { AdminPageHeader, AdminPagination, PrimaryButton, Card, renderIcon } from '../adminUI.jsx';
 
 const TYPE_TABS = [
   { key: 'all', label: '全部' },
@@ -10,6 +10,14 @@ const TYPE_TABS = [
   { key: 'workflow', label: '工作流' },
   { key: 'off', label: '已下架' },
 ];
+
+// 后台列表每页条数（主人 2026-10-19 指定：每页最多 12 条）
+const PAGE_SIZE = 12;
+
+// 「手动排序」下混合列表的分组权重：智能体在前、工作流在后。
+// 依据 = 前台 /agents「全部」页的拼装口径（先列全部智能体、再列全部工作流），
+// 后台按同一口径排，看到的顺序才和前台一致；也保证上下箭头不会跨类型乱跳。
+const KIND_RANK = { agent: 0, workflow: 1 };
 
 /* "使用次数" inline 编辑单元：
  * - 默认态：显示数字（千分位）+ hover 描边提示「可点击编辑」
@@ -111,6 +119,7 @@ export default function AdminAgents() {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('order');
   const [newMenu, setNewMenu] = useState(false);
+  const [page, setPage] = useState(1);
 
   // 拖拽状态：仅在「手动排序」模式下启用。dragId = 被拖行 id；overId = 鼠标悬停的目标行 id。
   const [dragId, setDragId] = useState(null);
@@ -135,9 +144,21 @@ export default function AdminAgents() {
   list = [...list].sort((a, b) => {
     if (sort === 'uses') return (b.uses || 0) - (a.uses || 0);
     if (sort === 'name') return a.name.localeCompare(b.name);
-    return (a.sortOrder || 0) - (b.sortOrder || 0);
+    // 手动排序：先按类型分组（智能体在前、工作流在后，与前台 /agents「全部」一致），组内再按 sortOrder 升序。
+    // 这样后台列表顺序 = 前台展示顺序，上下箭头也只在同类型内移动，不会跳到另一种类型里。
+    const rk = (KIND_RANK[a.kind] ?? 0) - (KIND_RANK[b.kind] ?? 0);
+    if (rk !== 0) return rk;
+    return (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0);
   });
-  listRef.current = list; // 拖拽 onDrop 闭包内取最新
+  listRef.current = list; // 拖拽 onDrop 闭包内取最新（存整份过滤后的列表，不是当前页）
+
+  // 分页：list 为过滤+排序后的全量，pageItems 才是渲染的那 12 条。
+  // 筛选条件变化 → 回到第 1 页；删除/过滤导致页数变少 → 页码自动收拢，不会停在空页。
+  const totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const pageItems = list.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  useEffect(() => { setPage(1); }, [type, category, search, sort]);
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
 
   const remove = (item) => {
     if (!window.confirm(`确定删除「${item.name}」？此操作不可撤销。`)) return;
@@ -146,6 +167,46 @@ export default function AdminAgents() {
   };
 
   const open = (item) => navigate(`/admin/${item.kind}s/${item.id}`);
+
+  // 当前筛选结果里的同类型上一行 / 下一行（**跨页也算**，否则第 13 条永远上不到第 1 条）；
+  // 越过类型边界或已经到头 → null（箭头置灰）
+  const neighborOf = (item, dir) => {
+    const vi = list.findIndex(x => x.id === item.id && x.kind === item.kind);
+    if (vi === -1) return null;
+    const step = dir === 'up' ? -1 : 1;
+    for (let i = vi + step; i >= 0 && i < list.length; i += step) {
+      if (list[i].kind === item.kind) return list[i];
+    }
+    return null;
+  };
+
+  /* 上下箭头调序（主人 2026-10-19 加的）
+   * 口径：以「当前筛选结果」为准（跨页也算），找同类型的上一行 / 下一行，把被点项在该类型的**完整序列**里挪到那个位置，
+   * 然后把整条序列按下标重写 sortOrder ＝ 0..n-1。
+   * 为什么重写整条而不只交换两个值：
+   *   1) 历史拖拽逻辑会写出 2 和 2 / 2.5 和 2.5 这种重复值，只交换值等于没动（线上已有大量重复）；
+   *   2) 顺带把小数洗成整数，前后端按 sortOrder 排序时不再靠数组原顺序兜底。
+   * 写库走 reorderAgentsByIds / reorderWorkflowsByIds（内部 persistAdminKey → 服务端 KV），
+   * 前台网页与小程序都按 sortOrder 升序取数，所以调完刷新即可同步。
+   * 过滤/搜索状态下也能用：目标行是筛选结果里的相邻行，在完整序列里可能隔了几条，挪过去后可见相对顺序仍正确。 */
+  const moveByStep = (item, dir) => {
+    if (sort !== 'order') return;
+    const target = neighborOf(item, dir);
+    if (!target) return;
+    const kindList = (item.kind === 'agent' ? agents : workflows)
+      .slice()
+      .sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0));
+    const from = kindList.findIndex(x => x.id === item.id);
+    const to = kindList.findIndex(x => x.id === target.id);
+    if (from === -1 || to === -1 || from === to) return;
+    const next = kindList.slice();
+    const [moved] = next.splice(from, 1);
+    // from > to（往上）→ 插到目标之前；from < to（往下）→ 移除后目标下标左移 1，插到 to 即落在目标之后
+    next.splice(to, 0, moved);
+    const ids = next.map(x => x.id);
+    if (item.kind === 'agent') reorderAgentsByIds(ids);
+    else reorderWorkflowsByIds(ids);
+  };
 
   // 拖拽实现：HTML5 native drag & drop。手柄列 + 「手动排序」模式下启用。
   // 「全部 / 已下架」等混合列表：拖拽后只**单点改被拖元素的 sortOrder**
@@ -265,6 +326,7 @@ export default function AdminAgents() {
             <thead className="bg-slate-50 text-slate-600">
               <tr>
                 <th className="text-left px-2 py-3 font-medium w-8"></th>
+                <th className="text-left px-2 py-3 font-medium w-[68px]">排序</th>
                 <th className="text-left px-5 py-3 font-medium">项目</th>
                 <th className="text-left px-5 py-3 font-medium">类型</th>
                 <th className="text-left px-5 py-3 font-medium">分类</th>
@@ -275,7 +337,7 @@ export default function AdminAgents() {
               </tr>
             </thead>
             <tbody>
-              {list.map(item => {
+              {pageItems.map(item => {
                 const isDragging = dragId === item.id;
                 const isOver = overId === item.id && dragId && dragId !== item.id;
                 return (
@@ -296,6 +358,38 @@ export default function AdminAgents() {
                         <GripVertical size={16} className="text-slate-200" />
                       </span>
                     )}
+                  </td>
+                  {/* 上/下箭头：仅在「手动排序」下可用；到本类型页首页尾自动置灰。
+                      按钮整体 stopPropagation，避免误触行点击进编辑页。 */}
+                  <td className="px-2 py-3" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center gap-0.5">
+                      {(() => {
+                        const upTarget = neighborOf(item, 'up');
+                        const downTarget = neighborOf(item, 'down');
+                        const btn = 'p-1 rounded-md transition ' + (draggable
+                          ? 'text-slate-500 hover:bg-blue-50 hover:text-blue-600'
+                          : 'text-slate-200 cursor-not-allowed');
+                        const tip = draggable ? '' : '（请先在右上角切到「手动排序」）';
+                        return (
+                          <>
+                            <button type="button" disabled={!draggable || !upTarget}
+                              onClick={() => moveByStep(item, 'up')}
+                              title={upTarget ? '上移一位' : '已经是本类型的第一条' + tip}
+                              aria-label="上移"
+                              className={btn + (draggable && upTarget ? '' : ' opacity-30 cursor-not-allowed hover:bg-transparent hover:text-slate-400')}>
+                              <ChevronUp size={15} />
+                            </button>
+                            <button type="button" disabled={!draggable || !downTarget}
+                              onClick={() => moveByStep(item, 'down')}
+                              title={downTarget ? '下移一位' : '已经是本类型的最后一条' + tip}
+                              aria-label="下移"
+                              className={btn + (draggable && downTarget ? '' : ' opacity-30 cursor-not-allowed hover:bg-transparent hover:text-slate-400')}>
+                              <ChevronDown size={15} />
+                            </button>
+                          </>
+                        );
+                      })()}
+                    </div>
                   </td>
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-3">
@@ -337,6 +431,9 @@ export default function AdminAgents() {
               })}
             </tbody>
           </table>
+          {/* 分页：每页 12 条。放在 Card 内部做底部条，与「用户管理 / 订单管理」的 AdminPagination 同款。
+              total 传过滤后的全量条数，排序调整后条数不变，页码不会因调序跳动。 */}
+          <AdminPagination page={safePage} total={list.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
         </Card>
       )}
     </div>
