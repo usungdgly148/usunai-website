@@ -59,9 +59,9 @@ export default function AgentList({ mode }) {
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder={`搜索${isWorkflow ? '工作流' : '智能体'}...`} className="w-full pl-9 pr-4 py-2 rounded-full border border-slate-200 bg-white text-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-100 outline-none transition" />
           </div>
           <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 no-scrollbar">
-            <button onClick={() => setActiveCat('all')} className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition ${activeCat === 'all' ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>全部</button>
+            <button onClick={() => { setActiveCat('all'); refreshAllConfig({ force: true }); }} className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition ${activeCat === 'all' ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>全部</button>
             {filterCats.map(cat => (
-              <button key={cat.id} onClick={() => setActiveCat(cat.id)} className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition ${activeCat === cat.id ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+              <button key={cat.id} onClick={() => { setActiveCat(cat.id); refreshAllConfig({ force: true }); }} className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition ${activeCat === cat.id ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
                 <CategoryIcon name={cat.icon} size={14} /> {cat.name}
                 {cat.showInHome && <span className="text-amber-400 leading-none">🔥</span>}
               </button>

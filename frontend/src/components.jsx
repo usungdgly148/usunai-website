@@ -39,7 +39,7 @@ export function Logo({ className = '', collapsed = false }) {
 export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { sidebarOpen, setSidebarOpen, sortedCategories, agents, workflows, categoryGroups } = useStore();
+  const { sidebarOpen, setSidebarOpen, sortedCategories, agents, workflows, categoryGroups, refreshAllConfig } = useStore();
   const search = new URLSearchParams(location.search);
   const activeCategory = search.get('category') || 'all';
 
@@ -140,7 +140,7 @@ export function Sidebar() {
                     const Icon = ICON_MAP[item.icon] || Home;
                     const cat = item.cat || item.id;
                     return (
-                      <Link key={item.id} to={item.href || `/?category=${item.id}`} onClick={() => setSidebarOpen(false)}>
+                      <Link key={item.id} to={item.href || `/?category=${item.id}`} onClick={() => { setSidebarOpen(false); refreshAllConfig({ force: true }); }}>
                         <div className={subItemClass(isActive(cat))}>
                           <Icon size={18} strokeWidth={1.8} className="transition-transform duration-200 group-hover:scale-110 motion-reduce:group-hover:scale-100" />
                           <span>{item.name}</span>

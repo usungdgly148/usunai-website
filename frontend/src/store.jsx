@@ -815,14 +815,43 @@ export function StoreProvider({ children }) {
     'agents', 'workflows', 'authProviders', 'categories', 'categoryGroups',
     'banners', 'recommended', 'announcements', 'computePackages',
   ]);
-  const refreshAllConfig = useCallback(async (options = {}) => {
+  // 2026-10-21：配置刷新去重。实测首屏会并发拉两次 get-config（store 启动 effect + 页面 effect），
+  // 连续点分类也是每次都拉一遍 403KB。这里做两件事：
+  //   ① 在途合并 —— 并发调用复用同一个 Promise，只发一个请求；
+  //   ② 3s 极短 TTL —— 只吸收「同一动作引发多次调用」，不是业务缓存。
+  // ⚠️ 必须 useRef：普通对象字面量每次渲染都会重建，TTL 记录会被清空，去重等于没做。
+  const CONFIG_TTL_MS = 3000;
+  const configFetchedAtRef = useRef(0);
+  const configInflightRef = useRef(null);
+  // 启动流程（下面的启动 useEffect）自己会拉一份 get-config，页面 effect 如果再拉就是纯浪费。
+  // ⚠️ React 的 effect 顺序是「子组件先、父组件后」，本 Provider 的启动 effect 一定晚于
+  //    Home / AgentList 的 mount effect。所以「启动中」标记必须在**渲染期**同步置位，
+  //    否则页面 effect 早已先跑，ref 还是空，去重形同虚设（这一版实测首屏仍发 2 次，就是踩了这个）。
+  const configBootPendingRef = useRef(false);
+  const configBootAtRef = useRef(0);
+  // 应用层条件请求用：记住上一次拿到的 ETag（公开端点与 admin 端点内容不同，分开存）
+  const configEtagRef = useRef({ public: '', admin: '' });
+  if (!configBootAtRef.current) {
+    configBootAtRef.current = Date.now();
+    configBootPendingRef.current = true;
+  }
+  // 内部实现：真正发请求并写回 state。对外不要直接调它，统一走下面的 refreshAllConfig 包装。
+  const fetchAllConfigInner = useCallback(async (options = {}) => {
     try {
       const adminRequest = options.admin === true
         || (options.admin !== false && typeof window !== 'undefined' && window.location.pathname.startsWith('/admin'));
       const fetcher = adminRequest ? adminFetch : apiFetch;
       const configUrl = adminRequest ? '/api/admin/data/get-config' : '/api/data/get-config';
-      const r = await fetcher(configUrl);
+      // 应用层条件请求：实测 Chrome 对这种响应并不发 If-None-Match，靠浏览器 HTTP 缓存省流不可控，
+      // 所以由我们自己带 ETag —— 内容没变时服务端回 304 空响应，变了立即 200 新内容。
+      const etagSlot = adminRequest ? 'admin' : 'public';
+      const prevEtag = configEtagRef.current[etagSlot];
+      const r = await fetcher(configUrl, prevEtag ? { headers: { 'If-None-Match': prevEtag } } : {});
+      // 304 = 服务端内容没变，本地 state 已是最新，不需要任何写回
+      if (r.status === 304) return { ok: true, notModified: true };
       if (!r.ok) return { ok: false };
+      const freshEtag = r.headers.get('etag');
+      if (freshEtag) configEtagRef.current[etagSlot] = freshEtag;
       const j = await r.json();
       const data = (j && j.data) || {};
       if (Object.keys(data).length === 0) return { ok: false };
@@ -853,6 +882,31 @@ export function StoreProvider({ children }) {
       return { ok: false, err: e.message };
     }
   }, []);
+
+  // 2026-10-21：对外统一入口。解决「后台改完，前台点分类不刷新」的三类问题：
+  //   ① 在途合并：首屏 store 启动 effect 与页面 effect 并发调用，只发一个请求；
+  //   ② 3s TTL：连点分类 / 同一次交互引发多次调用，不重复下载 403KB；
+  //   ③ force：点侧边栏、切回标签页等「用户明确要最新」的场景跳过上面两道闸门。
+  // 配合服务端 ETag：数据没变时 304 空响应，变了立即 200 新内容，所以 force 刷新几乎不花流量。
+  const refreshAllConfig = useCallback(async (options = {}) => {
+    const force = options.force === true;
+    if (!force && configInflightRef.current) return configInflightRef.current;
+    // 启动流程正在拉同一份配置：直接返回，它完成后会 setState，页面自然拿到最新数据。
+    // 8s 兜底：万一启动请求挂了，不能把页面永久锁死在这个分支。
+    if (!force && configBootPendingRef.current && Date.now() - configBootAtRef.current < 8000) {
+      return { ok: true, cached: true, booting: true };
+    }
+    if (!force && configFetchedAtRef.current && Date.now() - configFetchedAtRef.current < CONFIG_TTL_MS) {
+      return { ok: true, cached: true };
+    }
+    const task = fetchAllConfigInner(options);
+    configInflightRef.current = task;
+    const clearInflight = () => { if (configInflightRef.current === task) configInflightRef.current = null; };
+    task.then(clearInflight, clearInflight);
+    const res = await task;
+    if (res && res.ok) configFetchedAtRef.current = Date.now();
+    return res;
+  }, [fetchAllConfigInner]);
 
   // 单 key 写回：admin 显式操作后立即 PUT（替代 debounce 全表 PUT，避免多设备 stale localStorage 静默覆盖服务端数据）
   // 返回 { ok: bool, msg?: string }。失败时设置 persistError，App 顶层 Toast 提示用户，不静默吞错。
@@ -898,7 +952,7 @@ export function StoreProvider({ children }) {
   // 启动：从服务端拉取最新数据并覆盖（实现重新部署后保留）；server 为空则把当前数据迁移上去
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const bootTask = (async () => {
       try {
         // v14：拆成两个并发 GET（list-keys + get-config），都走嵌套子目录端点
         const [rList, rCfg] = await Promise.all([
@@ -955,6 +1009,12 @@ export function StoreProvider({ children }) {
         hydratedRef.current = true; // 瞬时错误也放开写回，由 POST 自行兜底
       }
     })();
+    // 启动写完 state 后解除「启动中」标记，并记一次拉取时间（3s 内页面不必再拉）
+    const clearBoot = () => {
+      configBootPendingRef.current = false;
+      configFetchedAtRef.current = Date.now();
+    };
+    bootTask.then(clearBoot, clearBoot);
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1028,12 +1088,25 @@ export function StoreProvider({ children }) {
   // 用 ref 持有最新 refreshCurrentUser，避免 focus/visibility 监听闭包到过期版本
   const refreshCurrentUserRef = useRef(refreshCurrentUser);
   useEffect(() => { refreshCurrentUserRef.current = refreshCurrentUser; }, [refreshCurrentUser]);
+  // 2026-10-21：切回标签页时也要刷配置。实测原来只刷用户余额、不刷 agents/workflows，
+  // 所以「后台刚上架 → 切回前台标签页」看到的一直是旧列表，必须手动刷新整页才生效。
+  // 5s 节流：防止窗口快速来回切换时连续打请求（有 ETag 兜底，即使真发也是 304）。
+  const lastCfgFocusRefreshRef = useRef(0);
   // 切回标签页 / 窗口重新聚焦时，刷新当前用户余额与有效期（管理员在另一窗口充值后即时同步）
   useEffect(() => {
     let t = null;
     const trigger = () => {
       clearTimeout(t);
-      t = setTimeout(() => { const fn = refreshCurrentUserRef.current; if (fn) fn(); }, 600);
+      t = setTimeout(() => {
+        const fn = refreshCurrentUserRef.current; if (fn) fn();
+        const now = Date.now();
+        if (now - lastCfgFocusRefreshRef.current > 5000) {
+          lastCfgFocusRefreshRef.current = now;
+          // 后台页面有自己的刷新链路，这里只处理用户端
+          const isAdminPage = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
+          if (!isAdminPage) refreshAllConfig({ force: true });
+        }
+      }, 600);
     };
     const onVis = () => { if (typeof document !== 'undefined' && document.visibilityState === 'visible') trigger(); };
     if (typeof window !== 'undefined') {
@@ -1047,7 +1120,7 @@ export function StoreProvider({ children }) {
         document.removeEventListener('visibilitychange', onVis);
       }
     };
-  }, []);
+  }, [refreshAllConfig]);
 
   // v14 移除：migrate-store 触发（端点已删除，单条 key 同步已 work，无需批量迁移）
 

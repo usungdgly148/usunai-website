@@ -5072,8 +5072,25 @@ const server = http.createServer(async (req, res) => {
           else data[k] = adminRoute ? v : redactSensitiveConfig(v);
         }
       }
+      // 2026-10-21：配置接口加 ETag 协商缓存。
+      // 后台上下架智能体后，前端必须立刻看到新数据，所以用 no-cache（可以存，但每次必须回源验证）：
+      //   内容没变 → 304 空响应（几百字节），省掉 148KB 的重复下载；
+      //   内容变了 → 200 + 新内容，立即生效。
+      // ⚠️ 绝不能用 max-age，那会让前端在上架后仍然读到旧缓存，正是「要等十几秒」的典型成因。
+      const cfgPayload = JSON.stringify({ ok: true, kv: true, data });
+      const cfgEtag = 'W/"' + crypto.createHash('sha1').update(cfgPayload).digest('hex').slice(0, 32) + '"';
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('ETag', cfgEtag);
+      // admin 路由返回明文、公开路由返回脱敏版，两者内容不同但走同一路径，Vary 防止中间层串味
+      res.setHeader('Vary', 'Authorization');
+      const cfgInm = req.headers['if-none-match'];
+      if (cfgInm && String(cfgInm).split(',').some((t) => t.trim() === cfgEtag)) {
+        res.statusCode = 304;
+        res.end();
+        return;
+      }
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ok: true, kv: true, data }));
+      res.end(cfgPayload);
       return;
     }
     if (p === '/api/admin/data/put-config' && req.method === 'POST') {
