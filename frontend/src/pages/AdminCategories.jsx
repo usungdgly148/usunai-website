@@ -26,8 +26,8 @@ const COLOR_OPTIONS = [
 const EMPTY_DRAFT = { name: '', group: '', icon: 'LayoutGrid', color: 'bg-blue-50 text-blue-600', sortOrder: '', miniappImage: '', miniappLink: '' };
 
 export default function AdminCategories() {
-  const { sortedCategories, addCategory, updateCategory, deleteCategory, reorderCategory, categoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup, reorderCategoryGroup, categories, refreshAllAdminLists, refreshAllConfig } = useStore();
-  useEffect(() => { refreshAllAdminLists(); refreshAllConfig(); }, [refreshAllAdminLists, refreshAllConfig]);
+  const { sortedCategories, addCategory, updateCategory, deleteCategory, reorderCategory, categoryGroups, addCategoryGroup, updateCategoryGroup, deleteCategoryGroup, reorderCategoryGroup, categories, refreshAllConfig } = useStore();
+  useEffect(() => { refreshAllConfig(); }, [refreshAllConfig]);
   const list = sortedCategories.filter(c => c.id !== 'all');
   const [editing, setEditing] = useState(null);
   const [draft, setDraft] = useState(EMPTY_DRAFT);

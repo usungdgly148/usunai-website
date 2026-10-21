@@ -7,8 +7,8 @@ import { tryUploadToBlob } from '../blobUpload.js';
 const ROLE_LABEL = { super: '超级管理员', operator: '运营', customer_service: '客服' };
 
 export default function AdminSettings() {
-  const { adminAccounts, operationLogs, toggleAdminAccountStatus, addAdminAccount, updateAdminAccount, deleteAdminAccount, logo, setLogo, siteConfig, updateSiteConfig, persistAdminKey, refreshAllAdminLists, refreshAllConfig } = useStore();
-  useEffect(() => { refreshAllAdminLists(); refreshAllConfig(); }, [refreshAllAdminLists, refreshAllConfig]);
+  const { adminAccounts, operationLogs, toggleAdminAccountStatus, addAdminAccount, updateAdminAccount, deleteAdminAccount, logo, setLogo, siteConfig, updateSiteConfig, persistAdminKey, refreshAllConfig } = useStore();
+  useEffect(() => { refreshAllConfig(); }, [refreshAllConfig]);
   const [tab, setTab] = useState('account');
   const [form, setForm] = useState({ name: '', account: '', role: 'operator' });
   const [modalOpen, setModalOpen] = useState(false);

@@ -642,8 +642,8 @@ export default function AdminWorkflowEdit({ isNew: isNewProp }) {
   const { id } = useParams();
   const isNew = isNewProp || id === 'new';
   const navigate = useNavigate();
-  const { workflows, sortedCategories, updateWorkflow, addWorkflow, authProviders, refreshAllAdminLists, refreshAllConfig } = useStore();
-  useEffect(() => { refreshAllAdminLists(); refreshAllConfig(); }, [refreshAllAdminLists, refreshAllConfig]);
+  const { workflows, sortedCategories, updateWorkflow, addWorkflow, authProviders, refreshAllConfig } = useStore();
+  useEffect(() => { refreshAllConfig(); }, [refreshAllConfig]);
   const existing = !isNew ? workflows.find(w => w.id === id) : null;
 
   const [form, setForm] = useState(() => {

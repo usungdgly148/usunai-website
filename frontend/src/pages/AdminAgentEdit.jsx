@@ -70,8 +70,8 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
   const { id } = useParams();
   const isNew = isNewProp || id === 'new';
   const navigate = useNavigate();
-  const { agents, sortedCategories, updateAgent, addAgent, authProviders, refreshAllAdminLists, refreshAllConfig } = useStore();
-  useEffect(() => { refreshAllAdminLists(); refreshAllConfig(); }, [refreshAllAdminLists, refreshAllConfig]);
+  const { agents, sortedCategories, updateAgent, addAgent, authProviders, refreshAllConfig } = useStore();
+  useEffect(() => { refreshAllConfig(); }, [refreshAllConfig]);
   const existing = !isNew ? agents.find(a => a.id === id) : null;
 
   const [form, setForm] = useState(() => {

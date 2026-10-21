@@ -19,8 +19,9 @@ const inputCls = 'w-full px-3 py-2 border border-slate-300 rounded-lg text-sm fo
 const priceCls = 'w-20 px-2 py-1.5 border border-slate-300 rounded-lg text-sm text-center focus:outline-none focus:border-blue-500';
 
 export default function AdminImageGen() {
-  const { authProviders, refreshAllAdminLists } = useStore();
-  useEffect(() => { refreshAllAdminLists?.(); }, [refreshAllAdminLists]);
+  const { authProviders, refreshAllConfig } = useStore();
+  // 2026-10-21：本页只用 authProviders（属配置类），原来调 refreshAllAdminLists 是拉 5.9MB 记录列表，纯浪费。
+  useEffect(() => { refreshAllConfig(); }, [refreshAllConfig]);
 
   const relays = useMemo(
     () => (authProviders || []).filter((p) => p.type === 'relay' && p.status !== 'disabled' && p.status !== 'inactive'),

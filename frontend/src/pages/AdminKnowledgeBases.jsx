@@ -12,7 +12,7 @@ const ACCEPT = '.pdf,.docx,.txt,.md,.markdown';
 const inputClass = 'w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:border-blue-500 focus:outline-none';
 
 export default function AdminKnowledgeBases() {
-  const { authProviders, refreshAllAdminLists } = useStore();
+  const { authProviders, refreshAllConfig } = useStore();
   const embeddingProviders = useMemo(() => authProviders.filter(p => p.type === 'bailian-embedding' && p.status !== 'disabled'), [authProviders]);
   const [items, setItems] = useState([]);
   const [selectedId, setSelectedId] = useState('');
@@ -41,7 +41,7 @@ export default function AdminKnowledgeBases() {
     catch (error) { notify(false, error.message); }
   };
 
-  useEffect(() => { refreshAllAdminLists(); load(); }, [refreshAllAdminLists]);
+  useEffect(() => { refreshAllConfig(); load(); }, [refreshAllConfig]);
   useEffect(() => { loadDocuments(selectedId); }, [selectedId]);
 
   const resetForm = () => {

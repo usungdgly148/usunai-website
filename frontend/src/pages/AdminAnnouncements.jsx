@@ -43,8 +43,8 @@ function EmptyState({ onAdd }) {
 }
 
 export default function AdminAnnouncements() {
-  const { announcements, addAnnouncement, updateAnnouncement, deleteAnnouncement, refreshAllAdminLists, refreshAllConfig } = useStore();
-  useEffect(() => { refreshAllAdminLists(); refreshAllConfig(); }, [refreshAllAdminLists, refreshAllConfig]);
+  const { announcements, addAnnouncement, updateAnnouncement, deleteAnnouncement, refreshAllConfig } = useStore();
+  useEffect(() => { refreshAllConfig(); }, [refreshAllConfig]);
   const [keyword, setKeyword] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null); // null=新建

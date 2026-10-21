@@ -384,6 +384,10 @@ export function StoreProvider({ children }) {
   });
   // 2026-08-05 拆表后：assets = 当前登录用户自己的（前台）；allAssets = 全量（仅后台 AdminAssets/AdminUsers 用）
   const [allAssets, setAllAssets] = useState([]);
+  // 2026-10-21：refreshAllAssets 的 15s TTL 命中时要返回上次结果，useCallback 闭包里的 allAssets 可能是旧值，
+  // 用 ref 跟一份最新的（赋值点有 4 处，统一用 effect 同步，避免漏改）。
+  const allAssetsRef = useRef([]);
+  useEffect(() => { allAssetsRef.current = allAssets; }, [allAssets]);
   const [computePackages, setComputePackages] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('clone_compute_packages'));
@@ -658,11 +662,25 @@ export function StoreProvider({ children }) {
 
   const hydratedRef = useRef(false); // 水合完成前禁止写回，防止覆盖服务端真实数据
 
+  // 2026-10-21：后台切页性能修复（主人反馈「侧边栏点 1-3 次才生效 / 页面加载慢」）
+  // 根因：记录类列表（users / regs / orders / computes / history）体积很大 —— 线上实测合计约 5.87MB
+  // （users 1.8MB + regs 1.8MB + history 2.03MB + computes 0.22MB + orders），
+  // 而 13 个后台页面**每次挂载都无条件全量重拉**，其中 9 个页面压根不读这些数据。
+  // 代价：r.json() 要在主线程 parse 近 6MB + setState 上千条记录 → 浏览器主线程阻塞数百毫秒，
+  // pushState 已经把地址栏改了但界面还没重绘，于是「点了没反应 → 再点一次」，而第二次点的是已激活项，自然也没新反应。
+  // 修复：① 按需（types 白名单）；② 15s TTL 去重 + 并发合并，切页时不再重复拉同一批。
+  const RECORD_LIST_TYPES = ['users', 'regs', 'orders', 'computes', 'history'];
+  // ⚠️ 必须是 useRef：普通对象字面量每次渲染都会重建，TTL 记录会被清空，去重等于没做。
+  const recordFetchedAtRef = useRef(Object.create(null)); // type -> 最后成功时间
+  const recordInflightRef = useRef(Object.create(null));  // type -> 进行中的 Promise
+  const RECORD_TTL_MS = 15000;
+
   // B1 + v14：从 GET 返回的 lists（单条 key 名数组）按需拉前 80 条 value 填充列表 state
   // ⚠️ list-keys 返回的 keys 子字段名是 API 命名（users/regs/orders/computes/history），
   //    而本 store 的 stateKey 是 adminUsers/registeredUsers/orders/computeRecords/history。
   //    必须按 API 名（type）取，否则只有恰好同名的 history 能命中，其余 4 个永远空数组。
-  const hydrateListsFromSingleKeys = useCallback(async (lists, useAdminToken = false) => {
+  // onlyTypes：只水合指定的 API 名（'users' | 'regs' | 'orders' | 'computes' | 'history'），传 null = 全量。
+  const hydrateListsFromSingleKeys = useCallback(async (lists, useAdminToken = false, onlyTypes = null) => {
     const MAP = {
       adminUsers: 'users',
       registeredUsers: 'regs',
@@ -674,6 +692,7 @@ export function StoreProvider({ children }) {
     const fetcher = useAdminToken ? adminFetch : apiFetch;
     const recordsUrl = useAdminToken ? '/api/admin/data/get-records' : '/api/data/get-records';
     for (const [stateKey, type] of Object.entries(MAP)) {
+      if (onlyTypes && !onlyTypes.includes(type)) continue; // 按需：跳过后台页面不用的列表
       const rawKeys = lists[type] || [];   // 用 API 名（type）不是 stateKey
       if (!Array.isArray(rawKeys) || rawKeys.length === 0) continue;
       const ids = rawKeys
@@ -706,14 +725,19 @@ export function StoreProvider({ children }) {
   // 解决：SaaS 模式下点侧边栏切换模块应立即看到最新数据，不依赖页面初次加载的 hydrate 快照。
   // 仅刷新 adminUsers（user_<id> 列表），不动其它 state，保证其它正在编辑的表单数据不丢。
   // ⚠️ 用 adminFetch 拿全量用户；普通 apiFetch 受用户权限过滤只返回自己的 user_*。
-  const refreshAdminUsersFromServer = useCallback(async () => {
+  const refreshAdminUsersFromServer = useCallback(async (options = {}) => {
+    // 2026-10-21：同上，15s 内重复进入「用户管理」直接复用上次结果（users 单类就有 1.8MB）。
+    if (!options.force && recordFetchedAtRef.current.users
+      && Date.now() - recordFetchedAtRef.current.users < RECORD_TTL_MS) {
+      return { ok: true, cached: true };
+    }
     try {
       const r = await adminFetch('/api/admin/data/list-keys');
       if (!r.ok) return { ok: false };
       const j = await r.json();
       const userKeys = (j && j.keys && j.keys.users) || [];
       if (!Array.isArray(userKeys) || userKeys.length === 0) {
-        setAdminUsers([]); return { ok: true };
+        setAdminUsers([]); recordFetchedAtRef.current.users = Date.now(); return { ok: true };
       }
       const ids = userKeys
         .map((k) => String(k).replace(/^user_/, ''))
@@ -732,6 +756,7 @@ export function StoreProvider({ children }) {
       }
       // admin 全量拉取：直接用服务端真值替换，不保留前一个账号的 localOnly 残留。
       setAdminUsers(items);
+      recordFetchedAtRef.current.users = Date.now();
       return { ok: true, count: items.length };
     } catch (e) {
       return { ok: false, err: e.message };
@@ -743,16 +768,42 @@ export function StoreProvider({ children }) {
   // ⚠️ 必须用 adminFetch（clone_admin_token），不能用 apiFetch（clone_token）。
   // 原因：用户可能先用手机用户登录（clone_token=手机token），再切换到 admin 登录。
   // adminLogin 已修复为写到独立 clone_admin_token，所以这里 adminFetch 能拿到正确的 admin token。
-  const refreshAllAdminLists = useCallback(async () => {
-    try {
-      const r = await adminFetch('/api/admin/data/list-keys');
-      if (!r.ok) return { ok: false };
-      const j = await r.json();
-      if (j && j.keys) await hydrateListsFromSingleKeys(j.keys, /* useAdminToken */ true);
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, err: e.message };
+  // 2026-10-21：改成「按需 + 15s 去重 + 并发合并」。
+  //   refreshAllAdminLists({ types: ['users','orders'] })  只拉页面真正渲染的那几类；
+  //   不传 types = 全量（仅启动水合/诊断用）；
+  //   { force: true } 绕过 TTL（用户增删改后需要强刷时用）。
+  // 返回 { ok, cached } —— cached=true 表示这批在 TTL 内已拉过，没有发请求。
+  const refreshAllAdminLists = useCallback(async (options = {}) => {
+    const requested = Array.isArray(options.types) && options.types.length
+      ? options.types.filter((t) => RECORD_LIST_TYPES.includes(t))
+      : RECORD_LIST_TYPES.slice();
+    const now = Date.now();
+    const pending = requested.filter((t) => !recordInflightRef.current[t]);
+    const stale = pending.filter((t) => options.force
+      || !recordFetchedAtRef.current[t]
+      || now - recordFetchedAtRef.current[t] > RECORD_TTL_MS);
+    // 正在拉的 + TTL 内已拉过的，都直接复用，不再打服务端
+    if (stale.length === 0) {
+      await Promise.all(pending.map((t) => recordInflightRef.current[t]).filter(Boolean));
+      return { ok: true, cached: true };
     }
+    const task = (async () => {
+      try {
+        const r = await adminFetch('/api/admin/data/list-keys');
+        if (!r.ok) return { ok: false };
+        const j = await r.json();
+        if (j && j.keys) await hydrateListsFromSingleKeys(j.keys, /* useAdminToken */ true, stale);
+        const done = Date.now();
+        for (const t of stale) recordFetchedAtRef.current[t] = done;
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, err: e.message };
+      } finally {
+        for (const t of stale) delete recordInflightRef.current[t];
+      }
+    })();
+    for (const t of stale) recordInflightRef.current[t] = task;
+    return task;
   }, [hydrateListsFromSingleKeys]);
 
   // 2026-08-04：刷新所有配置类数据（agents / workflows / categories / banners / siteConfig 等）
@@ -1549,13 +1600,19 @@ export function StoreProvider({ children }) {
   }, [user && user.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 后台：管理员拉全量资产（AdminAssets / AdminUsers 挂载时调用）
-  const refreshAllAssets = useCallback(async () => {
+  const refreshAllAssets = useCallback(async (options = {}) => {
+    // 2026-10-21：全量资产约 1.98MB，15s 内重复进「用户管理」直接复用（该数据只用于用户详情里的资产计数）。
+    if (!options.force && recordFetchedAtRef.current.assets
+      && Date.now() - recordFetchedAtRef.current.assets < RECORD_TTL_MS) {
+      return allAssetsRef.current || [];
+    }
     try {
       const r = await adminFetch('/api/admin/data/assets');
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
       const items = Array.isArray(j && j.items) ? j.items : [];
       setAllAssets(items);
+      recordFetchedAtRef.current.assets = Date.now();
       return items;
     } catch (e) {
       console.error('[assets] 拉取全量资产失败', e);

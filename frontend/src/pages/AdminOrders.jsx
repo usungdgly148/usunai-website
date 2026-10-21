@@ -26,7 +26,7 @@ const TYPE_TABS = [
 
 export default function AdminOrders() {
   const { orders, adminUsers, updateOrderStatus, refreshAllAdminLists, refreshAllConfig } = useStore();
-  useEffect(() => { refreshAllAdminLists(); refreshAllConfig(); }, [refreshAllAdminLists, refreshAllConfig]);
+  useEffect(() => { refreshAllAdminLists({ types: ['users', 'orders'] }); refreshAllConfig(); }, [refreshAllAdminLists, refreshAllConfig]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');

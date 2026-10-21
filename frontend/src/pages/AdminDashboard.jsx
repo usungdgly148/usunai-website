@@ -17,7 +17,7 @@ function startOfDay(d) {
 
 export default function AdminDashboard() {
   const { agents, workflows, adminUsers, adminUser, computeRecords, orders, refreshAllAdminLists, refreshAllConfig } = useStore();
-  useEffect(() => { refreshAllAdminLists(); refreshAllConfig(); }, [refreshAllAdminLists, refreshAllConfig]);
+  useEffect(() => { refreshAllAdminLists({ types: ['users', 'orders', 'computes'] }); refreshAllConfig(); }, [refreshAllAdminLists, refreshAllConfig]);
   const items = [...agents, ...workflows];
   const publishedCount = items.filter(x => x.published).length;
   const totalPoints = adminUsers.reduce((sum, u) => sum + (u.points || 0), 0);

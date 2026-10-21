@@ -110,8 +110,8 @@ function UsesCell({ id, kind, value, onCommit }) {
 }
 
 export default function AdminAgents() {
-  const { agents, workflows, sortedCategories, togglePublished, deleteAgent, deleteWorkflow, reorderAgentsByIds, reorderWorkflowsByIds, updateAgent, updateWorkflow, refreshAllAdminLists, refreshAllConfig } = useStore();
-  useEffect(() => { refreshAllAdminLists(); refreshAllConfig(); }, [refreshAllAdminLists, refreshAllConfig]);
+  const { agents, workflows, sortedCategories, togglePublished, deleteAgent, deleteWorkflow, reorderAgentsByIds, reorderWorkflowsByIds, updateAgent, updateWorkflow, refreshAllConfig } = useStore();
+  useEffect(() => { refreshAllConfig(); }, [refreshAllConfig]);
   const navigate = useNavigate();
 
   const [type, setType] = useState('all');

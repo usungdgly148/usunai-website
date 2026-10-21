@@ -75,9 +75,9 @@ export default function AdminLanding() {
     addLandingFooterColumn, removeLandingFooterColumn,
     resetLanding,
     customerService, updateCustomerService,
-    refreshAllAdminLists, refreshAllConfig,
+    refreshAllConfig,
   } = useStore();
-  useEffect(() => { refreshAllAdminLists(); refreshAllConfig(); }, [refreshAllAdminLists, refreshAllConfig]);
+  useEffect(() => { refreshAllConfig(); }, [refreshAllConfig]);
 
   const [saved, setSaved] = useState(false);
 

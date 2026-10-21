@@ -29,9 +29,9 @@ export default function AdminRecommend() {
   const {
     banners, addBanner, updateBanner, deleteBanner, toggleBanner, reorderBanner,
     recommended, addRecommended, removeRecommended, reorderRecommended,
-    agents, workflows, refreshAllAdminLists, refreshAllConfig,
+    agents, workflows, refreshAllConfig,
   } = useStore();
-  useEffect(() => { refreshAllAdminLists(); refreshAllConfig(); }, [refreshAllAdminLists, refreshAllConfig]);
+  useEffect(() => { refreshAllConfig(); }, [refreshAllConfig]);
 
   const [bannerModal, setBannerModal] = useState(false);
   const [editing, setEditing] = useState(null);

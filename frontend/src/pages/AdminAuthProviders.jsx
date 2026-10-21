@@ -22,13 +22,13 @@ async function postJson(url, body) {
 }
 
 export default function AdminAuthProviders() {
-  const { authProviders, addAuthProvider, updateAuthProvider, deleteAuthProvider, refreshAllAdminLists, refreshAllConfig } = useStore();
+  const { authProviders, addAuthProvider, updateAuthProvider, deleteAuthProvider, refreshAllConfig } = useStore();
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState('');
   const [form, setForm] = useState(blank);
   const [busy, setBusy] = useState('');
   const [result, setResult] = useState(null);
-  useEffect(() => { refreshAllAdminLists(); refreshAllConfig(); }, [refreshAllAdminLists, refreshAllConfig]);
+  useEffect(() => { refreshAllConfig(); }, [refreshAllConfig]);
 
   const set = patch => setForm(value => ({ ...value, ...patch }));
   const chooseType = type => {
@@ -65,7 +65,7 @@ export default function AdminAuthProviders() {
         savedId = await addAuthProvider(payload);
       }
       if (!savedId) throw new Error('保存失败');
-      setOpen(false); setResult(null); await refreshAllAdminLists();
+      setOpen(false); setResult(null); await refreshAllConfig();
     } catch (error) { setResult({ ok: false, text: error.message }); }
     finally { setBusy(''); }
   };
@@ -92,7 +92,7 @@ export default function AdminAuthProviders() {
     try {
       const ok = await deleteAuthProvider(id);
       if (!ok) throw new Error('删除失败');
-      await refreshAllAdminLists();
+      await refreshAllConfig();
     }
     catch (error) { setResult({ ok: false, text: error.message }); }
   };

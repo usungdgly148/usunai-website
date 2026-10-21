@@ -5,7 +5,7 @@ import { AdminPageHeader, AdminPagination, Card, Modal, PrimaryButton, Secondary
 
 export default function AdminCompute() {
   const { computeRecords, computePackages, adminUsers, addComputePackage, updateComputePackage, deleteComputePackage, togglePackagePublished, rechargeUserPoints, adminUser, rechargeInfo, saveRechargeInfo: persistRechargeInfo, refreshAllAdminLists, refreshAllConfig } = useStore();
-  useEffect(() => { refreshAllAdminLists(); refreshAllConfig(); }, [refreshAllAdminLists, refreshAllConfig]);
+  useEffect(() => { refreshAllAdminLists({ types: ['users', 'computes'] }); refreshAllConfig(); }, [refreshAllAdminLists, refreshAllConfig]);
   const totalRecharge = computeRecords.filter(r => r.type === 'recharge').reduce((s, r) => s + r.amount, 0);
   const totalConsume = computeRecords.filter(r => r.type === 'consume').reduce((s, r) => s + r.amount, 0);
   const net = totalRecharge - totalConsume;
