@@ -1886,27 +1886,13 @@ export function StoreProvider({ children }) {
   };
 
   // 智能体 / 工作流的增删改 + 排序（全部改成 async + persistKey，避免 silent overwrite）
-  const swapSort = async (key, id, dir) => {
-    const list = key === 'agents' ? agents : workflows;
-    const sorted = [...list].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
-    const idx = sorted.findIndex(x => x.id === id);
-    const next = dir === 'up' ? idx - 1 : idx + 1;
-    if (idx === -1 || next < 0 || next >= sorted.length) return;
-    const a = sorted[idx], b = sorted[next];
-    const after = list.map(x => {
-      if (x.id === a.id) return { ...x, sortOrder: b.sortOrder };
-      if (x.id === b.id) return { ...x, sortOrder: a.sortOrder };
-      return x;
-    });
-    if (key === 'agents') setAgents(after); else setWorkflows(after);
-    await persistAdminKey(key, after);
-  };
-  const reorderAgent = (id, dir) => swapSort('agents', id, dir);
-  const reorderWorkflow = (id, dir) => swapSort('workflows', id, dir);
+  // 2026-10-21：旧的两个调序方法 swapSort / reorderAgent / reorderWorkflow 已删除 ——
+  //   它们是「按类型列表里相邻交换 sortOrder 值」的旧实现，遇到重复值（线上 2/2/2、2.5/2.5）会静默失效；
+  //   现在后台「项目管理」的上下箭头统一走下面的 reorderAgentsByIds / reorderWorkflowsByIds（整条重编号）。
 
-  // 拖拽批量重排：传入「按新顺序排列的 id 数组」，把数组内 id 按 0..n-1 重写 sortOrder；
+  // 上下箭头批量重排：传入「该类型按新顺序排列的 id 数组」，把数组内 id 按 0..n-1 重写 sortOrder；
   // 不在 orderedIds 里的项保持原 sortOrder 不动（避免误伤其他项）。
-  // 适用场景：单类型列表拖拽（智能体 tab / 工作流 tab），主人在「手动排序」模式下拖动行重排。
+  // 为什么整条重编号而不是只交换两个值：线上历史数据里有大量重复 sortOrder，同值互换等于没动。
   const reorderAgentsByIds = async (orderedIds) => {
     const orderMap = new Map(orderedIds.map((id, i) => [id, i]));
     const next = agents.map(a => orderMap.has(a.id) ? { ...a, sortOrder: orderMap.get(a.id) } : a);
@@ -1925,10 +1911,16 @@ export function StoreProvider({ children }) {
   // 一旦 stale，setAgents 写入的就是基于旧数据算出的 next（看起来 setState 成功），但 persistKey 写服务的也是旧版 next，
   // 主人编辑的字段没真正落盘，刷新就被服务端权威值覆盖。
   // 同步 await persistKey 拿 { ok }，失败时 setAgents(prev => 原值) 回滚 + 让调用方处理（UsesCell 显示 Toast）。
+  // 2026-10-21：详情页的「排序权重」输入框已移除，新建项的落位改由这里决定 ——
+  // 取当前最大 sortOrder + 1，保证新建的智能体/工作流一律排在列表**最后**。
+  // （以前靠 blankForm 里的 sortOrder:999 兜底，一旦线上有 >999 的历史值就会插到中间；
+  //   调序走上下箭头后 sortOrder 会被重编成 0..n-1，max+1 依然落在末尾。）
+  const nextSortOrder = (list) => list.reduce((m, x) => Math.max(m, Number(x.sortOrder) || 0), 0) + 1;
+
   const addAgent = async (a) => {
     const id = Date.now() + '';
     const prev = agentsRef.current;
-    const next = [...prev, normalizeAgent({ ...a, id }, prev.length)];
+    const next = [...prev, normalizeAgent({ ...a, id, sortOrder: nextSortOrder(prev) }, prev.length)];
     setAgents(next);
     const r = await persistAdminKey('agents', next);
     if (!r.ok) {
@@ -1966,7 +1958,7 @@ export function StoreProvider({ children }) {
   const addWorkflow = async (w) => {
     const id = Date.now() + '';
     const prev = workflowsRef.current;
-    const next = [...prev, normalizeWorkflow({ ...w, id }, prev.length)];
+    const next = [...prev, normalizeWorkflow({ ...w, id, sortOrder: nextSortOrder(prev) }, prev.length)];
     setWorkflows(next);
     const r = await persistAdminKey('workflows', next);
     if (!r.ok) {
@@ -2176,8 +2168,8 @@ export function StoreProvider({ children }) {
     loginModalOpen, setLoginModalOpen, requireLogin, pendingAction, setPendingAction,
     sidebarOpen, setSidebarOpen,
     togglePublished, setPrice, publishedItems,
-    addAgent, updateAgent, deleteAgent, reorderAgent, reorderAgentsByIds,
-    addWorkflow, updateWorkflow, deleteWorkflow, reorderWorkflow, reorderWorkflowsByIds,
+    addAgent, updateAgent, deleteAgent, reorderAgentsByIds,
+    addWorkflow, updateWorkflow, deleteWorkflow, reorderWorkflowsByIds,
     rechargeUserPoints, toggleUserStatus, deleteUser, adminResetUserPassword, updateOrderStatus,
     addComputePackage, updateComputePackage, deleteComputePackage, togglePackagePublished,
     addAdminAccount, updateAdminAccount, deleteAdminAccount, toggleAdminAccountStatus, addLog,

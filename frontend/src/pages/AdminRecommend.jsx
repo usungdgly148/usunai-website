@@ -99,7 +99,7 @@ export default function AdminRecommend() {
 
         <div className="space-y-3">
           {/* 按 sortOrder 排序后渲染，与 AdminAgents 的列表排序策略一致；
-              swapSort 只交换 sortOrder 值，若不排序渲染，按钮看起来会"不生效"。 */}
+              调序用的 reorderBanner 只重写 sortOrder（10 的倍数），若不排序渲染，按钮看起来会"不生效"。 */}
           {[...banners].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)).map((b, i, arr) => (
             <div key={b.id} className="flex items-center gap-4 p-3 rounded-xl border border-slate-200/80 hover:border-slate-300 transition">
               <div className="w-40 rounded-lg overflow-hidden shrink-0 bg-slate-100 relative aspect-[21/9]">

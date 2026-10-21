@@ -1,7 +1,7 @@
 import { useStore } from '../store.jsx';
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Search, Plus, Edit2, ToggleLeft, ToggleRight, Eye, Trash2, ArrowUpDown, ChevronDown, ChevronUp, Mic, Clapperboard, GripVertical } from 'lucide-react';
+import { Search, Plus, Edit2, ToggleLeft, ToggleRight, Eye, Trash2, ArrowUpDown, ChevronDown, ChevronUp, Mic, Clapperboard } from 'lucide-react';
 import { AdminPageHeader, AdminPagination, PrimaryButton, Card, renderIcon } from '../adminUI.jsx';
 
 const TYPE_TABS = [
@@ -121,12 +121,6 @@ export default function AdminAgents() {
   const [newMenu, setNewMenu] = useState(false);
   const [page, setPage] = useState(1);
 
-  // 拖拽状态：仅在「手动排序」模式下启用。dragId = 被拖行 id；overId = 鼠标悬停的目标行 id。
-  const [dragId, setDragId] = useState(null);
-  const [overId, setOverId] = useState(null);
-  // 保存跨渲染最新 list 引用，onDrop 拿到的可能是 stale closure
-  const listRef = useRef([]);
-
   const catName = (id) => {
     const c = sortedCategories.find(c => c.id === id);
     return c ? c.name : '未分类';
@@ -150,7 +144,6 @@ export default function AdminAgents() {
     if (rk !== 0) return rk;
     return (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0);
   });
-  listRef.current = list; // 拖拽 onDrop 闭包内取最新（存整份过滤后的列表，不是当前页）
 
   // 分页：list 为过滤+排序后的全量，pageItems 才是渲染的那 12 条。
   // 筛选条件变化 → 回到第 1 页；删除/过滤导致页数变少 → 页码自动收拢，不会停在空页。
@@ -208,52 +201,9 @@ export default function AdminAgents() {
     else reorderWorkflowsByIds(ids);
   };
 
-  // 拖拽实现：HTML5 native drag & drop。手柄列 + 「手动排序」模式下启用。
-  // 「全部 / 已下架」等混合列表：拖拽后只**单点改被拖元素的 sortOrder**
-  // （newSort = 目标位置 sortOrder − 0.5），下次按 sortOrder 升序排自然到目标位，
-  // agent / workflow 各自的数组不被重排，kind 归属不乱。
-  const draggable = sort === 'order';
-  const handleDragStart = (e, id) => {
-    setDragId(id);
-    e.dataTransfer.effectAllowed = 'move';
-    // Firefox 需要 setData 才能触发拖拽
-    try { e.dataTransfer.setData('text/plain', id); } catch {}
-  };
-  const handleDragOver = (e, id) => {
-    if (!dragId || dragId === id) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    if (overId !== id) setOverId(id);
-  };
-  const handleDrop = (e, targetId) => {
-    e.preventDefault();
-    const sourceId = dragId;
-    setDragId(null);
-    setOverId(null);
-    if (!sourceId || sourceId === targetId) return;
-    const cur = listRef.current;
-    const srcIdx = cur.findIndex(x => x.id === sourceId);
-    const dstIdx = cur.findIndex(x => x.id === targetId);
-    if (srcIdx === -1 || dstIdx === -1) return;
-    // 单类型 tab（agent / workflow）：整列同 kind，按 id 顺序批量重排 agents/workflows
-    if (type === 'agent' || type === 'workflow') {
-      const next = cur.slice();
-      const [moved] = next.splice(srcIdx, 1);
-      next.splice(dstIdx, 0, moved);
-      const orderedIds = next.map(x => x.id);
-      if (type === 'agent') reorderAgentsByIds(orderedIds);
-      else reorderWorkflowsByIds(orderedIds);
-      return;
-    }
-    // 混合 tab（all / off）：仅**单点改被拖元素的 sortOrder** ＝ 目标位置 sortOrder − 0.5。
-    // 下次 list 按 sortOrder 升序排，被拖元素自然落在 target 之前；agent / workflow 各自的数组不被动，kind 归属不变。
-    const target = cur[dstIdx];
-    const newSort = (target?.sortOrder || 0) - 0.5;
-    const moved = cur[srcIdx];
-    if (moved.kind === 'agent') updateAgent(sourceId, { sortOrder: newSort });
-    else updateWorkflow(sourceId, { sortOrder: newSort });
-  };
-  const handleDragEnd = () => { setDragId(null); setOverId(null); };
+  // 「手动排序」模式开关：只有这个模式下每行的 ↑/↓ 才可用。
+  // 2026-10-21：原 HTML5 拖拽调序整套逻辑已按主人要求删除，排序统一走上下箭头。
+  const orderMode = sort === 'order';
 
   return (
     <div className="space-y-6">
@@ -325,8 +275,7 @@ export default function AdminAgents() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-600">
               <tr>
-                <th className="text-left px-2 py-3 font-medium w-8"></th>
-                <th className="text-left px-2 py-3 font-medium w-[68px]">排序</th>
+                <th className="text-left px-4 py-3 font-medium w-[80px]">排序</th>
                 <th className="text-left px-5 py-3 font-medium">项目</th>
                 <th className="text-left px-5 py-3 font-medium">类型</th>
                 <th className="text-left px-5 py-3 font-medium">分类</th>
@@ -338,52 +287,36 @@ export default function AdminAgents() {
             </thead>
             <tbody>
               {pageItems.map(item => {
-                const isDragging = dragId === item.id;
-                const isOver = overId === item.id && dragId && dragId !== item.id;
                 return (
                 <tr key={item.id}
-                  draggable={draggable}
-                  onDragStart={draggable ? (e) => handleDragStart(e, item.id) : undefined}
-                  onDragOver={draggable ? (e) => handleDragOver(e, item.id) : undefined}
-                  onDrop={draggable ? (e) => handleDrop(e, item.id) : undefined}
-                  onDragEnd={draggable ? handleDragEnd : undefined}
-                  onClick={() => { if (!dragId) open(item); }}
-                  className={`border-t border-slate-100 cursor-pointer transition ${isDragging ? 'opacity-40' : ''} ${isOver ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
+                  onClick={() => open(item)}
+                  className="border-t border-slate-100 cursor-pointer transition hover:bg-slate-50"
                 >
-                  <td className="px-2 py-3 text-slate-300">
-                    {draggable ? (
-                      <GripVertical size={16} className="cursor-grab active:cursor-grabbing" />
-                    ) : (
-                      <span title="切换到「手动排序」后可拖动调整顺序" className="inline-block">
-                        <GripVertical size={16} className="text-slate-200" />
-                      </span>
-                    )}
-                  </td>
                   {/* 上/下箭头：仅在「手动排序」下可用；到本类型页首页尾自动置灰。
                       按钮整体 stopPropagation，避免误触行点击进编辑页。 */}
-                  <td className="px-2 py-3" onClick={e => e.stopPropagation()}>
+                  <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                     <div className="flex items-center gap-0.5">
                       {(() => {
                         const upTarget = neighborOf(item, 'up');
                         const downTarget = neighborOf(item, 'down');
-                        const btn = 'p-1 rounded-md transition ' + (draggable
+                        const btn = 'p-1 rounded-md transition ' + (orderMode
                           ? 'text-slate-500 hover:bg-blue-50 hover:text-blue-600'
                           : 'text-slate-200 cursor-not-allowed');
-                        const tip = draggable ? '' : '（请先在右上角切到「手动排序」）';
+                        const tip = orderMode ? '' : '（请先在右上角切到「手动排序」）';
                         return (
                           <>
-                            <button type="button" disabled={!draggable || !upTarget}
+                            <button type="button" disabled={!orderMode || !upTarget}
                               onClick={() => moveByStep(item, 'up')}
                               title={upTarget ? '上移一位' : '已经是本类型的第一条' + tip}
                               aria-label="上移"
-                              className={btn + (draggable && upTarget ? '' : ' opacity-30 cursor-not-allowed hover:bg-transparent hover:text-slate-400')}>
+                              className={btn + (orderMode && upTarget ? '' : ' opacity-30 cursor-not-allowed hover:bg-transparent hover:text-slate-400')}>
                               <ChevronUp size={15} />
                             </button>
-                            <button type="button" disabled={!draggable || !downTarget}
+                            <button type="button" disabled={!orderMode || !downTarget}
                               onClick={() => moveByStep(item, 'down')}
                               title={downTarget ? '下移一位' : '已经是本类型的最后一条' + tip}
                               aria-label="下移"
-                              className={btn + (draggable && downTarget ? '' : ' opacity-30 cursor-not-allowed hover:bg-transparent hover:text-slate-400')}>
+                              className={btn + (orderMode && downTarget ? '' : ' opacity-30 cursor-not-allowed hover:bg-transparent hover:text-slate-400')}>
                               <ChevronDown size={15} />
                             </button>
                           </>

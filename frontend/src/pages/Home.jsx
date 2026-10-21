@@ -175,7 +175,7 @@ export default function Home() {
   const [paused, setPaused] = useState(false);
 
   // 按 sortOrder 排序：与后台「推荐配置」的上下箭头按钮保持一致，否则前台轮播顺序
-  // 不会跟随后台调整（后台 swapSort 只交换 sortOrder 值，不动数组顺序）
+  // 不会跟随后台调整（后台 reorderBanner 只重写 sortOrder，不动数组顺序）
   // ⚠️ 必须放在 useEffect 之前！useEffect deps 是同步求值，访问未声明的 const 会触发 TDZ (Cannot access 'X' before initialization)
   const slides = ((banners && banners.length ? banners : BANNER_SLIDES)
     .filter(b => b.published))

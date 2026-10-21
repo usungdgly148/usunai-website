@@ -67,7 +67,7 @@ const PLATFORMS = [
 
 const blankForm = {
   name: '', desc: '', category: 'short-video', icon: 'Clapperboard', iconColor: 'bg-cyan-600',
-  avatar: '', tags: [], published: false, vip: false, sortOrder: 999,
+  avatar: '', tags: [], published: false, vip: false,
   assetCategory: '',
   tutorialImage: '', tutorialUrl: '', tutorialTitle: '新手使用教程',
   // 工作流专属
@@ -882,10 +882,9 @@ export default function AdminWorkflowEdit({ isNew: isNewProp }) {
             {/* 预览与线上卡片同一套算法（cardGradient.js）：旧写法的 `|| 30` 会把 0° 显示成 30°。 */}
             <div className="h-12 rounded-lg border border-slate-200 mt-2" style={{ background: gradientCss(form, form.gradientFrom, form.gradientTo) }} />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="排序"><input type="number" value={form.sortOrder} onChange={e => set({ sortOrder: Number(e.target.value) })} className={inputCls} /></Field>
-            <Field label="算力点/次"><input type="number" value={form.priceRate} onChange={e => set({ priceRate: Number(e.target.value) })} className={inputCls} /></Field>
-          </div>
+          {/* 2026-10-21：「排序」输入框已按主人要求移除 —— 顺序统一由「项目管理」列表的上下箭头调整，
+              这里不再暴露 sortOrder；编辑保存时仍带原值（来自 existing 展开），不会被清掉。 */}
+          <Field label="算力点/次"><input type="number" value={form.priceRate} onChange={e => set({ priceRate: Number(e.target.value) })} className={inputCls} /></Field>
           <label className="flex items-center justify-between pt-1"><span className="text-sm font-medium text-slate-700">立即上架</span>
             <button type="button" onClick={() => set({ published: !form.published })} className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${form.published ? 'bg-blue-600' : 'bg-slate-200'}`}><span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${form.published ? 'translate-x-4' : 'translate-x-0.5'}`} /></button>
           </label>
