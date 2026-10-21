@@ -1,4 +1,5 @@
-import Taro, { usePullDownRefresh, useShareAppMessage, useShareTimeline } from '@tarojs/taro';
+import { useRef } from 'react';
+import Taro, { useDidShow, usePullDownRefresh, useShareAppMessage, useShareTimeline } from '@tarojs/taro';
 import { Text, View } from '@tarojs/components';
 import { LayoutBlocks } from '../../components/layout-blocks';
 import { PageState } from '../../components/page-state';
@@ -58,6 +59,15 @@ export default function HomePage() {
     }
     return { layout, content, contentError };
   }, []);
+
+  // 2026-10-21：切回小程序前台时静默刷新一次 —— 后台刚上架的智能体/工作流，回来就能看到。
+  // 首次进入由 useLoad 负责，这里跳过（否则首屏白白多拉一次）。
+  // silent 保证不切 loading，用户看到的是内容原地更新，而不是骨架屏闪一下。
+  const shownOnceRef = useRef(false);
+  useDidShow(() => {
+    if (!shownOnceRef.current) { shownOnceRef.current = true; return; }
+    void state.reload({ silent: true });
+  });
 
   usePullDownRefresh(async () => { await state.reload(); Taro.stopPullDownRefresh(); });
 

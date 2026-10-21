@@ -10,7 +10,9 @@ import { shareTargets } from '../../utils/share';
 export default function DetailPage() {
   const { pageStyle } = useThemePage();
   const { params } = useRouter();
-  const state = useLoad(() => getPublicContent(), []);
+  // force=true：详情页展示的就是开场白/点数这类运营随时会改的内容，进入时必须拿最新的，
+  // 不能吃 getPublicContent 的 30s 本地缓存。
+  const state = useLoad(() => getPublicContent(true), []);
   const item = useMemo(() => {
     const list = params.type === 'workflow' ? state.data?.workflows : state.data?.agents;
     return list?.find((entry) => entry.id === params.id);

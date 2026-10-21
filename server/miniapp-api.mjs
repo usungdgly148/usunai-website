@@ -1079,7 +1079,11 @@ export async function handleMiniappApi(req, res, url, deps) {
     // 分享设置单独取：它跟上面那批不一样 —— KV 键名（miniappShareSettings）与
     // 下发字段名（shareSettings）不是同一个字符串，塞不进上面那个「键名即字段名」的表。
     config.shareSettings = await KV.kvGet(SHARE_CONFIG_KV_KEY);
-    sendJson(res, 200, successEnvelope(sanitizePublicContent(config), requestId), requestId, 'public, max-age=30');
+    // 2026-10-21：原来是 'public, max-age=30' —— 后台改完智能体（开场白/点数）后，
+    // 小程序最长要等 30s（这层）+ 客户端 5 分钟本地缓存才更新，实测体验是「怎么改都不生效」。
+    // 改成 no-cache：允许存但每次必须回源验证，配合客户端 30s TTL 控制请求频率。
+    // ⚠️ public 也不能留 —— 它允许共享缓存/CDN 把旧内容再分发一层。
+    sendJson(res, 200, successEnvelope(sanitizePublicContent(config), requestId), requestId, 'no-cache');
     return true;
   }
 

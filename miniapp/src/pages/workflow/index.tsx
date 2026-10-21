@@ -204,7 +204,9 @@ function WorkflowPage() {
   };
 
   useEffect(() => {
-    getPublicContent().then((content) => {
+    // force=true：本页把 workflow 与表单初值快照进本地 state，只在进入时取一次，
+    // 吃 30s 缓存会导致「后台改了点数价格，进来还是旧值」。
+    getPublicContent(true).then((content) => {
       const item = content.workflows.find((entry) => entry.id === params.id);
       if (!item) throw new Error('工作流不存在或未上架');
       setWorkflow(item);

@@ -418,7 +418,10 @@ export async function handleMiniappLayout(req, res, url, { KV, requireAdmin, rea
       return true;
     }
     const result = await resolveMiniappLayout(KV, page);
-    send(res, 200, { ok: true, data: prepareMiniappLayoutForClient(result.layout), meta: { timestamp: new Date().toISOString(), versionId: result.versionId, source: result.source } }, 'public, max-age=30');
+    // 2026-10-21：与 /v1/content 一致，去掉 max-age=30 强缓存。
+    // 后台在小程序设置里改完布局，不该再被 HTTP 缓存多挡 30 秒；
+    // 请求频率由客户端 LAYOUT_TTL（60s）控制，这里不必再拦。
+    send(res, 200, { ok: true, data: prepareMiniappLayoutForClient(result.layout), meta: { timestamp: new Date().toISOString(), versionId: result.versionId, source: result.source } }, 'no-cache');
     return true;
   }
 

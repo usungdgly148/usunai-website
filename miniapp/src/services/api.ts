@@ -12,7 +12,10 @@ const TOKEN_KEY = 'usunai_miniapp_token';
 /** 用户主动退出登录标记（退出后不再静默登录，需点「微信一键登录」才重新进入） */
 const LOGGED_OUT_KEY = 'usunai_miniapp_logged_out';
 const CONTENT_CACHE_KEY = 'usunai_miniapp_content_v2';
-const CONTENT_TTL = 5 * 60 * 1000;
+// 2026-10-21：原来是 5 分钟。后台改完智能体开场白/点数后，小程序要 5 分钟才看得到，
+// 用户以为「改了没生效」。降到 30s：正常浏览仍有缓存收益，运营改完半分钟内就能看到。
+// 详情页/聊天页/工作流页另外走 getPublicContent(true) 强制回源，进入即最新。
+const CONTENT_TTL = 30 * 1000;
 const LAYOUT_TTL = 60 * 1000;
 let loginPromise: Promise<string> | null = null;
 /**

@@ -167,7 +167,9 @@ export default function ChatPage() {
   }, [agentId, sessionId]);
 
   useEffect(() => {
-    getPublicContent().then((content) => {
+    // force=true：本页把 agent 快照进本地 state，只在进入时取一次。
+    // 吃 30s 缓存会出现「后台改了开场白，进来还是旧的」，所以必须回源。
+    getPublicContent(true).then((content) => {
       const item = content.agents.find((entry) => entry.id === agentId);
       if (!item) throw new Error('智能体不存在或未上架');
       setAgent(item);
