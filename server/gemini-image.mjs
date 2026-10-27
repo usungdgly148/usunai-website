@@ -16,6 +16,7 @@
 //    绝不能把上游 URL 直接交给前端。
 
 import https from 'https';
+import crypto from 'crypto';
 
 export const IMAGE_MODEL_DEFAULT = 'gemini-nano-banana-2.1';
 
@@ -69,26 +70,39 @@ export const IMAGE_MODEL_CANDIDATES = [
 // ===== 两套上游接口风格（同一个中转站、同一把 Key，但端点与请求体完全不同）=====
 // A. gemini-native（默认）：POST {root}/v1beta/models/{model}:generateContent
 //    contents[].parts[] + generationConfig.imageConfig.aspectRatio / imageSize；**支持参考图**（inlineData）。
-// B. openai-images（gpt-image-* 系列）：POST {root}/v1/images/generations
+// B. openai-images（gpt-image-* 系列）：/v1/images/generations（文生图）+ /v1/images/edits（图生图）
 //    文档：https://easy88ai.com/doc/docs/gpt-image-25-flare-create.html（2026-10-17 抓取）
-//    body = { model, prompt, n, size:'1024x1024', quality, output_format, background, output_compression }
-//    响应 = { created, data:[{ b64_json | url, revised_prompt }], size, quality, output_format, usage }
-//    ⚠️ 这套是「创建」接口，**没有参考图入口** —— 参考图走的是另一条 /v1/images/edits（multipart），
-//       文档里只有 gpt-image-2 的 edit 页、没有 flare 的 ⇒ 本模块对 openai-images **明确拒绝参考图**，
-//       绝不允许「用户传了图却被静默忽略还照样扣点」。
+//    generations 的 body = { model, prompt, n, size:'1024x1024', quality, output_format, background, output_compression }
+//    两套响应同形 = { created, data:[{ b64_json | url, revised_prompt }], size, quality, output_format, usage }
 //    ⚠️ 分辨率在这套里是 `size`（"宽x高"字符串），不是 1K/2K/4K 枚举 ⇒ 见 OPENAI_IMAGE_SIZES 换算表。
+//    ⚠️ 这套有**两个**端点，按有没有参考图分流（2026-10-27 实测确定）：
+//        · 无参考图（文生图）→ POST {root}/v1/images/generations（JSON）—— buildOpenAIImagePayload()
+//        · 有参考图（图生图）→ POST {root}/v1/images/edits（multipart/form-data）—— buildOpenAIImageEditBody()
+//        **绝不能把参考图塞进 /generations**：实测 `image_urls` 与 `images[].image_url` 两种写法都回
+//        HTTP 200 但 `usage.input_tokens_details.image_tokens = 0`（= 上游**静默忽略**参考图），
+//        用户会「扣了点、拿到一张跟参考图无关的图」。只有 /edits 的 image_tokens 才 >0（1 张 1024、2 张 2048）。
+//        这个判据（image_tokens）也是以后排查「参考图到底生效没」的唯一可靠信号。
 export const IMAGE_API_STYLE_GEMINI = 'gemini-native';
 export const IMAGE_API_STYLE_OPENAI = 'openai-images';
 
-/** 判断模型走哪套接口。gpt-image-* 走 OpenAI 兼容的 /v1/images/generations，其余走 Gemini 原生。 */
+/** 判断模型走哪套接口。gpt-image-* 走 OpenAI 兼容 images 接口（generations / edits），其余走 Gemini 原生。 */
 export function imageApiStyle(model) {
   const id = String(model || '').trim().toLowerCase();
   return /^gpt-image/.test(id) ? IMAGE_API_STYLE_OPENAI : IMAGE_API_STYLE_GEMINI;
 }
 
-/** 该模型能否吃参考图（只有 Gemini 原生通道实测支持 inlineData）。 */
+/**
+ * 该模型能否吃参考图（图生图）。
+ * **两套通道都支持，只是实现方式不同**：
+ *   · Gemini 原生 → parts[].inlineData（同一个 :generateContent 端点）；
+ *   · gpt-image-*  → 换一条端点 POST /v1/images/edits（multipart），见 buildOpenAIImageEditBody()。
+ * ⚠️ 历史坑（2026-10-27 已修正）：这里原本只对 Gemini 返回 true，理由写的是「OpenAI 创建接口没有
+ *    参考图入口」——那只说明**不该用 /generations**，不等于模型不支持。实测 /edits 完全可用
+ *    （image_tokens 1 张 1024 / 2 张 2048），旧逻辑等于把一个能用的能力对用户藏了。
+ */
 export function imageModelSupportsRefs(model) {
-  return imageApiStyle(model) === IMAGE_API_STYLE_GEMINI;
+  const style = imageApiStyle(model);
+  return style === IMAGE_API_STYLE_GEMINI || style === IMAGE_API_STYLE_OPENAI;
 }
 
 // OpenAI images 的 size 换算表：档位 × 比例 → "宽x高"。
@@ -178,13 +192,18 @@ export function resolveGeminiRoot(baseUrl) {
   return { hostname: parsed.hostname, port: Number(parsed.port) || 443, root };
 }
 
-/** 拼出目标接口的完整信息（hostname / port / path）。两套风格分别对应不同路径。 */
-export function imageEndpoint(baseUrl, model) {
+/**
+ * 拼出目标接口的完整信息（hostname / port / path）。
+ * `edit=true` 只对 openai-images 有意义：带参考图必须走 /v1/images/edits，
+ * 走 /generations 会被上游静默忽略参考图（见文件中部两套风格说明）。
+ */
+export function imageEndpoint(baseUrl, model, { edit = false } = {}) {
   const name = String(model || '').trim() || IMAGE_MODEL_DEFAULT;
   const { hostname, port, root } = resolveGeminiRoot(baseUrl);
   if (imageApiStyle(name) === IMAGE_API_STYLE_OPENAI) {
-    // OpenAI 兼容：{root}/v1/images/generations（root 已剥掉末尾的 /v1，不会拼成 /v1/v1）
-    return { hostname, port, model: name, path: `${root}/v1/images/generations`, style: IMAGE_API_STYLE_OPENAI };
+    // OpenAI 兼容：{root}/v1/images/{generations|edits}（root 已剥掉末尾的 /v1，不会拼成 /v1/v1）
+    const leaf = edit ? 'edits' : 'generations';
+    return { hostname, port, model: name, path: `${root}/v1/images/${leaf}`, style: IMAGE_API_STYLE_OPENAI };
   }
   return { hostname, port, model: name, path: `${root}/v1beta/models/${name}:generateContent`, style: IMAGE_API_STYLE_GEMINI };
 }
@@ -262,9 +281,11 @@ export function buildImagePayload({ prompt, aspectRatio, resolution, images } = 
 }
 
 /**
- * 构造 OpenAI 风格（gpt-image-*）的请求体。
+ * 构造 OpenAI 风格（gpt-image-*）**文生图**（/v1/images/generations）的请求体。
  * 与 Gemini 的差别：分辨率用 `size`（"1024x1024"），质量用 `quality`，没有 contents/parts。
- * ⚠️ 该接口没有参考图入口 —— 传了图必须报错，不能静默忽略（否则是「扣了钱没照图改」的坑）。
+ * ⚠️ 这个函数**只管无参考图的场景**。带参考图必须改用 buildOpenAIImageEditBody()（走 /edits），
+ *    因为 /generations 会静默忽略参考图（实测 image_tokens = 0）。这里保留硬报错是**开发者护栏**：
+ *    万一调用方分流走错，宁可当场 500 也不要「扣了点却给了张无关的图」。
  */
 export function buildOpenAIImagePayload({ prompt, aspectRatio, resolution, images, model } = {}) {
   const text = String(prompt == null ? '' : prompt).trim();
@@ -272,8 +293,8 @@ export function buildOpenAIImagePayload({ prompt, aspectRatio, resolution, image
   const refs = prepareReferenceImages(images);
   if (refs.length) {
     throw Object.assign(
-      new Error('该模型不支持参考图（图生图），请去掉参考图或换用 Gemini 系列模型'),
-      { code: 'IMAGE_REF_UNSUPPORTED', status: 400 },
+      new Error('内部错误：带参考图必须走 /v1/images/edits（buildOpenAIImageEditBody），不能走 /generations'),
+      { code: 'IMAGE_REF_ROUTE_REQUIRED', status: 500 },
     );
   }
   const payload = {
@@ -286,6 +307,49 @@ export function buildOpenAIImagePayload({ prompt, aspectRatio, resolution, image
   const size = openAIImageSize(aspectRatio, resolution);
   if (size) payload.size = size;
   return payload;
+}
+
+/**
+ * 构造 OpenAI 风格（gpt-image-*）**图生图**（POST /v1/images/edits）的 multipart/form-data 请求体。
+ * 返回 `{ body: Buffer, contentType }`，交给 requestGeminiImage({ body, contentType, edit:true }) 直接发。
+ *
+ * 为什么自己拼 multipart 而不是用 FormData：本模块走原生 https.request（要自己控超时/响应体上限/
+ * 错误翻译），FormData 只能配 fetch；且手拼可以精确控制 Buffer 拼接、不用把 base64 再解码进 Blob。
+ *
+ * 实测（2026-10-27，gpt-image-2.5-flare，判据 usage.input_tokens_details.image_tokens）：
+ *   · 单张图，字段名 `image`            → HTTP 200 / 49.2s / image_tokens **1024** ✅
+ *   · 两张图，字段名 `image[]` 重复两次 → HTTP 200 / 39.6s / image_tokens **2048** ✅（两张都被读到）
+ *   · 带 `quality:'high'`              → HTTP 200，字段被接受 ✅
+ *     （注：响应回显的 `quality` 固定是 "low"，与请求无关 —— **不要拿它判断质量档是否生效**）
+ * ⚠️ 字段名必须按张数切换：单张 `image`、多张 `image[]`。OpenAI 官方多图约定是 `image[]`，
+ *    单张用 `image` 是本次实测确认可用的写法；两者混用（多张都用 `image`）未验过，不要改。
+ */
+export function buildOpenAIImageEditBody({ prompt, aspectRatio, resolution, images, model } = {}) {
+  const text = String(prompt == null ? '' : prompt).trim();
+  if (!text) throw new Error('请填写画面描述');
+  const refs = prepareReferenceImages(images);
+  if (!refs.length) throw new Error('内部错误：/v1/images/edits 需要至少一张参考图');
+  const boundary = `----usunImageEdit${crypto.randomBytes(12).toString('hex')}`;
+  const push = (chunks, value) => chunks.push(Buffer.from(value, 'utf8'));
+  const field = (chunks, name, value) => push(chunks, `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`);
+  const chunks = [];
+  field(chunks, 'model', String(model || '').trim() || IMAGE_MODEL_DEFAULT);
+  field(chunks, 'prompt', text);
+  field(chunks, 'n', '1');
+  const size = openAIImageSize(aspectRatio, resolution);
+  if (size) field(chunks, 'size', size);
+  field(chunks, 'quality', OPENAI_IMAGE_QUALITY);
+  // 文件名后缀必须跟真实 MIME 一致：上游会按扩展名/内容双重校验，写错直接 400 Invalid image data。
+  const extOf = (mime) => (/png/i.test(mime) ? 'png' : /webp/i.test(mime) ? 'webp' : 'jpg');
+  const partName = refs.length > 1 ? 'image[]' : 'image';
+  refs.forEach((ref, index) => {
+    const ext = extOf(ref.mimeType);
+    push(chunks, `--${boundary}\r\nContent-Disposition: form-data; name="${partName}"; filename="ref-${index + 1}.${ext}"\r\nContent-Type: ${ref.mimeType}\r\n\r\n`);
+    chunks.push(Buffer.from(ref.data, 'base64'));
+    push(chunks, '\r\n');
+  });
+  push(chunks, `--${boundary}--\r\n`);
+  return { body: Buffer.concat(chunks), contentType: `multipart/form-data; boundary=${boundary}` };
 }
 
 /**
@@ -340,6 +404,15 @@ export function extractImageResult(json) {
 /** 把上游 HTTP 错误翻译成给人看的中文，并给出机器可读 code。 */
 export function describeUpstreamError(statusCode, bodyText) {
   const detail = String(bodyText || '').trim().slice(0, 300).replace(/\s+/g, ' ');
+  // 403/402 有两种完全不同的成因，必须先按正文区分，否则会误导排查方向：
+  //   ① 令牌没有该模型权限 → 换分组；
+  //   ② **账户余额/额度不足** → 充值。实测（2026-10-27）余额耗尽时上游回的是
+  //      403 + `预扣费额度失败, 用户剩余额度: ＄0.026686, 需要预扣费额度: ＄0.031650`，
+  //      若按 ① 报「授权无效」，会让人去反复改 Key（完全无效的方向）。
+  const quotaHit = /预扣费|额度不足|余额不足|quota|insufficient[_\s-]?quota|exceeded your current quota|billing/i.test(detail);
+  if (quotaHit) {
+    return { code: 'IMAGE_QUOTA_EXHAUSTED', status: 503, message: `生图通道余额不足，请联系管理员给中转站充值后再试${detail ? '（上游：' + detail + '）' : ''}` };
+  }
   if (statusCode === 401 || statusCode === 403) {
     return { code: 'IMAGE_AUTH_INVALID', status: 502, message: '图片模型授权无效或该令牌没有图片模型权限，请到「AI 授权管理」检查 usun-img 凭证的分组' };
   }
@@ -366,11 +439,15 @@ export function describeUpstreamError(statusCode, bodyText) {
 
 /**
  * 调上游生成图片。成功返回解析后的 JSON；失败抛错（error.code / error.status / error.message）。
+ * 两种请求体形态：
+ *   · 传 payload（普通对象）→ JSON.stringify 发出，Content-Type: application/json（文生图 / Gemini 原生）；
+ *   · 传 body（Buffer）+ contentType + edit:true → 原样发出（gpt-image-* 图生图的 multipart）。
  * ⚠️ 响应体默认上限给 8MB（实测仅 ~537 字节），这与对话通道的 1MB 默认值不同 —— 不要照抄。
  */
-export function requestGeminiImage({ baseUrl, apiKey, payload, model, timeoutMs = IMAGE_TIMEOUT_MS }) {
-  const target = imageEndpoint(baseUrl, model);
-  const body = JSON.stringify(payload);
+export function requestGeminiImage({ baseUrl, apiKey, payload, body: rawBody, contentType, edit = false, model, timeoutMs = IMAGE_TIMEOUT_MS }) {
+  const target = imageEndpoint(baseUrl, model, { edit });
+  const body = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(JSON.stringify(payload == null ? {} : payload), 'utf8');
+  const type = contentType || 'application/json';
   // 响应体上限分两条：Gemini 原生只回一个 CDN 链接（实测 ~537 字节），8MB 足够；
   // OpenAI images 把整张图 base64 塞在 data[0].b64_json 里（4K PNG 18.5MB → base64 约 25MB），
   // 沿用 8MB 会被误杀成「响应体过大」⇒ 这条给 48MB。
@@ -383,10 +460,11 @@ export function requestGeminiImage({ baseUrl, apiKey, payload, model, timeoutMs 
       method: 'POST',
       timeout: timeoutMs,
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': type,
         Authorization: `Bearer ${apiKey}`,
         Accept: 'application/json',
-        'Content-Length': Buffer.byteLength(body),
+        // Buffer 有 .length；用 length 而不是 byteLength，避免「已编码好的 body 被再算一次」的歧义。
+        'Content-Length': body.length,
       },
     }, (response) => {
       const chunks = [];

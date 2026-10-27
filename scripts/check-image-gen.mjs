@@ -18,6 +18,7 @@ import {
   OPENAI_IMAGE_SIZES,
   aspectRatiosForModel,
   buildImagePayload,
+  buildOpenAIImageEditBody,
   buildOpenAIImagePayload,
   extractOpenAIImageResult,
   imageApiStyle,
@@ -145,7 +146,7 @@ check('后台路由透传参考图', adminRoute.includes('images: body.images'))
 check('后台路由不扣算力（无计费调用）', !adminRoute.includes('kvRecordNativeUsage'));
 
 const configStart = serverSrc.indexOf("if (p === '/api/image-gen/config' && req.method === 'GET')");
-const configRoute = configStart >= 0 ? serverSrc.slice(configStart, configStart + 1600) : '';
+const configRoute = configStart >= 0 ? serverSrc.slice(configStart, configStart + 3200) : '';
 check('配置下发路由存在', configStart > 0);
 check('配置路由下发价格', configRoute.includes('pricePoints: settings.pricePoints'));
 check('配置路由下发张数上限', configRoute.includes('maxRefImages: IMAGE_MAX_REF_IMAGES'));
@@ -266,13 +267,15 @@ check('已删「描述画面即可生成…」', !userPageSrc.includes('描述�
 check('已删「清晰度越高越慢…」', !userPageSrc.includes('清晰度越高越慢'));
 check('用户页关闭参考图说明（不带到页面）', userPageSrc.includes('showHint={false}'));
 
-// ===== 13. gpt-image-* 走 OpenAI 兼容 /v1/images/generations（2026-10-17 接入）=====
-// 两套风格必须互不干扰：gemini-* 走 :generateContent（imageConfig + inlineData），
-// gpt-image-* 走 /v1/images/generations（size + quality，无参考图入口）。
+// ===== 13. gpt-image-* 走 OpenAI 兼容 images 接口（2026-10-17 接入，2026-10-27 补齐图生图）=====
+// 两套风格必须互不干扰：gemini-* 走 :generateContent（imageConfig + inlineData）；
+// gpt-image-* 按**有没有参考图**分流：无图 → /v1/images/generations（JSON），
+// 有图 → /v1/images/edits（multipart）。带图走 generations 会被上游静默忽略（image_tokens=0）。
 check('gpt-image-* 判为 openai-images', imageApiStyle('gpt-image-2.5-flare') === 'openai-images');
 check('gemini-* 判为 gemini-native', imageApiStyle('gemini-nano-banana-2.1') === 'gemini-native');
 check('空模型名退化为 gemini-native', imageApiStyle('') === 'gemini-native');
-check('gpt-image-* 不吃参考图', imageModelSupportsRefs('gpt-image-2.5-flare') === false);
+check('gpt-image-* 支持参考图（走 /images/edits）', imageModelSupportsRefs('gpt-image-2.5-flare') === true);
+check('gpt-image sunburst 也支持参考图', imageModelSupportsRefs('gpt-image-2.5-sunburst') === true);
 check('gemini 吃参考图', imageModelSupportsRefs('gemini-nano-banana-2.1') === true);
 
 const epFlare = imageEndpoint('https://api.easy88ai.com/v1', 'gpt-image-2.5-flare');
@@ -283,6 +286,13 @@ const epGemini = imageEndpoint('https://api.easy88ai.com/v1', 'gemini-nano-banan
 check('gemini 端点保持不变', epGemini.path === '/v1beta/models/gemini-nano-banana-2.1:generateContent', epGemini.path);
 const epProxy = imageEndpoint('https://api.easy88ai.com/proxy/v1', 'gpt-image-2.5-flare');
 check('带子路径的 Base URL 只剥末尾 /v1', epProxy.path === '/proxy/v1/images/generations', epProxy.path);
+// 图生图必须换端点：/generations 会静默忽略参考图（实测 image_tokens=0）
+const epEdit = imageEndpoint('https://api.easy88ai.com/v1', 'gpt-image-2.5-flare', { edit: true });
+check('带参考图时端点切到 /v1/images/edits', epEdit.path === '/v1/images/edits', epEdit.path);
+const epEditProxy = imageEndpoint('https://api.easy88ai.com/proxy/v1', 'gpt-image-2.5-flare', { edit: true });
+check('子路径 + 图生图也正确', epEditProxy.path === '/proxy/v1/images/edits', epEditProxy.path);
+const epGeminiEdit = imageEndpoint('https://api.easy88ai.com/v1', 'gemini-nano-banana-2.1', { edit: true });
+check('gemini 不受 edit 标记影响', epGeminiEdit.path === '/v1beta/models/gemini-nano-banana-2.1:generateContent', epGeminiEdit.path);
 
 // size 换算表必须满足文档硬约束：两边都是 16 的倍数、单边 ≤3840、长宽比 ≤3:1、总像素 655,360~8,294,400
 const sizeViolations = [];
@@ -317,11 +327,36 @@ check('flare payload 带 quality', flarePayload.quality === 'high', String(flare
 check('flare payload 带 output_format=png', flarePayload.output_format === 'png');
 check('flare payload size 按档位换算', flarePayload.size === '2048x1152', String(flarePayload.size));
 check('flare payload 没有 Gemini 的 contents 字段', !('contents' in flarePayload));
+// 带参考图却走 /generations 必须当场报错（开发者护栏：宁可 500 也不能「扣了点给张无关图」）
 expectThrow(
-  'flare 传参考图必须报错（不能静默忽略）',
+  'flare 走 /generations 却带参考图必须报错',
   () => buildOpenAIImagePayload({ prompt: '猫', model: 'gpt-image-2.5-flare', images: one }),
-  'IMAGE_REF_UNSUPPORTED',
+  'IMAGE_REF_ROUTE_REQUIRED',
 );
+
+// /v1/images/edits 的 multipart 契约
+// 实测（2026-10-27）：字段名按张数区分 —— 单张 `image`、多张 `image[]`；两者都验过 image_tokens>0。
+const editForm = buildOpenAIImageEditBody({ prompt: '  改成蓝色  ', aspectRatio: '1:1', resolution: '1K', model: 'gpt-image-2.5-flare', images: one });
+const editBoundary = /boundary=(\S+)$/.exec(editForm.contentType)[1];
+const editText = editForm.body.toString('latin1');
+check('multipart Content-Type 带 boundary', /^multipart\/form-data; boundary=/.test(editForm.contentType), editForm.contentType);
+check('multipart 以 boundary 开头', editText.startsWith(`--${editBoundary}\r\n`));
+check('multipart 以 --boundary-- 收尾', editText.trimEnd().endsWith(`--${editBoundary}--`));
+check('multipart 带 model 字段', editText.includes('name="model"\r\n\r\ngpt-image-2.5-flare'));
+// 中文必须按 UTF-8 字节比对：body 是二进制，转 latin1 后中文会被拆成双字节，字面量比不出来
+check('multipart prompt 已去空白', editForm.body.includes(Buffer.from('name="prompt"\r\n\r\n改成蓝色', 'utf8')));
+check('multipart n 固定 1', editText.includes('name="n"\r\n\r\n1'));
+check('multipart size 按档位换算', editText.includes('name="size"\r\n\r\n1024x1024'));
+check('multipart 带 quality', editText.includes('name="quality"\r\n\r\nhigh'));
+check('单张参考图字段名为 image', editText.includes('name="image"; filename="ref-1.jpg"'));
+check('参考图字节原样嵌入', editForm.body.includes(Buffer.from(tiny, 'base64')));
+check('参考图 part 带正确 Content-Type', editText.includes('Content-Type: image/jpeg'));
+const editMulti = buildOpenAIImageEditBody({ prompt: '合成', model: 'gpt-image-2.5-sunburst', aspectRatio: '16:9', resolution: '2K', images: [...one, ...one] });
+const editMultiText = editMulti.body.toString('latin1');
+check('多张参考图字段名为 image[]（重复）', (editMultiText.match(/"image\[\]"/g) || []).length === 2, String((editMultiText.match(/"image\[\]"/g) || []).length));
+check('多张时不再出现单数 image 字段', !editMultiText.includes('name="image";'));
+check('多张 size 也按档位换算', editMultiText.includes('name="size"\r\n\r\n2048x1152'));
+expectThrow('edits 缺参考图要报错', () => buildOpenAIImageEditBody({ prompt: 'x', model: 'gpt-image-2.5-flare', images: [] }));
 
 const openaiB64 = extractOpenAIImageResult({ data: [{ b64_json: tiny }] });
 check('flare 响应 b64_json 可解析', openaiB64.ok && openaiB64.inline.base64 === tiny);
@@ -333,6 +368,9 @@ check('flare 响应带 error 时透出原因', String(extractOpenAIImageResult({
 // 接线断言：服务端按风格分流、参考图在扣费前就被拒、前端按模型能力隐藏上传区
 check('服务端按风格构造 payload', serverSrc.includes('buildOpenAIImagePayload({ prompt, aspectRatio, resolution, images: refs, model })'));
 check('服务端按风格解析响应', serverSrc.includes('extractOpenAIImageResult(json)'));
+check('服务端有图时构造 multipart（edits）', serverSrc.includes('buildOpenAIImageEditBody({ prompt, aspectRatio, resolution, images: refs, model })'));
+check('multipart 请求带 contentType 与 edit 标记', serverSrc.includes('contentType: form.contentType') && serverSrc.includes('edit: true'));
+check('请求层支持已编码 body', read('server/gemini-image.mjs').includes('body: rawBody') && read('server/gemini-image.mjs').includes("'Content-Type': type"));
 check('用户路由在扣费前拒绝不支持的参考图', (() => {
   // 必须只在**用户生图路由**里判断先后：别的路由（对话计费）也会出现 kvRecordNativeUsage
   const routeAt = serverSrc.indexOf("if (p === '/api/image-gen' && req.method === 'POST')");

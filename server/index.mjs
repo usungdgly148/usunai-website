@@ -56,6 +56,7 @@ import {
   IMAGE_RESOLUTIONS,
   aspectRatiosForModel,
   buildImagePayload,
+  buildOpenAIImageEditBody,
   buildOpenAIImagePayload,
   downloadImage,
   extractImageResult,
@@ -1365,13 +1366,23 @@ async function generateAndStoreImage({ provider, prompt, aspectRatio, resolution
   // images 是前端传来的参考图（可空）。校验在 buildImagePayload → prepareReferenceImages 里做，
   // 但用户侧路由会**先校验再预扣**，避免「参数不合法还先扣钱再退钱」。
   const refs = prepareReferenceImages(images);
-  // 两套上游风格：gpt-image-* 走 OpenAI 兼容 /v1/images/generations（size/quality，无参考图入口），
-  // 其余走 Gemini 原生 :generateContent（imageConfig，支持 inlineData 参考图）。
+  // 三路分流（2026-10-27 实测确定，判据是上游响应的 image_tokens）：
+  //   · gemini 原生               → :generateContent + parts[].inlineData（参考图塞 parts）
+  //   · gpt-image-* 且**有**参考图 → /v1/images/edits + multipart（唯一会让上游真读参考图的路径）
+  //   · gpt-image-* 且**无**参考图 → /v1/images/generations + JSON
+  // ⚠️ 带参考图时绝不能走 /generations：实测 image_urls / images[].image_url 都回 200 但
+  //    image_tokens=0，等于「扣了点、给了张跟参考图无关的图」。
   const openaiStyle = imageApiStyle(model) === IMAGE_API_STYLE_OPENAI;
-  const payload = openaiStyle
-    ? buildOpenAIImagePayload({ prompt, aspectRatio, resolution, images: refs, model })
-    : buildImagePayload({ prompt, aspectRatio, resolution, images: refs });
-  const json = await requestGeminiImage({ baseUrl: provider.baseUrl, apiKey: provider.apiKey, payload, model });
+  let request;
+  if (!openaiStyle) {
+    request = { payload: buildImagePayload({ prompt, aspectRatio, resolution, images: refs }) };
+  } else if (refs.length) {
+    const form = buildOpenAIImageEditBody({ prompt, aspectRatio, resolution, images: refs, model });
+    request = { body: form.body, contentType: form.contentType, edit: true };
+  } else {
+    request = { payload: buildOpenAIImagePayload({ prompt, aspectRatio, resolution, images: refs, model }) };
+  }
+  const json = await requestGeminiImage({ baseUrl: provider.baseUrl, apiKey: provider.apiKey, model, ...request });
   const extracted = openaiStyle ? extractOpenAIImageResult(json) : extractImageResult(json);
   if (!extracted.ok) {
     const detail = extracted.blockReason
@@ -2875,7 +2886,7 @@ const server = http.createServer(async (req, res) => {
           .map((item) => ({
             id: item.id,
             label: item.label || item.id,
-            // 前端据此决定要不要显示参考图上传（gpt-image-* 的「创建」接口没有参考图入口）
+            // 前端据此决定要不要显示参考图上传（两套通道都支持，只是实现方式不同：inlineData / /images/edits）
             supportsRefs: imageModelSupportsRefs(item.id),
             // 该模型真正支持的宽高比（gemini 系 10 个 / gpt-image 系 5 个）。
             // 前端必须按这个渲染，否则会出现「选了比例却被服务端回落到 1:1」。
@@ -3052,11 +3063,12 @@ const server = http.createServer(async (req, res) => {
         }
         const model = selection.model;
         const resolution = selection.resolution;
-        // 参考图能力按模型区分：gpt-image-*（OpenAI 创建接口）没有参考图入口，必须**扣费前**拒绝，
-        // 否则就是「收了钱却忽略用户上传的图」。前端也据此隐藏上传区，这里是硬边界。
+        // 参考图能力按模型区分，必须在**扣费前**校验（否则就是「收了钱却忽略了用户上传的图」）。
+        // 当前两套通道都支持参考图（gemini 走 inlineData，gpt-image-* 走 /v1/images/edits），
+        // 这个判断保留为**硬边界**：将来接入不吃参考图的模型时它会自动拦住，前端也据此隐藏上传区。
         if (refImages.length && !imageModelSupportsRefs(model)) {
           throw Object.assign(
-            new Error('该模型不支持参考图（图生图），请去掉参考图或换用 Gemini 系列模型'),
+            new Error('该模型不支持参考图（图生图），请去掉参考图或换用其它模型'),
             { code: 'IMAGE_REF_UNSUPPORTED', status: 400 },
           );
         }
