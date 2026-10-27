@@ -153,10 +153,13 @@ check('输入卡已加宽（max-w-3xl → max-w-5xl）',
   /ig-card mx-auto max-w-5xl rounded-\[26px\]/.test(pageSrc) && !pageSrc.includes('max-w-3xl'));
 check('已移除左下角「图片生成」胶囊', !pageSrc.includes('label="图片生成"'));
 check('已移除余额点数显示', !pageSrc.includes('{points} 点') && !pageSrc.includes('Coins size={12}'));
-check('输入框高度自适应（8 行封顶）',
-  pageSrc.includes('const MAX_PROMPT_ROWS = 8')
+check('输入框高度自适应（下限 4 行 / 封顶 8 行）',
+  pageSrc.includes('const MIN_PROMPT_ROWS = 4')
+  && pageSrc.includes('const MAX_PROMPT_ROWS = 8')
+  && pageSrc.includes('lineHeight * MIN_PROMPT_ROWS + paddingY')
   && pageSrc.includes("el.style.height = 'auto'")
   && pageSrc.includes("el.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden'"));
+check('已移除标题下的副标题', !pageSrc.includes('描述需求、上传参考图'));
 check('自适应高度从 computedStyle 取行高（不写死 28px）',
   pageSrc.includes('parseFloat(style.lineHeight)') && pageSrc.includes('parseFloat(style.paddingTop)'));
 check('窗口尺寸变化会重算高度', pageSrc.includes("window.addEventListener('resize', sync)"));

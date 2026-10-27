@@ -27,10 +27,13 @@ const ASPECT_LABELS = {
 };
 const aspectLabel = (value) => ASPECT_LABELS[value] || { label: '自定义', hint: value };
 
-// 输入框高度自适应：内容多高就多高，**最多 8 行文字**，超过就内部滚动。
+// 输入框高度自适应：内容多高就多高，但**不低于 4 行、最多 8 行**（超过就内部滚动）。
+// 下限 4 行是主人 2026-10-28 定的：空输入时留一块能一眼看出"这里可以写很多"的空白，
+// 只有 1 行会显得这张卡太扁、也太像普通搜索框。
 // 为什么用 JS 量而不是 CSS：`field-sizing: content` 只有 Chrome 123+ 支持，
 // 而这是主打页面，不能赌浏览器。行高与上下 padding 都从 computedStyle 现算，
 // 改字号/内边距时这里不用跟着改数字。
+const MIN_PROMPT_ROWS = 4;
 const MAX_PROMPT_ROWS = 8;
 // 可选模型 / 分辨率 / 点数 / 比例全部由服务端下发（后台改 KV 即生效），前端不硬编码任何点数。
 
@@ -202,7 +205,7 @@ export default function ImageGen() {
     return () => clearInterval(timer);
   }, [busy]);
 
-  // 输入框高度跟随内容，封顶 8 行（MAX_PROMPT_ROWS）。
+  // 输入框高度跟随内容，下限 4 行、封顶 8 行（MIN/MAX_PROMPT_ROWS）。
   //
   // 三个细节，都是踩过才知道的：
   //  1. 必须先把 height 置 auto 再读 scrollHeight —— 否则读到的是上一次的固定高度，只涨不落。
@@ -215,7 +218,7 @@ export default function ImageGen() {
       const style = window.getComputedStyle(el);
       const lineHeight = parseFloat(style.lineHeight) || 28;
       const paddingY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
-      const minHeight = lineHeight + paddingY;
+      const minHeight = lineHeight * MIN_PROMPT_ROWS + paddingY;
       const maxHeight = lineHeight * MAX_PROMPT_ROWS + paddingY;
       el.style.height = 'auto';
       const contentHeight = el.scrollHeight || minHeight;
@@ -366,7 +369,6 @@ export default function ImageGen() {
         <h1 className="text-[26px] font-extrabold leading-tight tracking-tight text-slate-900 sm:text-[38px]">
           你的设计 <span className="text-brand-600">Agent</span>，开始创作
         </h1>
-        <p className="mt-2 text-[13px] text-slate-400">描述需求、上传参考图，选好模型与比例，剩下的交给它</p>
       </div>
 
       {!user && (
