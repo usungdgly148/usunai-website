@@ -383,8 +383,10 @@ check('用户路由在扣费前拒绝不支持的参考图', (() => {
 check('config 下发 supportsRefs', serverSrc.includes('supportsRefs: imageModelSupportsRefs(item.id)'));
 check('后台 settings 下发带 supportsRefs 的副本', serverSrc.includes('withRefSupport(settings)'));
 check('大响应体上限按风格放大（b64 图不能按 8MB 判）', serverSrc.includes('withRefSupport') && read('server/gemini-image.mjs').includes('48 * 1024 * 1024'));
-check('用户页按 supportsRefs 隐藏参考图', userPageSrc.includes('refsSupported') && userPageSrc.includes('{refsSupported &&'));
-check('用户页换到不吃图的模型会清空已选参考图', userPageSrc.includes('if (entry && entry.supportsRefs === false) setRefs([])'));
+// 2026-10-28 用户页改版（大输入卡 + 胶囊工具条）后，参考图区变成"点开才显示"：
+// 判据从「{refsSupported &&」改为「refsOpen && refsSupported」，语义不变（能力=服务端说了算）。
+check('用户页按 refsSupported 决定是否显示参考图区', userPageSrc.includes('refsOpen && refsSupported'));
+check('用户页换到不吃图的模型会清空已选参考图', userPageSrc.includes('entry.supportsRefs === false') && userPageSrc.includes('setRefs([])'));
 check('后台页按 caps 隐藏参考图', adminPageSrc.includes('caps[model] !== false'));
 
 // ===== 14. 「加入资产库」按钮（用户页生成结果区）=====

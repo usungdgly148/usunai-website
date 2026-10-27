@@ -1,9 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Wand2, Download, FolderPlus, Check, Image as ImageIcon, AlertCircle, Coins, Loader2 } from 'lucide-react';
+import {
+  AlertCircle, ArrowUp, Check, ChevronDown, Coins, Crop, Download, FolderPlus,
+  Image as ImageIcon, ImagePlus, Loader2, Monitor, Sparkles, Wand2, X,
+} from 'lucide-react';
 import { useStore } from '../store.jsx';
 import { apiFetch } from '../authFetch.js';
 import RefImagePicker, { MAX_REF_IMAGES, toApiImages } from '../RefImagePicker.jsx';
+import InspirationPlaza from '../InspirationPlaza.jsx';
+import { PUBLISH_CATEGORIES, categoryLabel } from '../inspirationCategories.js';
 
 // 比例**文案**表。可用哪些比例由服务端按模型下发（`models[].aspectRatios`），
 // 前端不再自己维护一份「有哪些比例」的清单 —— 那是历史上三份副本不同步的根源。
@@ -23,6 +28,80 @@ const ASPECT_LABELS = {
 const aspectLabel = (value) => ASPECT_LABELS[value] || { label: '自定义', hint: value };
 // 可选模型 / 分辨率 / 点数 / 比例全部由服务端下发（后台改 KV 即生效），前端不硬编码任何点数。
 
+/**
+ * 底部工具条上的胶囊按钮。有 children 时是下拉菜单，没有就是普通按钮。
+ * 抽出来的原因：工具条上有 4 个长得一样的胶囊，各写一遍会出现「间距/圆角/字号」不一致。
+ */
+function Pill({ icon: Icon, label, hint, onClick, active = false, disabled = false, menu = null }) {
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (event) => {
+      if (boxRef.current && !boxRef.current.contains(event.target)) setOpen(false);
+    };
+    const onKey = (event) => { if (event.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const base = `ig-chip inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-2 text-[13px] transition disabled:cursor-not-allowed disabled:opacity-50 ${active
+    ? 'border-brand-600 bg-brand-50 font-medium text-brand-700'
+    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'}`;
+
+  if (!menu) {
+    return (
+      <button type="button" onClick={onClick} disabled={disabled} className={base}>
+        {Icon && <Icon size={14} className="shrink-0" />}
+        <span className="max-w-[8rem] truncate">{label}</span>
+      </button>
+    );
+  }
+
+  return (
+    <div ref={boxRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        disabled={disabled}
+        aria-expanded={open}
+        className={base}
+      >
+        {Icon && <Icon size={14} className="shrink-0" />}
+        <span className="max-w-[8rem] truncate">{label}</span>
+        <ChevronDown size={13} className={`shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute bottom-full left-0 z-40 mb-2 min-w-[12.5rem] rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl">
+          {menu({ close: () => setOpen(false) })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 下拉里的一行。 */
+function MenuItem({ selected, title, hint, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-[13px] transition ${selected
+        ? 'bg-brand-50 font-medium text-brand-700'
+        : 'text-slate-600 hover:bg-slate-50'}`}
+    >
+      <span className="min-w-0 flex-1 truncate">{title}</span>
+      {hint && <span className="shrink-0 text-[11px] text-slate-400">{hint}</span>}
+      {selected && <Check size={13} className="shrink-0" />}
+    </button>
+  );
+}
+
 export default function ImageGen() {
   const { user, openRechargeModal, refreshCurrentUserCompute, addAsset } = useStore();
   const [prompt, setPrompt] = useState('');
@@ -37,8 +116,18 @@ export default function ImageGen() {
   const [elapsed, setElapsed] = useState(0);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
-  // 「加入资产库」的按钮状态：idle 未加入 / saving 提交中 / added 已加入（防重复点）
+  // 「加入资产库」的按钮状态：idle 未加入 / added 已加入（防重复点）
   const [assetState, setAssetState] = useState('idle');
+  // 参考图区默认收起：参考图是"可选"，常驻展开会让输入区变高、把工具条挤下去
+  const [refsOpen, setRefsOpen] = useState(false);
+
+  // 灵感广场相关
+  const [plazaToken, setPlazaToken] = useState(0);   // 发布成功后 +1，让瀑布流重新拉第一页
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishCategory, setPublishCategory] = useState('poster');
+  const [publishState, setPublishState] = useState('idle'); // idle | saving | done
+  const promptRef = useRef(null);
+  const resultRef = useRef(null);
 
   // 模型/分辨率/点数都由服务端下发，避免前端硬编码与服务端脱节（后台改 KV 后刷新即生效）
   useEffect(() => {
@@ -70,7 +159,7 @@ export default function ImageGen() {
   // 当前模型的可用档位（每个档位自带点数，直接标在按钮上）
   const currentModel = models.find((item) => item.id === model) || models[0] || null;
   const resolutions = (currentModel && currentModel.resolutions) || [];
-  // 参考图能力由服务端下发（gpt-image-* 系列走 OpenAI 创建接口，没有参考图入口）
+  // 参考图能力由服务端下发（两套通道都支持，只是上传/转发方式不同）
   const refsSupported = !currentModel || currentModel.supportsRefs !== false;
 
   // 当前模型实际可用的比例：优先 models[].aspectRatios，其次顶层字段，最后用文案表的键兜底。
@@ -95,7 +184,7 @@ export default function ImageGen() {
       setAspect(nextRatios[0]);
     }
     // 新模型不吃参考图就把已选的图清掉，避免「传了图却没生效」还照样扣点
-    if (entry && entry.supportsRefs === false) setRefs([]);
+    if (entry && entry.supportsRefs === false) { setRefs([]); setRefsOpen(false); }
   };
 
   // 单张实测 20~23 秒，没有进度可拿，显示已等待秒数避免用户以为卡死
@@ -106,14 +195,22 @@ export default function ImageGen() {
   }, [busy]);
 
   const points = typeof user?.points === 'number' ? user.points : null;
+  const currentResolution = resolutions.find((item) => item.value === resolution) || null;
+  const aspectText = (() => {
+    const item = aspects.find((one) => one.value === aspect);
+    return item ? `${item.hint} ${item.label}` : aspect;
+  })();
+  const canSubmit = Boolean(prompt.trim()) && !busy && Boolean(user);
 
   const generate = async () => {
     const text = prompt.trim();
-    if (!text) { setError('请先描述你想要的画面'); return; }
+    if (!text) { setError('请先描述你想要的画面'); promptRef.current?.focus(); return; }
     setBusy(true);
     setError('');
     setResult(null);
     setAssetState('idle');
+    setPublishOpen(false);
+    setPublishState('idle');
     try {
       const res = await apiFetch('/api/image-gen', {
         method: 'POST',
@@ -152,12 +249,10 @@ export default function ImageGen() {
   };
 
   // 加入资产库：写入「图片」库（type='image'），与对话/工作流的资产同构（见 store.addAsset）。
-  // 只提交单条记录（store 内部走 POST /api/data/assets，服务端强制 userId=当前登录用户）。
   const addToAssets = () => {
     if (!result || assetState !== 'idle') return;
     const text = String(result.prompt || prompt || '').trim();
     const shortName = text ? (text.length > 24 ? `${text.slice(0, 24)}…` : text) : 'AI全能设计 · 图片';
-    setAssetState('saving');
     try {
       addAsset({
         sourceType: 'imageGen',
@@ -178,194 +273,326 @@ export default function ImageGen() {
     }
   };
 
+  const openPublish = () => {
+    setPublishState('idle');
+    setPublishOpen(true);
+  };
+
+  const publishToPlaza = async () => {
+    if (!result || publishState === 'saving') return;
+    setPublishState('saving');
+    try {
+      const res = await apiFetch('/api/inspiration/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: result.url,
+          prompt: String(result.prompt || prompt || '').trim(),
+          category: publishCategory,
+          model: result.model || model,
+          aspectRatio: result.aspectRatio || aspect,
+          resolution: result.resolution || resolution,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) throw new Error('登录已失效，请重新登录后再发布');
+      if (!res.ok || !data.ok) throw new Error(data.error || '发布失败，请稍后重试');
+      setPublishState('done');
+      setPlazaToken((value) => value + 1);
+      // 让用户看到"发成功了"，再收起来（直接关掉会像没反应）
+      setTimeout(() => setPublishOpen(false), 800);
+    } catch (e) {
+      setPublishState('idle');
+      setError(String(e.message || e));
+    }
+  };
+
+  // 「做同款」：把提示词回填到顶部输入框
+  const applyPrompt = (text) => {
+    setPrompt(String(text || '').slice(0, 2000));
+    promptRef.current?.focus();
+  };
+
+  // 出图后把结果卡滚进视野：图高 + 输入卡已经把操作按钮推到折叠线以下，
+  // 不滚一下用户会以为"生成完就没了"，还得自己找按钮。
+  useEffect(() => {
+    if (!result || !resultRef.current) return;
+    resultRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [result]);
+
   return (
-    <div className="max-w-4xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-          <Wand2 size={22} className="text-brand-600" /> AI全能设计
+    <div className="mx-auto w-full max-w-6xl px-1">
+      {/* ===== 标题 ===== */}
+      <div className="pb-6 pt-4 text-center sm:pt-8">
+        <h1 className="text-[26px] font-extrabold leading-tight tracking-tight text-slate-900 sm:text-[38px]">
+          你的设计 <span className="text-brand-600">Agent</span>，开始创作
         </h1>
+        <p className="mt-2 text-[13px] text-slate-400">描述需求、上传参考图，选好模型与比例，剩下的交给它</p>
       </div>
 
       {!user && (
-        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+        <div className="mx-auto mb-4 max-w-3xl rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
           请先 <Link to="/profile" className="font-medium underline">登录</Link> 后再使用。
         </div>
       )}
 
-      <div className="ig-card bg-white rounded-2xl border border-slate-200 p-5">
-        <div className="flex items-center justify-between mb-2">
-          <label className="text-sm font-medium text-slate-700">画面描述</label>
-          {points !== null && (
-            <span className="inline-flex items-center gap-1 text-xs text-slate-500">
-              <Coins size={13} /> 当前余额 {points} 点
-            </span>
-          )}
-        </div>
+      {/* ===== 输入卡 ===== */}
+      <div className="ig-card mx-auto max-w-3xl rounded-[26px] border border-slate-200 bg-white">
         <textarea
-          rows={4}
+          ref={promptRef}
+          rows={3}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           maxLength={2000}
-          className="ig-input w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:border-brand-600 resize-y"
-          placeholder="例如：一张产品海报，暖色木桌，柔和窗光，浅景深"
+          onKeyDown={(e) => {
+            // Ctrl/Cmd + Enter 直接生成：这页的输入框很长，手不用离开键盘
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && canSubmit) generate();
+          }}
+          placeholder="输入灵感、需求或你想完成的创作任务"
+          className="w-full resize-none rounded-t-[26px] bg-transparent px-5 pb-1 pt-5 text-[15px] leading-7 text-slate-800 outline-none placeholder:text-slate-400"
         />
-        <div className="text-right text-xs text-slate-400 mt-1">{prompt.length}/2000</div>
+        <div className="flex items-center justify-between px-5 pb-2 text-[11px] text-slate-300">
+          <span>{prompt.length > 0 ? `${prompt.length}/2000` : ''}</span>
+          <span className="hidden sm:inline">Ctrl / ⌘ + Enter 生成</span>
+        </div>
 
-        {refsSupported && (
-          <div className="mt-4 pt-4 border-t border-slate-100">
+        {/* 参考图展开区 */}
+        {refsOpen && refsSupported && (
+          <div className="mx-4 mb-2 rounded-2xl bg-slate-50/90 p-3">
             <RefImagePicker value={refs} onChange={setRefs} disabled={busy} showHint={false} />
           </div>
         )}
 
-        {/* 模型 + 清晰度：只列后台已上架的组合，点数随组合变化（前端不写死任何价格） */}
-        <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">
-          {models.length > 1 && (
-            <div>
-              <div className="text-sm font-medium text-slate-700 mb-2">模型</div>
-              <div className="flex flex-wrap gap-2">
-                {models.map((item) => (
+        {/* 工具条 */}
+        <div className="flex flex-wrap items-center gap-2 px-4 pb-4 pt-1">
+          <Pill icon={ImageIcon} label="图片生成" disabled />
+          <Pill
+            icon={Sparkles}
+            label={currentModel ? (currentModel.label || currentModel.id) : '模型'}
+            disabled={busy || models.length <= 1}
+            menu={models.length > 1 ? ({ close }) => models.map((item) => (
+              <MenuItem
+                key={item.id}
+                selected={item.id === model}
+                title={item.label || item.id}
+                hint={(item.resolutions || []).length ? `${(item.resolutions || []).length} 档` : ''}
+                onClick={() => { pickModel(item.id); close(); }}
+              />
+            )) : null}
+          />
+          <Pill
+            icon={Monitor}
+            label={currentResolution ? `${currentResolution.value} · ${currentResolution.points} 点` : (resolution || '清晰度')}
+            disabled={busy || resolutions.length <= 1}
+            menu={resolutions.length > 1 ? ({ close }) => resolutions.map((item) => (
+              <MenuItem
+                key={item.value}
+                selected={item.value === resolution}
+                title={item.value}
+                hint={`${item.points} 点`}
+                onClick={() => { setResolution(item.value); close(); }}
+              />
+            )) : null}
+          />
+          <Pill
+            icon={Crop}
+            label={aspectText}
+            disabled={busy || aspects.length <= 1}
+            menu={aspects.length > 1 ? ({ close }) => aspects.map((item) => (
+              <MenuItem
+                key={item.value}
+                selected={item.value === aspect}
+                title={`${item.hint} ${item.label}`}
+                onClick={() => { setAspect(item.value); close(); }}
+              />
+            )) : null}
+          />
+          <Pill
+            icon={ImagePlus}
+            label={refs.length ? `参考图 ${refs.length}/${MAX_REF_IMAGES}` : '参考图'}
+            active={refsOpen || refs.length > 0}
+            disabled={busy || !refsSupported}
+            onClick={() => setRefsOpen((value) => !value)}
+          />
+
+          <div className="ml-auto flex items-center gap-3">
+            {points !== null && (
+              <span className="hidden items-center gap-1 text-[11px] text-slate-400 sm:inline-flex">
+                <Coins size={12} /> {points} 点
+              </span>
+            )}
+            {busy && <span className="text-[11px] text-slate-400">已等待 {elapsed}s</span>}
+            <button
+              type="button"
+              onClick={generate}
+              disabled={!canSubmit}
+              title={user ? (prompt.trim() ? '开始生成' : '请先描述画面') : '请先登录'}
+              className={`ig-cta flex h-10 w-10 items-center justify-center rounded-full transition ${canSubmit
+                ? 'bg-brand-600 text-white hover:bg-brand-700'
+                : 'bg-slate-100 text-slate-400'}`}
+            >
+              {busy ? <Loader2 size={18} className="animate-spin" /> : <ArrowUp size={18} />}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {error && (
+        <p className="mx-auto mt-3 flex max-w-3xl items-start gap-1.5 text-sm text-rose-600">
+          <AlertCircle size={16} className="mt-0.5 shrink-0" />
+          <span>{error}</span>
+        </p>
+      )}
+
+      {/* ===== 结果 ===== */}
+      {(busy || result) && (
+        <div ref={resultRef} className="ig-card mx-auto mt-6 max-w-3xl rounded-2xl border border-slate-200 bg-white p-4">
+          {busy && (
+            <div className="flex flex-col items-center justify-center gap-2 py-16 text-slate-400">
+              <Wand2 size={32} className="animate-pulse" />
+              <p className="text-sm">
+                {refs.length ? `正在生成，带 ${refs.length} 张参考图通常需要 30~45 秒…` : '正在生成，通常 20 秒左右…'}
+              </p>
+            </div>
+          )}
+
+          {!busy && result && (
+            <div className="space-y-3">
+              <img
+                src={result.url}
+                alt={result.prompt || '生成结果'}
+                decoding="async"
+                className="ig-result-img mx-auto max-h-[60vh] w-auto max-w-full rounded-xl border border-slate-200"
+              />
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                  <span>{result.resolution || resolution}</span>
+                  <span>{result.aspectRatio || aspect}</span>
+                  {result.refImageCount > 0 && <span>参考图 {result.refImageCount}/{MAX_REF_IMAGES}</span>}
+                  <span>{Math.round((Number(result.size) || 0) / 1024)} KB</span>
+                  {typeof result.chargedPoints === 'number' && <span>消耗 {result.chargedPoints} 点</span>}
+                  {typeof result.points === 'number' && <span>余额 {result.points} 点</span>}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={openPublish}
+                    className="ig-cta inline-flex items-center gap-1.5 rounded-xl bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+                  >
+                    <Sparkles size={15} /> 加入灵感广场
+                  </button>
+                  <button
+                    type="button"
+                    onClick={addToAssets}
+                    disabled={assetState !== 'idle'}
+                    className={`ig-cta inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium disabled:cursor-default ${assetState === 'added'
+                      ? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border border-slate-300 text-slate-700 hover:bg-slate-50'}`}
+                  >
+                    {assetState === 'added' ? <><Check size={15} /> 已加入资产库</> : <><FolderPlus size={15} /> 加入资产库</>}
+                  </button>
+                  <a
+                    href={result.url}
+                    download
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ig-cta inline-flex items-center gap-1.5 rounded-xl border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                  >
+                    <Download size={15} /> 下载
+                  </a>
+                </div>
+              </div>
+              {assetState === 'added' && (
+                <p className="flex items-center gap-1 text-xs text-emerald-600">
+                  <Check size={14} /> 已加入「图片」资产库，可在
+                  <Link to="/assets" className="underline hover:text-emerald-700">我的资产</Link>
+                  的「图片」标签下查看。
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===== 发现灵感 ===== */}
+      <InspirationPlaza onUsePrompt={applyPrompt} refreshToken={plazaToken} />
+
+      {/* ===== 发布到灵感广场 ===== */}
+      {publishOpen && result && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4"
+          onMouseDown={() => { if (publishState !== 'saving') setPublishOpen(false); }}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between">
+              <h3 className="text-base font-bold text-slate-900">加入灵感广场</h3>
+              <button
+                type="button"
+                onClick={() => setPublishOpen(false)}
+                disabled={publishState === 'saving'}
+                className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <img
+              src={result.url}
+              alt="待发布作品"
+              className="mt-3 max-h-52 w-full rounded-xl border border-slate-200 object-cover"
+            />
+            <p className="mt-2.5 line-clamp-3 text-xs leading-relaxed text-slate-500">
+              {String(result.prompt || prompt || '').trim()}
+            </p>
+
+            <div className="mt-3">
+              <div className="mb-1.5 text-xs font-medium text-slate-600">选择分类</div>
+              <div className="flex flex-wrap gap-1.5">
+                {PUBLISH_CATEGORIES.map((item) => (
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => pickModel(item.id)}
-                    disabled={busy}
-                    className={`ig-chip px-3.5 py-2 rounded-xl border text-sm disabled:opacity-60 ${model === item.id ? 'ig-chip-on border-brand-600 bg-brand-50 text-brand-700 font-medium' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                    onClick={() => setPublishCategory(item.id)}
+                    disabled={publishState === 'saving'}
+                    className={`ig-chip rounded-full border px-2.5 py-1 text-[12px] transition ${publishCategory === item.id
+                      ? 'border-brand-600 bg-brand-50 font-medium text-brand-700'
+                      : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
                   >
-                    {item.label || item.id}
+                    {item.label}
                   </button>
                 ))}
               </div>
             </div>
-          )}
 
-          {resolutions.length > 0 && (
-            <div>
-              <div className="text-sm font-medium text-slate-700 mb-2">
-                清晰度
-                {models.length <= 1 && currentModel && (
-                  <span className="ml-1.5 text-xs font-normal text-slate-400">（{currentModel.label || currentModel.id}）</span>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {resolutions.map((item) => (
-                  <button
-                    key={item.value}
-                    type="button"
-                    onClick={() => setResolution(item.value)}
-                    disabled={busy}
-                    className={`ig-chip px-3.5 py-2 rounded-xl border text-sm disabled:opacity-60 ${resolution === item.value ? 'ig-chip-on border-brand-600 bg-brand-50 text-brand-700 font-medium' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-                  >
-                    {item.value} <span className={`text-xs ${resolution === item.value ? 'text-brand-600' : 'text-slate-400'}`}>{item.points} 点</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="mt-3">
-          <div className="text-sm font-medium text-slate-700 mb-2">画面比例</div>
-          <div className="flex flex-wrap gap-2">
-            {aspects.map((item) => (
+            <div className="mt-4 flex items-center gap-2">
               <button
-                key={item.value}
                 type="button"
-                onClick={() => setAspect(item.value)}
-                className={`ig-chip px-3.5 py-2 rounded-xl border text-sm ${aspect === item.value ? 'ig-chip-on border-brand-600 bg-brand-50 text-brand-700 font-medium' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                onClick={() => setPublishOpen(false)}
+                disabled={publishState === 'saving'}
+                className="ig-cta flex-1 rounded-xl border border-slate-300 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"
               >
-                {item.label} <span className="text-xs text-slate-400">{item.hint}</span>
+                取消
               </button>
-            ))}
+              <button
+                type="button"
+                onClick={publishToPlaza}
+                disabled={publishState !== 'idle'}
+                className={`ig-cta flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-medium disabled:opacity-80 ${publishState === 'done'
+                  ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
+                  : 'bg-brand-600 text-white hover:bg-brand-700'}`}
+              >
+                {publishState === 'saving' && <><Loader2 size={15} className="animate-spin" /> 发布中…</>}
+                {publishState === 'done' && <><Check size={15} /> 已发布</>}
+                {publishState === 'idle' && <><Sparkles size={15} /> 发布到{categoryLabel(publishCategory)}</>}
+              </button>
+            </div>
+            <p className="mt-2 text-center text-[11px] text-slate-400">发布后其他人可在灵感广场「做同款」复用你的提示词</p>
           </div>
         </div>
-
-        <button
-          type="button"
-          onClick={generate}
-          disabled={busy || !user}
-          className={`ig-cta mt-5 w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-brand-600 text-white text-sm font-medium hover:bg-brand-700 disabled:opacity-50 ${busy ? 'is-busy' : ''}`}
-        >
-          {busy ? <><Loader2 size={16} className="animate-spin" /> 生成中… 已等待 {elapsed}s</> : <><Wand2 size={16} /> 开始生成</>}
-        </button>
-
-        {error && (
-          <p className="mt-3 text-sm text-rose-600 flex items-start gap-1.5">
-            <AlertCircle size={16} className="mt-0.5 shrink-0" />
-            <span>{error}</span>
-          </p>
-        )}
-      </div>
-
-      <div className="ig-card mt-6 bg-white rounded-2xl border border-slate-200 p-5">
-        <div className="text-sm font-medium text-slate-700 mb-3">生成结果</div>
-
-        {!result && !busy && (
-          <div className="flex flex-col items-center justify-center gap-2 py-20 text-slate-300">
-            <ImageIcon size={40} className="ig-float" />
-            <p className="text-sm">描述画面后点「开始生成」</p>
-          </div>
-        )}
-
-        {busy && (
-          <div className="flex flex-col items-center justify-center gap-2 py-20 text-slate-400">
-            <Wand2 size={36} className="animate-pulse" />
-            <p className="text-sm">
-              {refs.length ? `正在生成，带 ${refs.length} 张参考图通常需要 30~45 秒…` : '正在生成，通常 20 秒左右…'}
-            </p>
-          </div>
-        )}
-
-        {result && (
-          <div className="space-y-3">
-            <img
-              src={result.url}
-              alt={result.prompt || '生成结果'}
-              decoding="async"
-              className="ig-result-img w-full rounded-xl border border-slate-200"
-            />
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                <span>{result.resolution || resolution}</span>
-                <span>{result.aspectRatio || aspect}</span>
-                {result.refImageCount > 0 && <span>参考图 {result.refImageCount}/{MAX_REF_IMAGES}</span>}
-                <span>{Math.round((Number(result.size) || 0) / 1024)} KB</span>
-                {typeof result.chargedPoints === 'number' && <span>消耗 {result.chargedPoints} 点</span>}
-                {typeof result.points === 'number' && <span>余额 {result.points} 点</span>}
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={addToAssets}
-                  disabled={assetState !== 'idle'}
-                  className={`ig-cta inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium disabled:cursor-default ${assetState === 'added'
-                    ? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
-                    : 'bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-70'}`}
-                >
-                  {assetState === 'saving' && <><Loader2 size={16} className="animate-spin" /> 加入中…</>}
-                  {assetState === 'added' && <><Check size={16} /> 已加入资产库</>}
-                  {assetState === 'idle' && <><FolderPlus size={16} /> 加入资产库</>}
-                </button>
-                <a
-                  href={result.url}
-                  download
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="ig-cta inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-slate-300 text-sm text-slate-700 hover:bg-slate-50"
-                >
-                  <Download size={16} /> 下载图片
-                </a>
-              </div>
-            </div>
-            {assetState === 'added' && (
-              <p className="text-xs text-emerald-600 flex items-center gap-1">
-                <Check size={14} /> 已加入「图片」资产库，可在
-                <Link to="/assets" className="underline hover:text-emerald-700">我的资产</Link>
-                的「图片」标签下查看。
-              </p>
-            )}
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }

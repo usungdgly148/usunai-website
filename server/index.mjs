@@ -26,6 +26,7 @@ import {
   virtualPayConfigured,
 } from './wechat-virtual-pay.mjs';
 import { errorEnvelope, handleMiniappApi, reconcilePendingVirtualOrders, requestIdFor, successEnvelope } from './miniapp-api.mjs';
+import { handleInspiration } from './inspiration.mjs';
 import {
   SHARE_CONFIG_KV_KEY,
   shareSettingsConfigured,
@@ -2734,6 +2735,9 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ ok: true, agents: Object.keys(agents).length }));
       return;
     }
+    // 灵感广场（AI全能设计 作品墙）：列表公开可读，发布/点赞/删除需登录。
+    // 模块自带路径判断，非 /api/inspiration/* 直接返回 false 继续往下走。
+    if (await handleInspiration(req, res, u, { KV, readBody, requireUser, getSession, isAdminSession })) return;
     if (await handleMiniappObservability(req, res, u, { KV, requireAdmin, readBody })) return;
     if (await handleMiniappAuth(req, res, u, {
       KV,
