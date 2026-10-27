@@ -8,6 +8,7 @@ import {
   Flame, Copy, MessageCircle, Search, Image, Clapperboard, ShoppingBag, Home,
   Hammer, Boxes, DoorOpen, Archive, Layers, Square, Droplets, Sofa, PenTool,
   HardHat, FileCheck, BadgeCheck, CalendarDays, LayoutTemplate, KeyRound, Megaphone, Smartphone,
+  GalleryVerticalEnd,
 } from 'lucide-react';
 
 /* ============================================================
@@ -28,6 +29,7 @@ export const ADMIN_NAV = [
     items: [
       { label: '授权中心', icon: KeyRound, href: '/admin/auth-providers' },
       { label: 'AI全能设计', icon: Image, href: '/admin/image-gen' },
+      { label: '灵感广场', icon: GalleryVerticalEnd, href: '/admin/inspiration' },
       { label: '知识库', icon: BookOpen, href: '/admin/knowledge-bases' },
       { label: '小程序设计', icon: Smartphone, href: '/admin/miniapp-design' },
       { label: '小程序设置', icon: KeyRound, href: '/admin/miniapp-settings' },

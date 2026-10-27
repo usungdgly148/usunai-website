@@ -39,6 +39,7 @@ const AdminAnnouncements = lazy(() => import('./pages/AdminAnnouncements.jsx'));
 const AdminLegalAgreements = lazy(() => import('./pages/AdminLegalAgreements.jsx'));
 const AdminKnowledgeBases = lazy(() => import('./pages/AdminKnowledgeBases.jsx'));
 const AdminImageGen = lazy(() => import('./pages/AdminImageGen.jsx'));
+const AdminInspiration = lazy(() => import('./pages/AdminInspiration.jsx'));
 const AdminMiniappDesign = lazy(() => import('./pages/AdminMiniappDesign.jsx'));
 const AdminMiniappSettings = lazy(() => import('./pages/AdminMiniappSettings.jsx'));
 
@@ -205,6 +206,7 @@ function AdminLayout() {
               <Route path="/admin/auth-providers" element={<AdminAuthProviders />} />
               <Route path="/admin/knowledge-bases" element={<AdminKnowledgeBases />} />
               <Route path="/admin/image-gen" element={<AdminImageGen />} />
+              <Route path="/admin/inspiration" element={<AdminInspiration />} />
               <Route path="/admin/miniapp-design" element={<AdminMiniappDesign />} />
               <Route path="/admin/miniapp-settings" element={<AdminMiniappSettings />} />
               <Route path="/admin/workflows/new" element={<AdminWorkflowEdit isNew />} />

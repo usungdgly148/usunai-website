@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertCircle, ArrowUp, Check, ChevronDown, Coins, Crop, Download, FolderPlus,
-  Image as ImageIcon, ImagePlus, Loader2, Monitor, Sparkles, Wand2, X,
+  AlertCircle, ArrowUp, Check, ChevronDown, Crop, Download, FolderPlus,
+  ImagePlus, Loader2, Monitor, Sparkles, Wand2, X,
 } from 'lucide-react';
 import { useStore } from '../store.jsx';
 import { apiFetch } from '../authFetch.js';
 import RefImagePicker, { MAX_REF_IMAGES, toApiImages } from '../RefImagePicker.jsx';
 import InspirationPlaza from '../InspirationPlaza.jsx';
-import { PUBLISH_CATEGORIES, categoryLabel } from '../inspirationCategories.js';
+import { useInspirationCategories } from '../useInspirationCategories.js';
 
 // 比例**文案**表。可用哪些比例由服务端按模型下发（`models[].aspectRatios`），
 // 前端不再自己维护一份「有哪些比例」的清单 —— 那是历史上三份副本不同步的根源。
@@ -26,6 +26,12 @@ const ASPECT_LABELS = {
   '4:1': { label: '超长横', hint: '4:1' },
 };
 const aspectLabel = (value) => ASPECT_LABELS[value] || { label: '自定义', hint: value };
+
+// 输入框高度自适应：内容多高就多高，**最多 8 行文字**，超过就内部滚动。
+// 为什么用 JS 量而不是 CSS：`field-sizing: content` 只有 Chrome 123+ 支持，
+// 而这是主打页面，不能赌浏览器。行高与上下 padding 都从 computedStyle 现算，
+// 改字号/内边距时这里不用跟着改数字。
+const MAX_PROMPT_ROWS = 8;
 // 可选模型 / 分辨率 / 点数 / 比例全部由服务端下发（后台改 KV 即生效），前端不硬编码任何点数。
 
 /**
@@ -128,6 +134,8 @@ export default function ImageGen() {
   const [publishState, setPublishState] = useState('idle'); // idle | saving | done
   const promptRef = useRef(null);
   const resultRef = useRef(null);
+  // 分类清单以服务端为准（后台「灵感广场」可增删改序），与广场 chips 共用同一次请求
+  const { publishable, labelOf } = useInspirationCategories();
 
   // 模型/分辨率/点数都由服务端下发，避免前端硬编码与服务端脱节（后台改 KV 后刷新即生效）
   useEffect(() => {
@@ -194,7 +202,38 @@ export default function ImageGen() {
     return () => clearInterval(timer);
   }, [busy]);
 
-  const points = typeof user?.points === 'number' ? user.points : null;
+  // 输入框高度跟随内容，封顶 8 行（MAX_PROMPT_ROWS）。
+  //
+  // 三个细节，都是踩过才知道的：
+  //  1. 必须先把 height 置 auto 再读 scrollHeight —— 否则读到的是上一次的固定高度，只涨不落。
+  //  2. 行高/padding 从 computedStyle 取，不写死 28px：以后改 leading-7 不用回来改代码。
+  //  3. 窗口尺寸变化会改变换行数，必须重算，否则横竖屏切换后高度会错。
+  useEffect(() => {
+    const el = promptRef.current;
+    if (!el) return undefined;
+    const sync = () => {
+      const style = window.getComputedStyle(el);
+      const lineHeight = parseFloat(style.lineHeight) || 28;
+      const paddingY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+      const minHeight = lineHeight + paddingY;
+      const maxHeight = lineHeight * MAX_PROMPT_ROWS + paddingY;
+      el.style.height = 'auto';
+      const contentHeight = el.scrollHeight || minHeight;
+      el.style.height = `${Math.min(Math.max(contentHeight, minHeight), maxHeight)}px`;
+      // 只有真的超过 8 行才允许内部滚动；否则鼠标滚到输入框会「卡住」页面滚动
+      el.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden';
+    };
+    sync();
+    window.addEventListener('resize', sync);
+    return () => window.removeEventListener('resize', sync);
+  }, [prompt]);
+
+  // 后台把当前选中的分类删了/停用了 → 落到第一个可选分类，避免发布时后端回落得莫名其妙
+  useEffect(() => {
+    if (!publishable.length) return;
+    if (!publishable.some((item) => item.id === publishCategory)) setPublishCategory(publishable[0].id);
+  }, [publishable, publishCategory]);
+
   const currentResolution = resolutions.find((item) => item.value === resolution) || null;
   const aspectText = (() => {
     const item = aspects.find((one) => one.value === aspect);
@@ -331,16 +370,16 @@ export default function ImageGen() {
       </div>
 
       {!user && (
-        <div className="mx-auto mb-4 max-w-3xl rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+        <div className="mx-auto mb-4 max-w-5xl rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
           请先 <Link to="/profile" className="font-medium underline">登录</Link> 后再使用。
         </div>
       )}
 
       {/* ===== 输入卡 ===== */}
-      <div className="ig-card mx-auto max-w-3xl rounded-[26px] border border-slate-200 bg-white">
+      <div className="ig-card mx-auto max-w-5xl rounded-[26px] border border-slate-200 bg-white">
         <textarea
           ref={promptRef}
-          rows={3}
+          rows={1}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           maxLength={2000}
@@ -363,64 +402,63 @@ export default function ImageGen() {
           </div>
         )}
 
-        {/* 工具条 */}
-        <div className="flex flex-wrap items-center gap-2 px-4 pb-4 pt-1">
-          <Pill icon={ImageIcon} label="图片生成" disabled />
-          <Pill
-            icon={Sparkles}
-            label={currentModel ? (currentModel.label || currentModel.id) : '模型'}
-            disabled={busy || models.length <= 1}
-            menu={models.length > 1 ? ({ close }) => models.map((item) => (
-              <MenuItem
-                key={item.id}
-                selected={item.id === model}
-                title={item.label || item.id}
-                hint={(item.resolutions || []).length ? `${(item.resolutions || []).length} 档` : ''}
-                onClick={() => { pickModel(item.id); close(); }}
-              />
-            )) : null}
-          />
-          <Pill
-            icon={Monitor}
-            label={currentResolution ? `${currentResolution.value} · ${currentResolution.points} 点` : (resolution || '清晰度')}
-            disabled={busy || resolutions.length <= 1}
-            menu={resolutions.length > 1 ? ({ close }) => resolutions.map((item) => (
-              <MenuItem
-                key={item.value}
-                selected={item.value === resolution}
-                title={item.value}
-                hint={`${item.points} 点`}
-                onClick={() => { setResolution(item.value); close(); }}
-              />
-            )) : null}
-          />
-          <Pill
-            icon={Crop}
-            label={aspectText}
-            disabled={busy || aspects.length <= 1}
-            menu={aspects.length > 1 ? ({ close }) => aspects.map((item) => (
-              <MenuItem
-                key={item.value}
-                selected={item.value === aspect}
-                title={`${item.hint} ${item.label}`}
-                onClick={() => { setAspect(item.value); close(); }}
-              />
-            )) : null}
-          />
-          <Pill
-            icon={ImagePlus}
-            label={refs.length ? `参考图 ${refs.length}/${MAX_REF_IMAGES}` : '参考图'}
-            active={refsOpen || refs.length > 0}
-            disabled={busy || !refsSupported}
-            onClick={() => setRefsOpen((value) => !value)}
-          />
+        {/* 工具条：左侧参数胶囊、右侧生成按钮，**永远同一行**。
+            旧写法是 flex-wrap + ml-auto：胶囊把整行占满时按钮会被折到下一行，
+            看起来像"生成按钮在参数下面"。现在右栏 shrink-0 单独成列，
+            窄屏只会让左边胶囊自己换行，按钮不会再掉下去。 */}
+        <div className="flex items-end gap-3 px-4 pb-4 pt-1">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+            <Pill
+              icon={Sparkles}
+              label={currentModel ? (currentModel.label || currentModel.id) : '模型'}
+              disabled={busy || models.length <= 1}
+              menu={models.length > 1 ? ({ close }) => models.map((item) => (
+                <MenuItem
+                  key={item.id}
+                  selected={item.id === model}
+                  title={item.label || item.id}
+                  hint={(item.resolutions || []).length ? `${(item.resolutions || []).length} 档` : ''}
+                  onClick={() => { pickModel(item.id); close(); }}
+                />
+              )) : null}
+            />
+            <Pill
+              icon={Monitor}
+              label={currentResolution ? `${currentResolution.value} · ${currentResolution.points} 点` : (resolution || '清晰度')}
+              disabled={busy || resolutions.length <= 1}
+              menu={resolutions.length > 1 ? ({ close }) => resolutions.map((item) => (
+                <MenuItem
+                  key={item.value}
+                  selected={item.value === resolution}
+                  title={item.value}
+                  hint={`${item.points} 点`}
+                  onClick={() => { setResolution(item.value); close(); }}
+                />
+              )) : null}
+            />
+            <Pill
+              icon={Crop}
+              label={aspectText}
+              disabled={busy || aspects.length <= 1}
+              menu={aspects.length > 1 ? ({ close }) => aspects.map((item) => (
+                <MenuItem
+                  key={item.value}
+                  selected={item.value === aspect}
+                  title={`${item.hint} ${item.label}`}
+                  onClick={() => { setAspect(item.value); close(); }}
+                />
+              )) : null}
+            />
+            <Pill
+              icon={ImagePlus}
+              label={refs.length ? `参考图 ${refs.length}/${MAX_REF_IMAGES}` : '参考图'}
+              active={refsOpen || refs.length > 0}
+              disabled={busy || !refsSupported}
+              onClick={() => setRefsOpen((value) => !value)}
+            />
+          </div>
 
-          <div className="ml-auto flex items-center gap-3">
-            {points !== null && (
-              <span className="hidden items-center gap-1 text-[11px] text-slate-400 sm:inline-flex">
-                <Coins size={12} /> {points} 点
-              </span>
-            )}
+          <div className="flex shrink-0 items-center gap-2">
             {busy && <span className="text-[11px] text-slate-400">已等待 {elapsed}s</span>}
             <button
               type="button"
@@ -438,7 +476,7 @@ export default function ImageGen() {
       </div>
 
       {error && (
-        <p className="mx-auto mt-3 flex max-w-3xl items-start gap-1.5 text-sm text-rose-600">
+        <p className="mx-auto mt-3 flex max-w-5xl items-start gap-1.5 text-sm text-rose-600">
           <AlertCircle size={16} className="mt-0.5 shrink-0" />
           <span>{error}</span>
         </p>
@@ -446,7 +484,7 @@ export default function ImageGen() {
 
       {/* ===== 结果 ===== */}
       {(busy || result) && (
-        <div ref={resultRef} className="ig-card mx-auto mt-6 max-w-3xl rounded-2xl border border-slate-200 bg-white p-4">
+        <div ref={resultRef} className="ig-card mx-auto mt-6 max-w-5xl rounded-2xl border border-slate-200 bg-white p-4">
           {busy && (
             <div className="flex flex-col items-center justify-center gap-2 py-16 text-slate-400">
               <Wand2 size={32} className="animate-pulse" />
@@ -551,7 +589,7 @@ export default function ImageGen() {
             <div className="mt-3">
               <div className="mb-1.5 text-xs font-medium text-slate-600">选择分类</div>
               <div className="flex flex-wrap gap-1.5">
-                {PUBLISH_CATEGORIES.map((item) => (
+                {publishable.map((item) => (
                   <button
                     key={item.id}
                     type="button"
@@ -586,7 +624,7 @@ export default function ImageGen() {
               >
                 {publishState === 'saving' && <><Loader2 size={15} className="animate-spin" /> 发布中…</>}
                 {publishState === 'done' && <><Check size={15} /> 已发布</>}
-                {publishState === 'idle' && <><Sparkles size={15} /> 发布到{categoryLabel(publishCategory)}</>}
+                {publishState === 'idle' && <><Sparkles size={15} /> 发布到{labelOf(publishCategory)}</>}
               </button>
             </div>
             <p className="mt-2 text-center text-[11px] text-slate-400">发布后其他人可在灵感广场「做同款」复用你的提示词</p>

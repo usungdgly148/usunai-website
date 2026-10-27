@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Copy, Heart, ImageOff, Loader2, Search, Sparkles, Trash2 } from 'lucide-react';
 import { apiFetch } from './authFetch.js';
-import { PLAZA_CATEGORIES } from './inspirationCategories.js';
+import { useInspirationCategories } from './useInspirationCategories.js';
 
 // 每页条数。**不要调大**：这一页是「向下滚就加载」的瀑布流，
 // 首屏只需要铺满可视区，一次给太多会把首屏变慢、还把后面几屏的图片提前解码。
@@ -35,6 +35,8 @@ function ratioPlaceholder(value) {
  *    手机上这个功能等于不存在。所以 `opacity-100 sm:opacity-0 sm:group-hover:opacity-100`。
  */
 export default function InspirationPlaza({ onUsePrompt, refreshToken = 0 }) {
+  // 分类清单来自服务端（后台可增删改序），这里不再用前端写死的那份
+  const { categories } = useInspirationCategories();
   const [category, setCategory] = useState('all');
   const [keywordInput, setKeywordInput] = useState('');
   const [keyword, setKeyword] = useState('');
@@ -101,6 +103,12 @@ export default function InspirationPlaza({ onUsePrompt, refreshToken = 0 }) {
       }
     }
   }, [category, keyword]);
+
+  // 后台删掉/停用了当前选中的分类 → 回到「全部」，否则会一直卡在一个筛不出东西的分类上
+  useEffect(() => {
+    if (!categories.length) return;
+    if (!categories.some((item) => item.id === category)) setCategory('all');
+  }, [categories, category]);
 
   // 分类 / 关键词 / 发布成功后 → 从头加载
   useEffect(() => {
@@ -215,7 +223,7 @@ export default function InspirationPlaza({ onUsePrompt, refreshToken = 0 }) {
 
         <div className="order-3 -mx-1 w-full overflow-x-auto px-1 sm:order-2 sm:ml-2 sm:w-auto sm:flex-1">
           <div className="flex w-max items-center gap-2 py-1">
-            {PLAZA_CATEGORIES.map((item) => (
+            {categories.map((item) => (
               <button
                 key={item.id}
                 type="button"
