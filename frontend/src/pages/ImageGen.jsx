@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertCircle, ArrowUp, Check, ChevronDown, Crop, Download, FolderPlus,
-  ImagePlus, Loader2, Monitor, Sparkles, Wand2, X,
+  ImagePlus, Loader2, Monitor, Sparkles, Wand2, X, ZoomIn,
 } from 'lucide-react';
 import { useStore } from '../store.jsx';
 import { apiFetch } from '../authFetch.js';
@@ -129,6 +129,9 @@ export default function ImageGen() {
   const [assetState, setAssetState] = useState('idle');
   // 参考图区默认收起：参考图是"可选"，常驻展开会让输入区变高、把工具条挤下去
   const [refsOpen, setRefsOpen] = useState(false);
+  // 结果图预览（灯箱）：只在生成成功后才可能为 true
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const thumbRef = useRef(null);
 
   // 灵感广场相关
   const [plazaToken, setPlazaToken] = useState(0);   // 发布成功后 +1，让瀑布流重新拉第一页
@@ -237,6 +240,30 @@ export default function ImageGen() {
     if (!publishable.some((item) => item.id === publishCategory)) setPublishCategory(publishable[0].id);
   }, [publishable, publishCategory]);
 
+  // 大图预览：锁滚动 + Esc 关闭 + 关闭后把焦点还给缩略图。
+  //
+  // ⚠️ 锁滚动必须**补偿滚动条宽度**，否则桌面端一锁，`overflow:hidden` 让滚动条消失、
+  //    整页内容右移 15px —— 这就是用户能感觉到的"布局跳动"。
+  // ⚠️ 焦点用 `preventScroll: true` 还回去，否则浏览器会为了露出缩略图再滚一次。
+  useEffect(() => {
+    if (!previewOpen) return undefined;
+    const { body } = document;
+    const scrollbar = window.innerWidth - document.documentElement.clientWidth;
+    const prevOverflow = body.style.overflow;
+    const prevPadding = body.style.paddingRight;
+    body.style.overflow = 'hidden';
+    if (scrollbar > 0) body.style.paddingRight = `${scrollbar}px`;
+    const onKey = (event) => { if (event.key === 'Escape') setPreviewOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      body.style.overflow = prevOverflow;
+      body.style.paddingRight = prevPadding;
+      const thumb = thumbRef.current;
+      if (thumb && typeof thumb.focus === 'function') thumb.focus({ preventScroll: true });
+    };
+  }, [previewOpen]);
+
   const currentResolution = resolutions.find((item) => item.value === resolution) || null;
   const aspectText = (() => {
     const item = aspects.find((one) => one.value === aspect);
@@ -250,6 +277,7 @@ export default function ImageGen() {
     setBusy(true);
     setError('');
     setResult(null);
+    setPreviewOpen(false);   // 重新生成时先收起大图，否则灯箱里会挂着上一张
     setAssetState('idle');
     setPublishOpen(false);
     setPublishState('idle');
@@ -498,12 +526,35 @@ export default function ImageGen() {
 
           {!busy && result && (
             <div className="space-y-3">
-              <img
-                src={result.url}
-                alt={result.prompt || '生成结果'}
-                decoding="async"
-                className="ig-result-img mx-auto max-h-[60vh] w-auto max-w-full rounded-xl border border-slate-200"
-              />
+              {/* 缩略图即预览入口：桌面悬停浮出「查看大图」，移动端右上角常驻放大镜（触屏没有 hover）。
+                  用 <button> 而不是给 <img> 挂 onClick —— 键盘 Tab 可聚焦、回读屏有语义。
+                  ⚠️ 不挂 transform 动效：任何缩放都会让图片重采样、看着变软。 */}
+              <button
+                type="button"
+                ref={thumbRef}
+                onClick={() => setPreviewOpen(true)}
+                aria-label="查看大图"
+                title="查看大图"
+                className="group relative mx-auto block max-w-full cursor-zoom-in overflow-hidden rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
+              >
+                <img
+                  src={result.url}
+                  alt={result.prompt || '生成结果'}
+                  decoding="async"
+                  draggable={false}
+                  className="ig-result-img mx-auto block max-h-[60vh] w-auto max-w-full"
+                />
+                {/* 桌面：悬停变暗 + 居中胶囊提示 */}
+                <span className="pointer-events-none absolute inset-0 hidden items-center justify-center bg-slate-900/25 opacity-0 transition-opacity duration-200 group-hover:opacity-100 sm:flex">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-[12px] font-medium text-slate-900 shadow-sm">
+                    <ZoomIn size={14} /> 查看大图
+                  </span>
+                </span>
+                {/* 移动端：常驻角标（否则手机上根本没有入口提示） */}
+                <span className="pointer-events-none absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-900/55 text-white backdrop-blur sm:hidden">
+                  <ZoomIn size={15} />
+                </span>
+              </button>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
                   <span>{result.resolution || resolution}</span>
@@ -631,6 +682,44 @@ export default function ImageGen() {
             </div>
             <p className="mt-2 text-center text-[11px] text-slate-400">发布后其他人可在灵感广场「做同款」复用你的提示词</p>
           </div>
+        </div>
+      )}
+
+      {/* ===== 大图预览（灯箱）=====
+          用 fixed 覆盖层显示**同一张原图**（不生成缩略图、不做二次压缩），
+          尺寸只受视口约束（max 92vw / 86vh），小图保持原生像素、不放大 ⇒ 清晰度与原图一致。
+          关闭方式三种：右上角 ×、点空白处、按 Esc；点图片本身不关闭（防误触）。 */}
+      {previewOpen && result && (
+        <div
+          className="ig-lightbox fixed inset-0 z-[70] flex flex-col items-center justify-center bg-slate-950/90 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-label="查看大图"
+          onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewOpen(false); }}
+        >
+          <button
+            type="button"
+            onClick={() => setPreviewOpen(false)}
+            aria-label="关闭预览"
+            title="关闭预览（Esc）"
+            className="absolute right-4 top-4 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+          >
+            <X size={20} />
+          </button>
+          <img
+            src={result.url}
+            alt={result.prompt || '生成结果'}
+            draggable={false}
+            className="ig-lightbox-img rounded-lg shadow-2xl"
+            style={{ maxWidth: '92vw', maxHeight: '86vh', width: 'auto', height: 'auto' }}
+          />
+          <p className="mt-3 text-center text-[11px] text-white/55">
+            {[result.resolution, result.aspectRatio, result.model].filter(Boolean).join(' · ')}
+            <span className="mx-2 text-white/25">|</span>
+            {/* 触屏没有 Esc，文案不能统一写「按 Esc」—— 手机上那句话等于没提示 */}
+            <span className="sm:hidden">点空白处或右上角 × 关闭</span>
+            <span className="hidden sm:inline">点击空白处或按 Esc 关闭</span>
+          </p>
         </div>
       )}
     </div>

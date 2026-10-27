@@ -457,12 +457,19 @@ aside:hover .apple-scrollbar::-webkit-scrollbar-thumb:hover,
   50%      { transform: translateY(-3px); }
 }
 
+/* ---------- 大图预览（灯箱）：整层淡入 + 图片轻微落定 ----------
+   用 fixed 覆盖层而不是把原图放大：覆盖层在文档流之外，开/关都不会引起重排，
+   所以「关闭后页面布局不跳动」是天然成立的（外加 JS 里补偿了滚动条宽度）。 */
+.ig-lightbox { animation: igFadeIn var(--ig-d2) var(--ig-ease) backwards; }
+@keyframes igFadeIn { from { opacity: 0; } to { opacity: 1; } }
+.ig-lightbox-img { animation: igDevelop var(--ig-d3) var(--ig-ease-expo) backwards; }
+
 /* ---------- 统一降级 ---------- */
 @media (prefers-reduced-motion: reduce) {
   .ig-card, .ig-chip, .ig-input, .ig-cta, .ig-result-img {
     transition-duration: 1ms !important;
   }
-  .ig-chip-on, .ig-cta.is-busy, .ig-float, .ig-result-img {
+  .ig-chip-on, .ig-cta.is-busy, .ig-float, .ig-result-img, .ig-lightbox, .ig-lightbox-img {
     animation: none !important;
   }
   .ig-chip:hover, .ig-chip:active, .ig-cta:hover, .ig-cta:active { transform: none !important; }

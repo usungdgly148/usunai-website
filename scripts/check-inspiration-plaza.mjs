@@ -168,7 +168,29 @@ check('参数胶囊与生成按钮同一行（右栏 shrink-0 不再被折行）
   && pageSrc.includes('flex shrink-0 items-center gap-2')
   && !pageSrc.includes('ml-auto flex items-center gap-3'));
 
-// ===== 11. 后台管理页 =====
+// ===== 11. 结果图大图预览（灯箱，2026-10-28 第三轮）=====
+check('缩略图是按钮且带无障碍名', pageSrc.includes('aria-label="查看大图"') && pageSrc.includes('cursor-zoom-in'));
+check('桌面悬停才浮出「查看大图」提示', pageSrc.includes('group-hover:opacity-100') && pageSrc.includes('查看大图'));
+check('移动端另有常驻角标（触屏没有 hover）', pageSrc.includes('sm:hidden') && pageSrc.includes('<ZoomIn'));
+check('灯箱是模态覆盖层', pageSrc.includes('ig-lightbox') && pageSrc.includes('role="dialog"') && pageSrc.includes('aria-modal="true"'));
+check('灯箱显示的是**同一张原图**（不另生成缩略图）',
+  (pageSrc.match(/src=\{result\.url\}/g) || []).length >= 2);
+check('大图只受视口约束、小图不放大', pageSrc.includes("maxWidth: '92vw'") && pageSrc.includes("maxHeight: '86vh'"));
+check('三种关闭方式：按钮 / 点空白 / Esc',
+  pageSrc.includes('aria-label="关闭预览"')
+  && pageSrc.includes('event.target === event.currentTarget')
+  && pageSrc.includes("event.key === 'Escape'"));
+check('点图片本身不关闭（防误触）', pageSrc.includes('onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewOpen(false); }}'));
+check('开灯箱时锁滚动并**补偿滚动条宽度**（避免整页右移）',
+  pageSrc.includes('window.innerWidth - document.documentElement.clientWidth')
+  && pageSrc.includes('body.style.paddingRight'));
+check('关闭后焦点回到缩略图且不再滚动', pageSrc.includes('preventScroll: true') && pageSrc.includes('thumbRef'));
+check('重新生成会先收起灯箱', pageSrc.includes('setPreviewOpen(false);   // 重新生成时先收起大图'));
+check('关闭提示按设备区分（触屏不提 Esc）',
+  pageSrc.includes('点空白处或右上角 × 关闭') && pageSrc.includes('点击空白处或按 Esc 关闭'));
+check('灯箱动效在 reduced-motion 下降级', read('frontend/src/index.css').includes('.ig-lightbox, .ig-lightbox-img'));
+
+// ===== 12. 后台管理页 =====
 check('后台侧边栏有「灵感广场」', adminUiSrc.includes("{ label: '灵感广场'") && adminUiSrc.includes("href: '/admin/inspiration'"));
 check('后台路由已注册', appSrc.includes("import('./pages/AdminInspiration.jsx')") && appSrc.includes('/admin/inspiration" element={<AdminInspiration />}'));
 check('后台页面接了分类设置接口', adminPageSrc.includes("adminFetch('/api/admin/inspiration/settings'"));
