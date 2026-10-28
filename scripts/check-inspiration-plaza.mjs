@@ -33,6 +33,7 @@ const adminUiSrc = read('frontend/src/adminUI.jsx');
 const appSrc = read('frontend/src/App.jsx');
 const catsSrc = read('frontend/src/inspirationCategories.js');
 const hookSrc = read('frontend/src/useInspirationCategories.js');
+const cssSrc = read('frontend/src/index.css');
 
 let pass = 0;
 const failures = [];
@@ -203,6 +204,45 @@ check('分类标识规则与服务端一致（前端先挡一次）', adminPageS
 check('保存分类后让前台缓存失效', adminPageSrc.includes('invalidateInspirationCategories()'));
 check('删除作品前二次确认', adminPageSrc.includes('window.confirm'));
 check('后台作者信息只显示尾号（不铺全量 userId）', adminPageSrc.includes('item.userId.slice(0, 6)'));
+
+// ===== 13. 发现灵感 · 大图预览（2026-10-28 第二轮）=====
+// 这一组断言守的是「交互契约」而不是像素：下面的细节每一条都踩过坑，删了就会回归。
+check('缩略图本身是「查看大图」按钮（键盘可聚焦）',
+  plazaSrc.includes('aria-label="查看大图"') && plazaSrc.includes('cursor-zoom-in'));
+check('灯箱有可访问语义', plazaSrc.includes('role="dialog"') && plazaSrc.includes('aria-modal="true"'));
+check('灯箱直出原图（不做缩略图副本）', plazaSrc.includes('src={viewerItem.url}'));
+// ⚠️ 透明度必须落在 Tailwind 刻度内：`bg-slate-950/92` 的 92 不在刻度里，类不会被生成，
+//    现场表现是「只有 backdrop-blur、没有深色底」，页面上白花花一片（截图才发现）。
+check('遮罩用刻度内的深色底（/90，别写 /92 之类）',
+  plazaSrc.includes('bg-slate-950/90') && !/bg-slate-950\/(?!90\b)\d+/.test(plazaSrc));
+check('图片尺寸只受视口约束（92vw / 82vh）',
+  plazaSrc.includes("maxWidth: '92vw'") && plazaSrc.includes("maxHeight: '82vh'"));
+check('等比不拉伸（object-contain + 宽高 auto）',
+  plazaSrc.includes("objectFit: 'contain'") && plazaSrc.includes("width: 'auto', height: 'auto'"));
+check('有上一张 / 下一张按钮', plazaSrc.includes('aria-label="上一张"') && plazaSrc.includes('aria-label="下一张"'));
+check('首/末张箭头会禁用', plazaSrc.includes('disabled={viewerIndex <= 0}')
+  && plazaSrc.includes('disabled={viewerIndex >= items.length - 1 && !hasMore}'));
+check('有位置计数（n / total）', plazaSrc.includes('{viewerIndex + 1} / {items.length}'));
+check('键盘 Esc / ← / → 都支持',
+  plazaSrc.includes("event.key === 'Escape'")
+  && plazaSrc.includes("event.key !== 'ArrowLeft' && event.key !== 'ArrowRight'")
+  && plazaSrc.includes("event.key === 'ArrowRight' ? 1 : -1"));
+check('移动端左右滑动切换', plazaSrc.includes('onViewerTouchStart') && plazaSrc.includes('onViewerTouchEnd'));
+check('滑动有阈值 + 竖向不劫持',
+  plazaSrc.includes('Math.abs(dx) < 50') && plazaSrc.includes('Math.abs(dx) <= Math.abs(dy) * 1.4'));
+check('到已加载末尾会顺手续拉下一页', plazaSrc.includes('if (delta > 0 && hasMore) loadMore();'));
+check('打开时锁滚动且补偿滚动条', plazaSrc.includes("body.style.overflow = 'hidden'")
+  && plazaSrc.includes('document.documentElement.clientWidth'));
+// 点空白关闭必须排除按钮和图片本身：mousedown 的默认聚焦行为会覆盖同步 focus，故延到下一帧
+check('点空白关闭，但不吃按钮/图片的点击',
+  plazaSrc.includes("target.closest('button') || target.closest('img')"));
+check('关闭后焦点归还延到下一帧（否则被 mousedown 默认行为抢走）',
+  plazaSrc.includes('requestAnimationFrame(() => trigger.focus({ preventScroll: true }))'));
+check('预加载相邻两张', plazaSrc.includes('new Image()'));
+check('列表变化后下标收敛（删作品/切分类不越界）', plazaSrc.includes('viewerIndex > items.length - 1'));
+check('悬停提示只在有 hover 的设备出现',
+  cssSrc.includes('.ig-zoom-hint') && cssSrc.includes('@media (hover: none)')
+  && cssSrc.includes('.ig-zoomable:hover .ig-zoom-hint'));
 
 if (failures.length) {
   console.log(`\n[FAIL] ${failures.length}/${pass + failures.length} 项不通过：`);

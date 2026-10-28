@@ -464,9 +464,21 @@ aside:hover .apple-scrollbar::-webkit-scrollbar-thumb:hover,
 @keyframes igFadeIn { from { opacity: 0; } to { opacity: 1; } }
 .ig-lightbox-img { animation: igDevelop var(--ig-d3) var(--ig-ease-expo) backwards; }
 
+/* ---------- 瀑布流缩略图的「查看大图」提示 ----------
+   只在真有悬停能力的设备上出现：触屏若常显这枚徽标，会和右上角「做同款」挤在一起，
+   而手机上点图片本来就是最直觉的操作，不需要教。 */
+.ig-zoom-hint { opacity: 0; transition: opacity var(--ig-d2) var(--ig-ease); }
+@media (hover: hover) {
+  .ig-zoomable:hover .ig-zoom-hint,
+  .ig-zoomable:focus-visible .ig-zoom-hint { opacity: 1; }
+}
+@media (hover: none) {
+  .ig-zoom-hint { display: none; }
+}
+
 /* ---------- 统一降级 ---------- */
 @media (prefers-reduced-motion: reduce) {
-  .ig-card, .ig-chip, .ig-input, .ig-cta, .ig-result-img {
+  .ig-card, .ig-chip, .ig-input, .ig-cta, .ig-result-img, .ig-zoom-hint {
     transition-duration: 1ms !important;
   }
   .ig-chip-on, .ig-cta.is-busy, .ig-float, .ig-result-img, .ig-lightbox, .ig-lightbox-img {

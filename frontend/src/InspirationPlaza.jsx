@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Copy, Heart, ImageOff, Loader2, Search, Sparkles, Trash2 } from 'lucide-react';
+import { Copy, ChevronLeft, ChevronRight, Heart, ImageOff, Loader2, Search, Sparkles, Trash2, X, ZoomIn } from 'lucide-react';
 import { apiFetch } from './authFetch.js';
 import { useInspirationCategories } from './useInspirationCategories.js';
 
@@ -46,6 +46,14 @@ export default function InspirationPlaza({ onUsePrompt, refreshToken = 0 }) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [total, setTotal] = useState(0);
+
+  // 大图预览：null = 关闭，数字 = 当前展示的作品在 items 里的下标。
+  // 用「下标」而不是「item 对象」，是为了让 ←/→ 切换天然跟着列表走（列表增删后自动收敛）。
+  const [viewerIndex, setViewerIndex] = useState(null);
+  const viewerTriggerRef = useRef(null);   // 关闭时把焦点还给被点击的那张缩略图
+  const touchRef = useRef({ x: 0, y: 0 }); // 移动端滑动起点
+  const viewerOpen = viewerIndex !== null;
+  const viewerItem = viewerOpen ? items[viewerIndex] || null : null;
 
   const cursorRef = useRef(0);      // 已加载到的绝对偏移（唯一可信来源）
   const inflightRef = useRef(0);     // 当前进行中的请求序号，0 = 空闲
@@ -213,6 +221,114 @@ export default function InspirationPlaza({ onUsePrompt, refreshToken = 0 }) {
     flash('提示词已填入上方输入框');
   };
 
+  // ===== 大图预览 =====
+  const openViewer = (index, event) => {
+    viewerTriggerRef.current = event?.currentTarget || null;
+    setViewerIndex(index);
+  };
+
+  const closeViewer = () => setViewerIndex(null);
+
+  const stepViewer = (delta) => {
+    if (viewerIndex === null) return;
+    const next = viewerIndex + delta;
+    if (next < 0) return;
+    if (next >= items.length) {
+      // 已到「已加载的最后一张」：还有下一页就顺手拉一页，用户不用退出来再滚一次
+      if (delta > 0 && hasMore) loadMore();
+      return;
+    }
+    setViewerIndex(next);
+  };
+
+  // 锁滚动 + 关闭时还原焦点。
+  // ⚠️ 锁滚动必须**补偿滚动条宽度**：`overflow:hidden` 会让滚动条消失、整页右移 15px，
+  //    用户在灯箱里能看见背后的瀑布流"跳"了一下（桌面端实测就是 15px）。
+  // ⚠️ 焦点用 `preventScroll: true` 还回去，否则浏览器为露出缩略图会再滚一次，
+  //    表现是「关掉大图后列表跑到别的位置」。
+  useEffect(() => {
+    if (!viewerOpen) return undefined;
+    const { body } = document;
+    const scrollbar = window.innerWidth - document.documentElement.clientWidth;
+    const prevOverflow = body.style.overflow;
+    const prevPadding = body.style.paddingRight;
+    body.style.overflow = 'hidden';
+    if (scrollbar > 0) body.style.paddingRight = `${scrollbar}px`;
+    return () => {
+      body.style.overflow = prevOverflow;
+      body.style.paddingRight = prevPadding;
+      const trigger = viewerTriggerRef.current;
+      if (trigger && typeof trigger.focus === 'function') {
+        // ⚠️ 必须延到下一帧：用「点空白处」关闭时，mousedown 的**默认聚焦行为**
+        //    在 React 事件处理之后才执行，同步 focus 会被它覆盖成 body
+        //    （实测 activeElement 变成 BODY，键盘用户"丢失位置"）。
+        requestAnimationFrame(() => trigger.focus({ preventScroll: true }));
+      }
+    };
+  }, [viewerOpen]);
+
+  // 键盘：Esc 关、← → 切换。只在打开时绑定，避免全局常驻监听。
+  useEffect(() => {
+    if (!viewerOpen) return undefined;
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setViewerIndex(null);
+        return;
+      }
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      setViewerIndex((current) => {
+        if (current === null) return current;
+        const next = current + (event.key === 'ArrowRight' ? 1 : -1);
+        if (next < 0 || next >= items.length) return current;
+        return next;
+      });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [viewerOpen, items.length]);
+
+  // 预加载相邻两张：切换时直接命中缓存，不会先看到一段空屏。
+  useEffect(() => {
+    if (!viewerOpen) return undefined;
+    [viewerIndex - 1, viewerIndex + 1].forEach((idx) => {
+      const url = items[idx]?.url;
+      if (!url) return;
+      const img = new Image();
+      img.src = url;
+    });
+    return undefined;
+  }, [viewerOpen, viewerIndex, items]);
+
+  // 预览中列表变了（删掉自己的作品 / 切分类 / 发布后刷新）→ 下标必须收敛，否则会空白或越界
+  useEffect(() => {
+    if (viewerIndex === null) return;
+    if (items.length === 0) {
+      setViewerIndex(null);
+      return;
+    }
+    if (viewerIndex > items.length - 1) setViewerIndex(items.length - 1);
+  }, [items.length, viewerIndex]);
+
+  // 移动端左右滑动切换。竖滑不劫持（否则想上下拖一下图会被误判成翻页）；
+  // 位移小于 50px 当作误触，不切换 —— 手机上轻点提示层很容易带出几像素位移。
+  const onViewerTouchStart = (event) => {
+    const touch = event.touches[0];
+    if (!touch) return;
+    touchRef.current = { x: touch.clientX, y: touch.clientY };
+  };
+
+  const onViewerTouchEnd = (event) => {
+    const touch = event.changedTouches[0];
+    if (!touch) return;
+    const dx = touch.clientX - touchRef.current.x;
+    const dy = touch.clientY - touchRef.current.y;
+    if (Math.abs(dx) < 50) return;
+    if (Math.abs(dx) <= Math.abs(dy) * 1.4) return;
+    stepViewer(dx < 0 ? 1 : -1);
+  };
+
   return (
     <section className="mt-12">
       {/* 标题行：标题 + 分类 chips + 搜索 */}
@@ -258,22 +374,35 @@ export default function InspirationPlaza({ onUsePrompt, refreshToken = 0 }) {
       {/* 瀑布流 */}
       {items.length > 0 && (
         <div className="mt-3 columns-2 gap-3 sm:columns-3 lg:columns-4 xl:columns-5">
-          {items.map((item) => {
+          {items.map((item, index) => {
             const box = ratioPlaceholder(item.aspectRatio);
             return (
             <figure
               key={item.id}
               className="group relative mb-3 break-inside-avoid overflow-hidden rounded-2xl bg-slate-100 ring-1 ring-slate-900/5"
             >
-              <img
-                src={item.url}
-                alt={item.prompt || '灵感作品'}
-                width={box.width}
-                height={box.height}
-                loading="lazy"
-                decoding="async"
-                className="w-full transition-transform duration-[600ms] ease-out sm:group-hover:scale-[1.04]"
-              />
+              {/* 点击看大图：整张缩略图就是一个按钮（键盘可 Tab 到、读屏有语义）。
+                  提示只在桌面悬停出现 —— 手机上再叠一个徽标会和右上角「做同款」打架。 */}
+              <button
+                type="button"
+                onClick={(event) => openViewer(index, event)}
+                aria-label="查看大图"
+                title="查看大图"
+                className="ig-zoomable relative block w-full cursor-zoom-in focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+              >
+                <img
+                  src={item.url}
+                  alt={item.prompt || '灵感作品'}
+                  width={box.width}
+                  height={box.height}
+                  loading="lazy"
+                  decoding="async"
+                  className="w-full transition-transform duration-[600ms] ease-out sm:group-hover:scale-[1.04]"
+                />
+                <span className="ig-zoom-hint pointer-events-none absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-slate-900/55 px-2 py-1 text-[11px] font-medium text-white backdrop-blur">
+                  <ZoomIn size={12} /> 查看大图
+                </span>
+              </button>
 
               {/* 做同款：右上角，悬停出现（小屏常显，否则手机上没有入口） */}
               <button
@@ -334,6 +463,90 @@ export default function InspirationPlaza({ onUsePrompt, refreshToken = 0 }) {
         {loading && <span className="inline-flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> 加载中…</span>}
         {!loading && !hasMore && items.length > 0 && <span>已经看到全部了</span>}
       </div>
+
+      {/* ===== 大图预览（灯箱）=====
+          四个要点：
+          1. `src` 直接用 `item.url`（列表里就是原图，没有缩略图副本）⇒ 清晰度与原图完全一致；
+          2. 尺寸只受视口约束（92vw / 82vh）+ `width/height: auto` + `object-contain`，
+             长图（1:5）、超宽图、超大像素图都等比缩进屏幕，绝不拉伸变形、绝不溢出；
+          3. 小图保持原生像素**不放大**（auto 而不是 100%）—— 放大只会变糊；
+          4. 关闭方式：右上角 ×、点空白处、按 Esc；点图片本身不关闭（防误触）。
+             触屏另有左右滑动切换，桌面是 ← → 键 + 两侧箭头。 */}
+      {viewerItem && (
+        <div
+          className="ig-lightbox fixed inset-0 z-[70] flex flex-col bg-slate-950/90 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-label="查看大图"
+          onMouseDown={(event) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            // 点按钮、点图片本身不关闭；其余留白（图区两侧、顶栏、底栏）都算「点空白处」
+            if (target.closest('button') || target.closest('img')) return;
+            closeViewer();
+          }}
+        >
+          {/* 顶栏：位置计数 + 关闭 */}
+          <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3">
+            <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] tabular-nums text-white/80">
+              {viewerIndex + 1} / {items.length}
+            </span>
+            <button
+              type="button"
+              onClick={closeViewer}
+              aria-label="关闭预览"
+              title="关闭预览（Esc）"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          {/* 图区：左右滑动切换（关闭判定在对话框根节点上，见上） */}
+          <div
+            className="relative flex min-h-0 flex-1 items-center justify-center px-2"
+            onTouchStart={onViewerTouchStart}
+            onTouchEnd={onViewerTouchEnd}
+          >
+            <button
+              type="button"
+              onClick={() => stepViewer(-1)}
+              disabled={viewerIndex <= 0}
+              aria-label="上一张"
+              className="absolute left-1 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-white/10 sm:left-4 sm:h-11 sm:w-11"
+            >
+              <ChevronLeft size={22} />
+            </button>
+
+            <img
+              src={viewerItem.url}
+              alt={viewerItem.prompt || '灵感作品'}
+              draggable={false}
+              className="ig-lightbox-img rounded-lg shadow-2xl"
+              style={{ width: 'auto', height: 'auto', maxWidth: '92vw', maxHeight: '82vh', objectFit: 'contain' }}
+            />
+
+            <button
+              type="button"
+              onClick={() => stepViewer(1)}
+              disabled={viewerIndex >= items.length - 1 && !hasMore}
+              aria-label="下一张"
+              className="absolute right-1 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-white/10 sm:right-4 sm:h-11 sm:w-11"
+            >
+              <ChevronRight size={22} />
+            </button>
+          </div>
+
+          {/* 底栏：提示词 + 操作提示（按设备分文案，触屏看到「按 Esc」等于没提示） */}
+          <div className="shrink-0 px-4 pb-4 pt-2 text-center">
+            <p className="mx-auto line-clamp-2 max-w-3xl text-[12px] leading-relaxed text-white/75">{viewerItem.prompt}</p>
+            <p className="mt-1.5 text-[11px] text-white/45">
+              <span className="sm:hidden">左右滑动切换 · 点空白处或右上角 × 关闭</span>
+              <span className="hidden sm:inline">← → 切换 · 点击空白处或按 Esc 关闭</span>
+            </p>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
