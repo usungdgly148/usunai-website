@@ -6,7 +6,8 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const checks = [
   ['frontend/src/store.jsx', ["tutorialTitle: '新手使用教程'", "tutorialImage: ''", "tutorialUrl: ''"]],
   ['frontend/src/adminUI.jsx', ['export function TutorialSettings', 'aspect-[21/9]', 'maxWidth: 512', 'maxWidth: 840', 'formatImageBytes', 'tryUploadToBlob(processed, { admin: true })']],
-  ['frontend/src/imageCompress.js', ["canvas.toBlob(resolve, 'image/webp', quality)", "file.type === 'image/gif' || file.type === 'image/svg+xml'", 'maxHeight / img.height']],
+  // 2026-10-28 修正：编码格式已从写死 webp 改为 mimeType 参数（默认仍是 webp），断言随之对齐真实契约
+  ['frontend/src/imageCompress.js', ["mimeType = 'image/webp',", "canvas.toBlob(resolve, mimeType, quality)", "file.type === 'image/gif' || file.type === 'image/svg+xml'", 'maxHeight / img.height']],
   ['server/index.mjs', ["contentType.startsWith('image/') ? 5 * 1024 * 1024 : 25 * 1024 * 1024"]],
   ['frontend/src/blobUpload.js', ['adminFetch', 'const authenticatedFetch = admin ? adminFetch : apiFetch', 'authenticatedFetch(data.url']],
   ['frontend/src/store.jsx', ['const onUserUnauthorized', 'const onAdminUnauthorized', "addEventListener('usun:unauthorized', onUserUnauthorized)", "addEventListener('usun:admin-unauthorized', onAdminUnauthorized)"]],

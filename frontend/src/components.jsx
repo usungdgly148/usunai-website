@@ -76,10 +76,11 @@ export function Sidebar() {
 
 
   const homeItemClass = (active) =>
-    `group relative flex items-center gap-4 px-5 py-3.5 rounded-full text-[15px] font-medium transition-all duration-200 ease-out hover:translate-x-1 hover:text-brand-700 active:scale-[0.98] motion-reduce:hover:translate-x-0 motion-reduce:active:scale-100 before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-[3px] before:h-5 before:rounded-full before:bg-brand-600 before:content-[''] before:origin-center before:transition-transform before:duration-200 ${active ? 'bg-brand-100 text-slate-900 before:scale-y-100' : 'text-slate-700 hover:bg-slate-200/50 before:scale-y-0'}`;
+    `group flex items-center gap-4 px-5 py-3.5 rounded-full text-[15px] font-medium transition-all duration-200 ease-out hover:translate-x-1 hover:text-brand-700 active:scale-[0.98] motion-reduce:hover:translate-x-0 motion-reduce:active:scale-100 ${active ? 'bg-brand-100 text-slate-900' : 'text-slate-700 hover:bg-slate-200/50'}`;
 
+  // 选中态 = 大圆弧胶囊 + 浅蓝底，**不再画左侧竖线**（2026-10-28 主人指定，参考稿是无竖线的胶囊）
   const subItemClass = (active) =>
-    `group relative flex items-center gap-3 px-5 py-2.5 rounded-xl text-[14px] font-medium transition-all duration-200 ease-out hover:translate-x-1 hover:text-brand-700 active:scale-[0.98] motion-reduce:hover:translate-x-0 motion-reduce:active:scale-100 before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-[3px] before:h-5 before:rounded-full before:bg-brand-600 before:content-[''] before:origin-center before:transition-transform before:duration-200 ${active ? 'bg-brand-100 text-brand-700 before:scale-y-100' : 'text-slate-600 hover:bg-slate-200/50 before:scale-y-0'}`;
+    `group flex items-center gap-3 px-5 py-2.5 rounded-full text-[14px] font-medium transition-all duration-200 ease-out hover:translate-x-1 hover:text-brand-700 active:scale-[0.98] motion-reduce:hover:translate-x-0 motion-reduce:active:scale-100 ${active ? 'bg-brand-100 text-brand-700' : 'text-slate-600 hover:bg-slate-200/50'}`;
 
   return (
     <>
