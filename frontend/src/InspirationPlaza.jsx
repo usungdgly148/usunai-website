@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Copy, ChevronLeft, ChevronRight, Heart, ImageOff, Loader2, Search, Sparkles, Trash2, X, ZoomIn } from 'lucide-react';
+import { Copy, ChevronLeft, ChevronRight, Heart, ImageOff, Loader2, Search, Sparkles, X, ZoomIn } from 'lucide-react';
 import { apiFetch } from './authFetch.js';
 import { useInspirationCategories } from './useInspirationCategories.js';
 
@@ -190,24 +190,6 @@ export default function InspirationPlaza({ onUsePrompt, refreshToken = 0 }) {
         : one)));
     } catch (e) {
       setItems((prev) => prev.map((one) => (one.id === item.id ? item : one))); // 回滚
-      flash(String(e.message || e));
-    }
-  };
-
-  const removeItem = async (item) => {
-    if (!window.confirm('确定从灵感广场移除这张作品？')) return;
-    try {
-      const res = await apiFetch('/api/inspiration/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: item.id }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.ok) throw new Error(data.error || '删除失败');
-      setItems((prev) => prev.filter((one) => one.id !== item.id));
-      setTotal((prev) => Math.max(0, prev - 1));
-      flash('已从灵感广场移除');
-    } catch (e) {
       flash(String(e.message || e));
     }
   };
@@ -427,16 +409,6 @@ export default function InspirationPlaza({ onUsePrompt, refreshToken = 0 }) {
                     <Heart size={12} className={item.liked ? 'fill-rose-400 text-rose-400' : ''} />
                     {item.likes > 0 ? item.likes : '喜欢'}
                   </button>
-                  {item.mine && (
-                    <button
-                      type="button"
-                      onClick={() => removeItem(item)}
-                      className="ml-auto inline-flex items-center gap-1 transition hover:text-white"
-                      title="从灵感广场移除"
-                    >
-                      <Trash2 size={12} /> 移除
-                    </button>
-                  )}
                 </div>
               </figcaption>
             </figure>

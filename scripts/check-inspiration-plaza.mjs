@@ -244,6 +244,17 @@ check('悬停提示只在有 hover 的设备出现',
   cssSrc.includes('.ig-zoom-hint') && cssSrc.includes('@media (hover: none)')
   && cssSrc.includes('.ig-zoomable:hover .ig-zoom-hint'));
 
+// ===== 14. 「移除」已下线（2026-10-28 主人要求：图片右下角的移除按钮及交互全部删除）=====
+// 这一组是**反向断言**：功能删了就得一直删着，谁再加回来会立刻红。
+check('广场不再有「移除」按钮文案', !plazaSrc.includes('移除'));
+check('广场不再调用 /api/inspiration/delete', !plazaSrc.includes('/api/inspiration/delete'));
+check('广场不再引用垃圾桶图标', !plazaSrc.includes('Trash2'));
+check('广场不再有 removeItem 逻辑', !plazaSrc.includes('removeItem'));
+check('广场不再有二次确认弹窗（那是移除专用）', !plazaSrc.includes('window.confirm'));
+check('信息行不再用 ml-auto 撑右侧空位', !plazaSrc.includes('ml-auto inline-flex'));
+check('后台仍保留删除作品能力（本次只删前台入口）',
+  adminPageSrc.includes("adminFetch('/api/admin/inspiration/delete'"));
+
 if (failures.length) {
   console.log(`\n[FAIL] ${failures.length}/${pass + failures.length} 项不通过：`);
   for (const item of failures) console.log('  ·', item);
