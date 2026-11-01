@@ -415,7 +415,13 @@ function AnnouncementPanel({ announcements, expandedId, onToggle, onClose }) {
 
 // 前台「算力充值」弹窗：仅展示后台算力套餐 + 客服二维码 + 提示信息，不提供真实充值
 export function RechargeDialog({ packages, qr, info, expiryDate, hideExpiry, onClose }) {
-  const list = Array.isArray(packages) ? packages : [];
+  // 只展示后台「已上架」的套餐，口径必须与小程序端一致：
+  // `server/miniapp-api.mjs` 的 sanitizePublicContent 用 `published !== false`（缺省视为上架）+ 按 sortOrder 排序。
+  // ⚠️ 这里不能只信 store 传来的数组：store 里的 computePackages 是**后台管理用的全量数据**（后台要能看到未上架的），
+  //    所以面向用户的过滤必须落在展示层，否则「未上架」套餐会出现在会员的充值弹窗里（2026-11-01 线上问题）。
+  const list = (Array.isArray(packages) ? packages : [])
+    .filter((pkg) => pkg && pkg.published !== false)
+    .sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0));
   // 套餐有效期文案：固定生效日显示具体到期日；购买日起算则显示购买后天数
   const pkgEndDate = (from, days) => {
     const base = new Date(from);
@@ -470,10 +476,8 @@ export function RechargeDialog({ packages, qr, info, expiryDate, hideExpiry, onC
                     </div>
                     <div className="text-brand-600 font-bold shrink-0">¥{pkg.price}</div>
                   </div>
-                  <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs ${pkg.published ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                      {pkg.published ? '已上架' : '未上架'}
-                    </span>
+                  {/* 上架状态徽标已移除：列表只会有已上架套餐，再显示「已上架」是纯噪声 */}
+                  <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
                     <span className="text-[11px] text-slate-400">{pkgValidityText(pkg)}</span>
                   </div>
                 </div>
