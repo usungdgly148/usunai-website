@@ -55,17 +55,11 @@ page {
   --td-brand-color: var(--mini-primary);
   --td-brand-color-light: var(--mini-primary-soft);
 
-  /* 底部导航栏（iOS Liquid Glass：80% 基础伪玻璃 + 20% 真毛玻璃增强） */
-  /* 基础玻璃渐变 + 淡蓝环境光（radial-gradient 多层），不依赖 backdrop-filter */
-  --mini-tab-bg: radial-gradient(circle at 80% 50%, rgba(70, 130, 255, .10), transparent 55%), linear-gradient(180deg, rgba(255, 255, 255, .82), rgba(245, 249, 255, .88));
-  --mini-tab-border: rgba(255, 255, 255, .88);        /* 半透明玻璃边 */
-  --mini-tab-shadow: 0 8rpx 30rpx rgba(60, 100, 160, .12), inset 0 1rpx 0 rgba(255, 255, 255, .95);
-  --mini-tab-text: rgba(138, 152, 173, .7);           /* 未选中灰蓝文字（0.7 透明度，低存在感） */
-  --mini-tab-text-active: #2878e8;                    /* 选中蓝色文字 */
-  /* 选中气泡：斜向玻璃渐变 + 内高光 + 轻微蓝光晕 */
-  --mini-tab-bubble: linear-gradient(145deg, rgba(255, 255, 255, .96), rgba(235, 244, 255, .80));
-  --mini-tab-bubble-border: rgba(255, 255, 255, .95);
-  --mini-tab-bubble-shadow: inset 0 1rpx 4rpx rgba(255, 255, 255, 1), 0 4rpx 16rpx rgba(50, 120, 240, .15);
+  /* 底部导航栏（固定贴底 · 铺满宽度：白底 + 顶部 1px 分隔线，无圆角无阴影） */
+  --mini-tab-bg: #ffffff;                             /* 贴底栏底色 */
+  --mini-tab-border: rgba(16, 31, 56, .08);           /* 顶部分隔线 */
+  --mini-tab-text: #8a98ad;                           /* 未选中文字（与未选中图标同色） */
+  --mini-tab-text-active: #2878e8;                    /* 选中文字（与选中实心图标同色） */
 }
 
 view, text, input, textarea, button, image { box-sizing: border-box; }
@@ -251,7 +245,10 @@ button::after { border: 0; }
 .layout-banner-title { position: absolute; left: 24px; bottom: 20px; max-width: 80%; color: #fff; font-size: 28px; font-weight: 650; text-shadow: 0 1px 5px rgba(0,0,0,.5); }
 
 /* Miniapp visual design V1: light palette shared with the web application. */
-.mini-home-page, .mini-profile-page, .mini-assets-page { padding-bottom: 210px; }
+/* 底部留白交给 <MiniappTabBar> 的 .mini-tab-bar-spacer（104rpx + 安全区），
+   页面只留一层呼吸。原来的 210px 是给「悬浮胶囊 + 大量留白」的历史值，
+   贴底后不改就会在内容与底栏之间多出一大片空白（2026-11-02）。 */
+.mini-home-page, .mini-profile-page, .mini-assets-page { padding-bottom: 32px; }
 .mini-home-brand { display: flex; align-items: center; gap: 16px; margin: 4px 0 24px; }
 .mini-home-brand-mark { display: flex; width: 66px; height: 66px; align-items: center; justify-content: center; border-radius: 20px; background: linear-gradient(135deg, #2e68ec, #6e59eb); color: #fff; font-size: 24px; font-weight: 800; }
 .mini-home-brand-title { display: block; color: var(--mini-ink); font-size: 35px; font-weight: 750; }
@@ -1204,10 +1201,14 @@ button::after { border: 0; }
 .mini-logout-button { width: 100%; margin: 0; height: 92px; border-radius: 24px; background: var(--mini-surface); color: #ff4d4f; font-size: 29px; font-weight: 600; line-height: 92px; box-shadow: 0 8px 24px rgba(45, 80, 135, .06); }
 .mini-logout-button::after { border: 0; }
 
-/* ===== 底部导航栏：iOS Liquid Glass 悬浮胶囊（80% 基础伪玻璃 + 20% 真毛玻璃增强） ===== */
+/* ===== 底部导航栏：固定贴底 · 铺满宽度（2026-11-02 由悬浮玻璃胶囊改造） =====
+   设计口径：白底贴底、左右 0 留白、无圆角，顶部 1px 分隔线；
+   5 等分竖排（图标在上 / 文字在下），未选中线条图标+灰蓝字，选中实心图标+蓝字。
+   ⚠️ 已删除：996rpx 圆角、左右 margin、玻璃渐变、backdrop-filter、阴影、选中气泡。
+      贴底后底下就是页面底色，模糊没有任何视觉收益，只是白耗性能。 */
 .mini-tab-bar-spacer {
-  /* 高度 = 胶囊上外边距 16 + 胶囊高 110 + 胶囊下外边距 16 = 142；额外 padding-bottom 给安全区 */
-  height: 142rpx;
+  /* 高度 = 栏内容 104rpx；底部安全区单独用 padding 撑，避免 spacer 与固定栏差一行 */
+  height: 104rpx;
   padding-bottom: constant(safe-area-inset-bottom);
   padding-bottom: env(safe-area-inset-bottom);
 }
@@ -1219,85 +1220,38 @@ button::after { border: 0; }
   z-index: 100;
   padding-bottom: constant(safe-area-inset-bottom);
   padding-bottom: env(safe-area-inset-bottom);
-  pointer-events: none; /* 胶囊外不挡点击，胶囊本身 pointer-events:auto 恢复 */
+  background: var(--mini-tab-bg);
+  border-top: 1rpx solid var(--mini-tab-border);
 }
-/* 悬浮液态玻璃胶囊底板 */
 .mini-tab-bar-inner {
-  position: relative;
   display: flex;
   align-items: stretch;
-  height: 110rpx;
-  margin: 16rpx 24rpx;
-  padding: 8rpx 10rpx;
-  border: 2rpx solid var(--mini-tab-border);
-  border-radius: 999rpx;
-  /* 基础伪玻璃：斜向白→淡蓝渐变 + 淡蓝环境光，不依赖 backdrop-filter 也成立 */
-  background: var(--mini-tab-bg);
-  box-shadow: var(--mini-tab-shadow);
-  /* 真毛玻璃增强：不支持时浏览器忽略，基础玻璃继续正常显示 */
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
-  pointer-events: auto;
-}
-/* 顶部高光：模拟玻璃反光，柔和不留明显白线（高度约 27%） */
-.mini-tab-bar-inner::before {
-  content: '';
-  position: absolute;
-  left: 18rpx;
-  right: 18rpx;
-  top: 3rpx;
-  height: 30rpx;
-  border-radius: 999rpx;
-  background: linear-gradient(180deg, rgba(255, 255, 255, .6), rgba(255, 255, 255, 0));
-  pointer-events: none;
+  height: 104rpx;
 }
 .mini-tab-item {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.mini-tab-item-hover { opacity: .7; }
-/* 气泡容器：固定尺寸，未选中透明，选中浮现玻璃背景 */
-.mini-tab-bubble {
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 108rpx;
-  height: 92rpx;
-  border-radius: 999rpx;
-  border: 2rpx solid transparent;
-  transition: transform 220ms ease, background 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+  transition: opacity 160ms ease;
 }
+.mini-tab-item-hover { opacity: .6; }
+/* 图标尺寸/两套造型图由 styles/tab-icons.scss 提供，这里只补状态过渡 */
 .mini-tab-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 44rpx;
-  height: 44rpx;
-  opacity: .7; /* 未选中图标 0.7 透明度，低存在感 */
-  transition: opacity 220ms ease;
+  transition: opacity 160ms ease;
 }
 .mini-tab-label {
-  margin-top: 2rpx;
-  font-size: 24rpx;
-  line-height: 1.2;
+  margin-top: 4rpx;
+  font-size: 22rpx;
+  line-height: 1.15;
   white-space: nowrap;
   color: var(--mini-tab-text);
-  transition: color 220ms ease;
+  transition: color 160ms ease;
 }
-/* 选中态：独立玻璃气泡（斜向玻璃渐变 + 内高光 + 轻微蓝光晕 + 轻微上浮） */
-.mini-tab-item-active .mini-tab-bubble {
-  background: var(--mini-tab-bubble);
-  border-color: var(--mini-tab-bubble-border);
-  box-shadow: var(--mini-tab-bubble-shadow);
-  transform: translateY(-2rpx) scale(1.02);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-}
-.mini-tab-item-active .mini-tab-icon { opacity: 1; }
-.mini-tab-item-active .mini-tab-label { color: var(--mini-tab-text-active); font-weight: 650; }
+/* 选中态：实心图标（另一套图）+ 蓝色文字，图文颜色同步切换 */
+.mini-tab-item-active .mini-tab-label { color: var(--mini-tab-text-active); font-weight: 600; }
 
 
 /* ===== 「AI全能设计」小程序创作页（P0：文生图） =====

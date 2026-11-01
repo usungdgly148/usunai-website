@@ -12,23 +12,23 @@ const tabs: Array<{ key: TabKey; label: string; url: string }> = [
 ];
 
 /**
- * 底部导航栏（自绘 · iOS Liquid Glass 液态玻璃悬浮胶囊）。
+ * 底部导航栏（自绘 · 固定贴底铺满宽度）。
  *
- * 视觉：悬浮式玻璃胶囊（左右留白、圆角 999rpx、淡蓝环境光 + 白→淡蓝渐变基础玻璃 +
- * 顶部高光 + 半透明细边 + 柔和阴影），5 等分；
- * 当前项为「独立玻璃气泡」（固定尺寸气泡，斜向玻璃渐变 + 内高光 + 轻微蓝光晕 + 上浮 2rpx，
- * 蓝色图标 + 蓝色文字 #2878E8），未选中项为灰蓝细线图标（0.7 透明度）+ 灰蓝文字。
+ * 视觉（2026-11-02 主人指定，参考图：抖音底部栏）：
+ * 白底贴底、左右无留白、无圆角，顶部一条 1px 分隔线与页面内容切分；
+ * 5 等分，每项「图标在上、文字在下」竖排；
+ * 未选中 = 线条描边图标 + 灰蓝文字；选中 = **实心图标** + 蓝色文字（图文同色同步切换）。
  *
- * 实现原则（80% 基础伪玻璃 + 20% 真毛玻璃增强）：
- * 基础玻璃用渐变 + 高光 + 阴影，完全不依赖 backdrop-filter；
- * backdrop-filter 只是增强（不支持时自动被忽略，基础玻璃照常显示）。
+ * ⚠️ 历史沿革：改造前是 iOS Liquid Glass 悬浮胶囊（左右 margin + 999rpx 圆角 + 玻璃渐变
+ * + backdrop-filter + 选中态玻璃气泡）。贴底后这些全部没有意义（底下就是页面底色，模糊
+ * 等于白耗性能），已整体移除；`.mini-tab-bubble` 气泡层也随之删掉，别再按旧结构加回来。
  *
  * ⚠️ 图标实现说明（踩坑记录，勿改回内联 SVG）：
  * 微信小程序 WXML 只渲染已注册的内置组件，Taro 生成的 dist/base.wxml 里没有
  * svg / path / rect / linearGradient 等模板，所以「内联 <svg> 图标」会被**静默丢弃**，
- * 表现就是——胶囊容器正常显示，但里面只剩文字、图标全没了。
+ * 表现就是——容器正常显示，但里面只剩文字、图标全没了。
  * 因此图标走 CSS background-image + base64 内联 PNG data URI，
- * 由 src/styles/tab-icons.scss 提供（脚本 scripts/gen-tab-icons.js 生成）。
+ * 由 src/styles/tab-icons.scss 提供（脚本 scripts/gen-tab-icons.js 生成，含线条/实心两套）。
  */
 export function MiniappTabBar({ active }: { active: TabKey }) {
   const jump = (key: TabKey) => {
@@ -38,7 +38,7 @@ export function MiniappTabBar({ active }: { active: TabKey }) {
   };
   return (
     <>
-      {/* 占位：让页面底部留出胶囊 + 安全区高度，避免内容被悬浮胶囊遮住 */}
+      {/* 占位：贴底栏是 fixed，用它把页面内容顶上去，避免最后一段被栏体盖住 */}
       <View className='mini-tab-bar-spacer' />
       <View className='mini-tab-bar'>
         <View className='mini-tab-bar-inner'>
@@ -51,10 +51,8 @@ export function MiniappTabBar({ active }: { active: TabKey }) {
                 hoverClass='mini-tab-item-hover'
                 onClick={() => jump(tab.key)}
               >
-                <View className='mini-tab-bubble'>
-                  <View className={`mini-tab-icon mini-tab-icon-${tab.key}`} />
-                  <View className='mini-tab-label'>{tab.label}</View>
-                </View>
+                <View className={`mini-tab-icon mini-tab-icon-${tab.key}`} />
+                <View className='mini-tab-label'>{tab.label}</View>
               </View>
             );
           })}

@@ -82,15 +82,11 @@ const DARK_VARS: Record<string, string> = {
   '--td-tab-bar-bg-color': 'rgba(23, 33, 51, .94)',
   '--td-tab-bar-border-color': 'var(--mini-line-faint)',
   '--td-tab-bar-round-shadow': '0 8px 24px rgba(0, 0, 0, .3)',
-  /* 自绘胶囊导航栏（iOS Liquid Glass · 深色覆盖）：深底渐变基础玻璃 + 蓝色气泡 */
-  '--mini-tab-bg': 'radial-gradient(circle at 80% 50%, rgba(70, 130, 255, .12), transparent 55%), linear-gradient(180deg, rgba(30, 41, 59, .88), rgba(24, 34, 50, .92))',
-  '--mini-tab-border': 'rgba(255, 255, 255, .14)',
-  '--mini-tab-shadow': '0 8rpx 30rpx rgba(0, 0, 0, .5), inset 0 1rpx 0 rgba(255, 255, 255, .12)',
-  '--mini-tab-text': 'rgba(124, 139, 163, .7)',
+  /* 自绘贴底导航栏（深色覆盖）：深底 + 顶部细线，去掉旧胶囊的玻璃/气泡/阴影变量 */
+  '--mini-tab-bg': '#131c2b',
+  '--mini-tab-border': 'rgba(255, 255, 255, .08)',
+  '--mini-tab-text': '#6d7f98',
   '--mini-tab-text-active': '#7ca4ff',
-  '--mini-tab-bubble': 'linear-gradient(145deg, rgba(74, 125, 255, .32), rgba(50, 85, 160, .24))',
-  '--mini-tab-bubble-border': 'rgba(140, 170, 255, .4)',
-  '--mini-tab-bubble-shadow': 'inset 0 1rpx 4rpx rgba(255, 255, 255, .2), 0 4rpx 16rpx rgba(0, 0, 0, .4)',
 };
 
 type ThemeListener = () => void;
