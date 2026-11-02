@@ -13,10 +13,11 @@
   --font-display: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STSong', 'PingFang SC', 'Microsoft YaHei', serif;
   --font-num: 'Sora', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', sans-serif;
 
-  /* 品牌双色（2026-08-03 视觉升级 #6）：深墨蓝为主 + 琥珀金为强调，80/15/5 配比 */
-  --brand: #1E4A78;
-  --brand-dark: #0F2A4A;
-  --brand-light: #EAF0F7;
+  /* 品牌双色（2026-11-03 起为「橙色 + 琥珀金」）：主色 #FF6900 与 Tailwind 的 brand 色阶同源，
+     改色阶时这里必须一起改，否则 .text-brand / .bg-brand 系列会和 Tailwind 类不一致 */
+  --brand: #FF6900;
+  --brand-dark: #E85D00;
+  --brand-light: #FFF4EC;
   --accent: #C8881A;
   --accent-dark: #875710;
   --accent-light: #FDF6E9;
@@ -149,9 +150,9 @@ body {
 .bg-accent       { background-color: var(--accent); }
 .border-accent   { border-color: var(--accent); }
 
-/* 品牌渐变文字（深墨蓝 → 蓝 → 琥珀金，仅用于关键大数字/标题，克制使用） */
+/* 品牌渐变文字（深橙 → 主橙 → 浅橙，仅用于关键大数字/标题，克制使用） */
 .gradient-brand {
-  background: linear-gradient(135deg, #0F2A4A 0%, #2C6CA8 55%, #C8881A 120%);
+  background: linear-gradient(135deg, #C24F00 0%, #FF6900 55%, #FFA96E 120%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -165,7 +166,7 @@ body {
   pointer-events: none;
   background-color: #ffffff;
   background-image:
-    radial-gradient(120% 55% at 50% -8%, rgba(30, 74, 120, 0.10), rgba(30, 74, 120, 0) 60%),
+    radial-gradient(120% 55% at 50% -8%, rgba(255, 105, 0, 0.10), rgba(255, 105, 0, 0) 60%),
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
   background-repeat: no-repeat, repeat;
   background-size: 100% 100%, 180px 180px;
@@ -181,7 +182,7 @@ body {
 
   .page-noise {
     position: absolute;
-    background-image: radial-gradient(120% 55% at 50% -8%, rgba(30, 74, 120, 0.10), rgba(30, 74, 120, 0) 60%);
+    background-image: radial-gradient(120% 55% at 50% -8%, rgba(255, 105, 0, 0.10), rgba(255, 105, 0, 0) 60%);
     background-repeat: no-repeat;
     background-size: 100% 100%;
   }
@@ -353,7 +354,7 @@ aside:hover .apple-scrollbar::-webkit-scrollbar-thumb:hover,
   /* 三级阴影：越靠下越"远"，透明度始终 < 0.18 */
   --ig-shadow-1: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.03);
   --ig-shadow-2: 0 2px 4px rgba(15, 23, 42, 0.05), 0 10px 24px -14px rgba(15, 23, 42, 0.14);
-  --ig-ring: 0 0 0 3px rgba(22, 58, 95, 0.12);
+  --ig-ring: 0 0 0 3px rgba(255, 105, 0, 0.12);
 }
 
 /* ---------- 卡片：静止几乎无阴影，hover / 内部聚焦时抬一级 ---------- */
@@ -390,7 +391,7 @@ aside:hover .apple-scrollbar::-webkit-scrollbar-thumb:hover,
 }
 /* 选中：给一点"落定"的呼吸 —— 只在类名刚加上时播一次，不是无限循环 */
 .ig-chip-on {
-  box-shadow: inset 0 0 0 1px rgba(22, 58, 95, 0.06), 0 1px 2px rgba(22, 58, 95, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 105, 0, 0.06), 0 1px 2px rgba(255, 105, 0, 0.06);
   /* backwards（不是 both）：动画结束后释放 transform，否则会一直压住 hover 的位移 */
   animation: igSettle var(--ig-d3) var(--ig-ease-expo) backwards;
 }
@@ -404,7 +405,7 @@ aside:hover .apple-scrollbar::-webkit-scrollbar-thumb:hover,
   transition: border-color var(--ig-d2) var(--ig-ease),
               box-shadow var(--ig-d2) var(--ig-ease),
               background-color var(--ig-d2) var(--ig-ease);
-  caret-color: #163A5F;
+  caret-color: #FF6900;
 }
 @media (hover: hover) {
   /* slate-400：与静止的 slate-300 拉开一档，否则看不出变化 */
@@ -422,7 +423,7 @@ aside:hover .apple-scrollbar::-webkit-scrollbar-thumb:hover,
 @media (hover: hover) {
   .ig-cta:hover:not(:disabled) {
     transform: translateY(-1px);
-    box-shadow: 0 4px 10px -4px rgba(22, 58, 95, 0.35);
+    box-shadow: 0 4px 10px -4px rgba(255, 105, 0, 0.35);
   }
 }
 .ig-cta:active:not(:disabled) {
@@ -434,8 +435,8 @@ aside:hover .apple-scrollbar::-webkit-scrollbar-thumb:hover,
 /* 等待中的"呼吸"：只在这一刻出现，2.4s 一轮、幅度极低，不干扰阅读 */
 .ig-cta.is-busy { animation: igBreathe 2.4s var(--ig-ease) infinite; }
 @keyframes igBreathe {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(22, 58, 95, 0); }
-  50%      { box-shadow: 0 0 0 4px rgba(22, 58, 95, 0.10); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 105, 0, 0); }
+  50%      { box-shadow: 0 0 0 4px rgba(255, 105, 0, 0.10); }
 }
 
 /* ---------- 结果图：出现时轻微放大 + 淡入，像照片"落定" ---------- */

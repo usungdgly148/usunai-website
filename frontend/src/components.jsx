@@ -1525,7 +1525,8 @@ const CATEGORY_THEME = {
   // 私域 / 个人 IP：深色渐变，沉稳高级
   'private': { dark: true, header: 'linear-gradient(135deg, #1E293B 0%, #334155 70%, #475569 100%)', accent: '#C8881A' },
   // GEO / 本地获客：网格纹理，科技感
-  'geo': { dark: false, header: 'linear-gradient(135deg, #EFF6FF 0%, #FFFFFF 100%)', accent: '#1E4A78', grid: true },
+  // 网格线原为品牌深蓝 #1E4A78（= 旧 brand-500），2026-11-03 品牌色改橙后同步换成 #FF6900。
+  'geo': { dark: false, header: 'linear-gradient(135deg, #EFF6FF 0%, #FFFFFF 100%)', accent: '#FF6900', grid: true },
 };
 
 export function AgentCard({ item, to, featured = false, className = '' }) {
@@ -1564,7 +1565,7 @@ export function AgentCard({ item, to, featured = false, className = '' }) {
   const headerDecor = theme?.ribbon ? (
     <div className="absolute -top-3 -right-3 w-10 h-10 rotate-45" style={{ background: 'linear-gradient(135deg, #F4511E, #FB8C00)' }} />
   ) : theme?.grid ? (
-    <div className="absolute inset-0 opacity-[0.10]" style={{ backgroundImage: 'linear-gradient(#1E4A78 1px, transparent 1px), linear-gradient(90deg, #1E4A78 1px, transparent 1px)', backgroundSize: '18px 18px' }} />
+    <div className="absolute inset-0 opacity-[0.10]" style={{ backgroundImage: 'linear-gradient(#FF6900 1px, transparent 1px), linear-gradient(90deg, #FF6900 1px, transparent 1px)', backgroundSize: '18px 18px' }} />
   ) : null;
 
   const Header = ({ cls }) => (
