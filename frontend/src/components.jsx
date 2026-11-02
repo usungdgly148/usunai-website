@@ -7,8 +7,10 @@ import {
   Home, FileText, Video, BookOpen, Radio, Image, Clapperboard, MessageCircle, Search, Briefcase, ShoppingBag,
   Menu, X, User, LogOut, ChevronRight, Sparkles, LayoutGrid, History, Settings, HelpCircle, MessageSquare,
   Grid3X3, Bell, CreditCard, Ticket, Receipt, Flag, Star, Users, Mic, Calendar, ArrowLeft, Archive, Zap, Package,
-  Target, Handshake, Crown, UserCircle, Lightbulb, Flame, Copy, Hammer, Boxes, DoorOpen, Layers, Square, Droplets, Sofa, PenTool, HardHat, FileCheck, BadgeCheck, CalendarDays, QrCode, AlertTriangle
+  Target, Handshake, Crown, UserCircle, Lightbulb, Flame, Copy, Hammer, Boxes, DoorOpen, Layers, Square, Droplets, Sofa, PenTool, HardHat, FileCheck, BadgeCheck, CalendarDays, QrCode, AlertTriangle,
+  CheckCircle2, RefreshCw, Loader2, Clock, ShieldCheck
 } from 'lucide-react';
+import QRCode from 'qrcode';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { gradientCss, hasCustomGradient } from './cardGradient.js';
@@ -413,15 +415,202 @@ function AnnouncementPanel({ announcements, expandedId, onToggle, onClose }) {
   );
 }
 
-// 前台「算力充值」弹窗：仅展示后台算力套餐 + 客服二维码 + 提示信息，不提供真实充值
-export function RechargeDialog({ packages, qr, info, expiryDate, hideExpiry, onClose }) {
+// 前台「算力充值」弹窗：选套餐 → 生成微信支付二维码 → 微信扫码支付 → 算力自动到账。
+//
+// 支付通道 = 微信 Native 支付（扫码支付）：
+//   · 服务端 POST /api/recharge/order 返回 code_url（weixin://wxpay/bizpayurl?pr=xxx）；
+//   · 前端用 qrcode 库把 code_url 画成二维码，用户拿微信「扫一扫」付款；
+//   · 到账由服务端兜底（支付通知 + 前端轮询 + 定时对账三重保险），前端只负责展示状态。
+//
+// 状态机：select（选套餐）→ paying（等支付）→ success（已到账）/ error（失败或超时，可重试）。
+export function RechargeDialog({ packages, info, expiryDate, hideExpiry, onClose }) {
+  const { user, points, refreshCurrentUser, refreshCurrentUserCompute } = useStore();
   // 只展示后台「已上架」的套餐，口径必须与小程序端一致：
   // `server/miniapp-api.mjs` 的 sanitizePublicContent 用 `published !== false`（缺省视为上架）+ 按 sortOrder 排序。
   // ⚠️ 这里不能只信 store 传来的数组：store 里的 computePackages 是**后台管理用的全量数据**（后台要能看到未上架的），
   //    所以面向用户的过滤必须落在展示层，否则「未上架」套餐会出现在会员的充值弹窗里（2026-11-01 线上问题）。
-  const list = (Array.isArray(packages) ? packages : [])
+  const list = useMemo(() => (Array.isArray(packages) ? packages : [])
     .filter((pkg) => pkg && pkg.published !== false)
-    .sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0));
+    .sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0)), [packages]);
+  const payable = (pkg) => Number(pkg.points) > 0 && Number(pkg.price) > 0;
+
+  const [selectedId, setSelectedId] = useState('');
+  const [step, setStep] = useState('select'); // select | paying | success | error
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState(''); // 选套餐阶段的行内提示（未绑手机号 / 限购等）
+  const [errMsg, setErrMsg] = useState(''); // error 阶段的说明
+  const [order, setOrder] = useState(null); // { orderId, points, amount, packageName, expiresAt }
+  const [qrcodeUrl, setQrcodeUrl] = useState(''); // 待渲染的 code_url
+  const [qrSrc, setQrSrc] = useState(''); // 渲染后的 dataURL
+  const [paidOrder, setPaidOrder] = useState(null);
+  const [remainMs, setRemainMs] = useState(0);
+
+  const selected = list.find((pkg) => String(pkg.id) === String(selectedId)) || null;
+
+  // 默认选中第一个可支付套餐，减少一次点击
+  useEffect(() => {
+    if (selectedId) return;
+    const first = list.find(payable);
+    if (first) setSelectedId(String(first.id));
+  }, [list, selectedId]);
+
+  // code_url → 二维码图片。qrcode 库输出 dataURL，离屏渲染，不依赖任何外链服务。
+  useEffect(() => {
+    let alive = true;
+    if (!qrcodeUrl) { setQrSrc(''); return () => { alive = false; }; }
+    QRCode.toDataURL(qrcodeUrl, {
+      width: 640,
+      margin: 1,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#0f172a', light: '#ffffff' },
+    })
+      .then((url) => { if (alive) setQrSrc(url); })
+      .catch(() => {
+        if (!alive) return;
+        setErrMsg('二维码生成失败，请重新获取。');
+        setStep('error');
+      });
+    return () => { alive = false; };
+  }, [qrcodeUrl]);
+
+  // 倒计时：二维码有效期由服务端下发（expiresAt），前端只做展示，不自己算过期。
+  useEffect(() => {
+    if (step !== 'paying' || !order || !order.expiresAt) return undefined;
+    const end = Date.parse(order.expiresAt);
+    if (!Number.isFinite(end)) return undefined;
+    const tick = () => setRemainMs(Math.max(0, end - Date.now()));
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [step, order]);
+
+  // 到账确认：每 2.5s 查一次服务端订单状态（服务端会顺带向微信查单，不依赖通知是否送达）。
+  useEffect(() => {
+    if (step !== 'paying' || !order || !order.orderId) return undefined;
+    let alive = true;
+    let timer = null;
+    const tick = async () => {
+      try {
+        const res = await apiFetch(`/api/recharge/status?orderId=${encodeURIComponent(order.orderId)}`);
+        const data = await res.json().catch(() => null);
+        if (!alive) return;
+        if (data && data.ok && data.order) {
+          if (data.order.status === 'paid') { finishPaid(data.order); return; }
+          if (data.order.status === 'closed') {
+            setErrMsg('二维码已过期，这笔订单已关闭。如需继续充值，请重新获取二维码。');
+            setStep('error');
+            return;
+          }
+        }
+      } catch { /* 网络抖动：交给下一轮 */ }
+      if (alive) timer = setTimeout(tick, 2500);
+    };
+    timer = setTimeout(tick, 1500);
+    return () => { alive = false; if (timer) clearTimeout(timer); };
+  }, [step, order]);
+
+  // 倒计时归零：先跟服务端确认一次（可能刚好付成功），确认没付才转 error 态。
+  useEffect(() => {
+    if (step !== 'paying' || !order || !order.expiresAt) return undefined;
+    const end = Date.parse(order.expiresAt);
+    if (!Number.isFinite(end) || Date.now() < end) return undefined;
+    let alive = true;
+    (async () => {
+      try {
+        const res = await apiFetch(`/api/recharge/status?orderId=${encodeURIComponent(order.orderId)}`);
+        const data = await res.json().catch(() => null);
+        if (!alive) return;
+        if (data && data.ok && data.order && data.order.status === 'paid') { finishPaid(data.order); return; }
+        setErrMsg('二维码已过期。若您已经完成支付，可点「我已支付，重新查询」；否则请重新获取二维码。');
+        setStep('error');
+      } catch {
+        if (alive) {
+          setErrMsg('二维码已过期，请重新获取。');
+          setStep('error');
+        }
+      }
+    })();
+    return () => { alive = false; };
+  }, [remainMs, step, order]);
+
+  function finishPaid(paid) {
+    setPaidOrder(paid);
+    setStep('success');
+    // 到账后立刻拉一次权威余额/套餐（弹窗里的「当前算力」与页面顶部的点数都读 store）
+    try { refreshCurrentUser(); refreshCurrentUserCompute(); } catch { /* ignore */ }
+  }
+
+  const startPay = async () => {
+    if (busy) return;
+    if (!selected) { setNotice('请先选择一个套餐'); return; }
+    setBusy(true);
+    setNotice('');
+    setErrMsg('');
+    setQrSrc('');
+    setQrcodeUrl('');
+    try {
+      const res = await apiFetch('/api/recharge/order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packageId: selected.id }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || !data.ok) {
+        const code = String((data && data.code) || '');
+        const msg = String((data && data.msg) || '暂时无法发起支付，请稍后重试');
+        // 业务校验类错误（未绑手机号 / 试用已购 / 未登录 / 套餐变动）留在选套餐页提示 —— 原地重试没有意义。
+        if (['PHONE_BIND_REQUIRED', 'TRIAL_ALREADY_PURCHASED', 'NOT_LOGGED_IN', 'PACKAGE_NOT_FOUND', 'INVALID_PACKAGE', 'ADMIN_NOT_ALLOWED'].includes(code)) {
+          // 未登录：store 的登录弹窗只挂在 Header 内部（App 层没有渲染它），从这里调不到，
+          // 所以只能给一条**能照着做**的指引，别让用户对着一句「请先登录」干瞪眼。
+          setNotice(code === 'NOT_LOGGED_IN'
+            ? '请先登录后再充值：点页面右上角「登录」，登录完成后重新打开本弹窗即可继续支付。'
+            : msg);
+          setStep('select');
+        } else {
+          setErrMsg(msg);
+          setStep('error');
+        }
+        return;
+      }
+      const next = data.order || {};
+      setOrder(next);
+      setQrcodeUrl(String(data.codeUrl || ''));
+      setPaidOrder(null);
+      setRemainMs(Math.max(0, (Date.parse(next.expiresAt || '') || 0) - Date.now()));
+      setStep('paying');
+    } catch {
+      setErrMsg('网络异常，未能发起支付，请稍后重试。');
+      setStep('error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // 支付可能已成功但通知延迟：给用户一个手动复查入口，避免「付了钱却显示没付」
+  const recheck = async () => {
+    if (busy || !order || !order.orderId) return;
+    setBusy(true);
+    try {
+      const res = await apiFetch(`/api/recharge/status?orderId=${encodeURIComponent(order.orderId)}`);
+      const data = await res.json().catch(() => null);
+      if (data && data.ok && data.order && data.order.status === 'paid') { finishPaid(data.order); return; }
+      setErrMsg(data && data.ok ? '这笔订单仍未支付成功，请重新获取二维码再试一次。' : String((data && data.msg) || '查询失败，请稍后重试。'));
+    } catch {
+      setErrMsg('网络异常，查询失败，请稍后重试。');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const backToSelect = () => {
+    setStep('select');
+    setErrMsg('');
+    setNotice('');
+    setOrder(null);
+    setQrcodeUrl('');
+    setQrSrc('');
+  };
+
   // 套餐有效期文案：固定生效日显示具体到期日；购买日起算则显示购买后天数
   const pkgEndDate = (from, days) => {
     const base = new Date(from);
@@ -435,6 +624,12 @@ export function RechargeDialog({ packages, qr, info, expiryDate, hideExpiry, onC
     if (pkg.validFrom) return `长期有效（${pkg.validFrom} 起）`;
     return '长期有效';
   };
+  const mmss = (ms) => {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+  };
+  const priceText = (v) => `¥${Number(v).toFixed(2).replace(/\.00$/, '')}`;
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
@@ -446,7 +641,6 @@ export function RechargeDialog({ packages, qr, info, expiryDate, hideExpiry, onC
             </div>
             <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
           </div>
-          <p className="text-sm text-slate-500 mb-5">以下为当前可选的算力套餐。算力充值由客服人工办理，请扫码联系客服完成。</p>
 
           {/* 套餐已到期提示横幅：由收银台/到期拦截传入 expiryDate 触发；新访客入口(底部 CTA)由 hideExpiry 跳过 */}
           {expiryDate && !hideExpiry && (
@@ -455,56 +649,210 @@ export function RechargeDialog({ packages, qr, info, expiryDate, hideExpiry, onC
                 <AlertTriangle size={18} /> 算力套餐已到期
               </div>
               <p className="text-sm text-amber-700 mt-1.5 leading-relaxed">
-                您的算力套餐已于 <span className="font-semibold">{formatPlanDate(expiryDate)}</span> 到期。您账户中剩余的算力已为您保留，但套餐有效期结束后需联系客服续费，才能继续使用智能体 / 工作流。
+                您的算力套餐已于 <span className="font-semibold">{formatPlanDate(expiryDate)}</span> 到期。账户中剩余的算力仍会保留，重新购买套餐后即可继续使用智能体 / 工作流。
               </p>
-              <p className="text-sm text-amber-700 mt-1.5 leading-relaxed">请扫描下方客服二维码完成充值，或直接选择套餐联系客服办理。</p>
             </div>
           )}
 
-          {/* 算力套餐卡片：后台设置多少种就显示多少张 */}
-          <h3 className="font-semibold text-slate-900 mb-3 text-sm">算力套餐</h3>
-          {list.length === 0 ? (
-            <div className="text-sm text-slate-400 py-8 text-center border border-dashed border-slate-200 rounded-xl">后台暂未设置算力套餐</div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {list.map(pkg => (
-                <div key={pkg.id} className="rounded-xl border border-slate-200 p-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="font-semibold text-slate-900 truncate">{pkg.name}</div>
-                      <div className="text-xs text-slate-500 mt-0.5">{Number(pkg.points || 0).toLocaleString()} 点</div>
-                    </div>
-                    <div className="text-brand-600 font-bold shrink-0">¥{pkg.price}</div>
+          {step === 'success' && paidOrder ? (
+            // ===== 支付成功 =====
+            <div className="py-6 text-center">
+              <div className="w-16 h-16 rounded-full bg-emerald-50 flex items-center justify-center mx-auto">
+                <CheckCircle2 size={34} className="text-emerald-600" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900 mt-4">支付成功</h3>
+              <p className="text-sm text-slate-600 mt-1.5">
+                <span className="font-semibold text-emerald-600">+{Number(paidOrder.points || 0).toLocaleString()} 点</span> 算力已到账
+              </p>
+              <div className="mt-5 mx-auto max-w-sm rounded-xl bg-slate-50 border border-slate-100 p-4 text-left text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">套餐</span>
+                  <span className="text-slate-900 font-medium">{paidOrder.packageName || '算力充值'}</span>
+                </div>
+                <div className="flex items-center justify-between mt-2">
+                  <span className="text-slate-500">支付金额</span>
+                  <span className="text-slate-900 font-medium">{priceText(paidOrder.amount || 0)}</span>
+                </div>
+                <div className="flex items-center justify-between mt-2">
+                  <span className="text-slate-500">订单号</span>
+                  <span className="text-slate-500 font-mono text-xs truncate max-w-[60%]">{paidOrder.orderId}</span>
+                </div>
+              </div>
+              <p className="text-xs text-slate-400 mt-4">可在「算力明细」中查看这笔充值记录</p>
+              <button onClick={onClose} className="mt-5 w-full sm:w-auto px-8 py-2.5 rounded-xl bg-brand-600 text-white font-medium hover:bg-brand-700 transition-colors">
+                完成
+              </button>
+            </div>
+          ) : step === 'paying' && order ? (
+            // ===== 等待扫码支付 =====
+            <div>
+              <div className="rounded-2xl border border-slate-200 p-5">
+                <div className="flex flex-col sm:flex-row items-center gap-5">
+                  <div className="w-44 h-44 shrink-0 rounded-xl border border-slate-100 bg-white p-2 flex items-center justify-center">
+                    {qrSrc
+                      ? <img src={qrSrc} alt="微信支付二维码" className="w-full h-full object-contain" />
+                      : <Loader2 size={26} className="animate-spin text-slate-300" />}
                   </div>
-                  {/* 上架状态徽标已移除：列表只会有已上架套餐，再显示「已上架」是纯噪声 */}
-                  <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
-                    <span className="text-[11px] text-slate-400">{pkgValidityText(pkg)}</span>
+                  <div className="min-w-0 flex-1 text-center sm:text-left">
+                    <div className="text-sm font-semibold text-slate-900">请使用微信「扫一扫」完成支付</div>
+                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">支付成功后页面会自动更新，算力立即到账，无需等待人工处理。</p>
+                    <div className="mt-3 inline-flex flex-wrap items-center gap-2">
+                      <span className="px-2 py-1 rounded-lg bg-brand-50 text-brand-600 text-xs font-medium">{order.packageName || '算力充值'}</span>
+                      <span className="px-2 py-1 rounded-lg bg-slate-100 text-slate-600 text-xs">{Number(order.points || 0).toLocaleString()} 点</span>
+                      <span className="px-2 py-1 rounded-lg bg-slate-100 text-slate-600 text-xs">应付 {priceText(order.amount || 0)}</span>
+                    </div>
+                    <div className="mt-3 flex items-center justify-center sm:justify-start gap-1.5 text-xs text-slate-500">
+                      <Clock size={13} />
+                      二维码有效期 <span className="font-mono text-slate-700">{mmss(remainMs)}</span>
+                    </div>
+                    <div className="mt-2 flex items-center justify-center sm:justify-start gap-1.5 text-xs text-amber-600">
+                      <Loader2 size={13} className="animate-spin" /> 正在等待支付结果…
+                    </div>
                   </div>
                 </div>
-              ))}
+              </div>
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-2 mt-4">
+                <button onClick={backToSelect} className="text-sm text-slate-500 hover:text-slate-700 transition-colors">
+                  ← 返回选择套餐
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={recheck}
+                    disabled={busy}
+                    className="px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                  >
+                    我已支付，查询到账
+                  </button>
+                  <button
+                    onClick={startPay}
+                    disabled={busy}
+                    className="px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors inline-flex items-center gap-1.5"
+                  >
+                    <RefreshCw size={14} className={busy ? 'animate-spin' : ''} /> 重新获取二维码
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : step === 'error' ? (
+            // ===== 失败 / 超时 =====
+            <div className="py-6 text-center">
+              <div className="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center mx-auto">
+                <AlertTriangle size={32} className="text-amber-500" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900 mt-4">支付未完成</h3>
+              <p className="text-sm text-slate-600 mt-1.5 leading-relaxed max-w-md mx-auto">{errMsg || '支付没有完成，请重新尝试。'}</p>
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-2 mt-5">
+                <button
+                  onClick={startPay}
+                  disabled={busy}
+                  className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-brand-600 text-white font-medium hover:bg-brand-700 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1.5"
+                >
+                  <RefreshCw size={15} className={busy ? 'animate-spin' : ''} /> 重新获取二维码
+                </button>
+                <button
+                  onClick={recheck}
+                  disabled={busy || !order || !order.orderId}
+                  className="w-full sm:w-auto px-6 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-medium hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                >
+                  我已支付，重新查询
+                </button>
+              </div>
+              <button onClick={backToSelect} className="mt-3 text-sm text-slate-500 hover:text-slate-700 transition-colors">
+                返回选择套餐
+              </button>
+            </div>
+          ) : (
+            // ===== 选套餐 =====
+            <div>
+              <p className="text-sm text-slate-500 mb-5">选择套餐后使用微信扫码支付，支付成功后算力自动到账。</p>
+
+              <h3 className="font-semibold text-slate-900 mb-3 text-sm">算力套餐</h3>
+              {list.length === 0 ? (
+                <div className="text-sm text-slate-400 py-8 text-center border border-dashed border-slate-200 rounded-xl">后台暂未设置算力套餐</div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {list.map((pkg) => {
+                    const active = String(pkg.id) === String(selectedId);
+                    const usable = payable(pkg);
+                    return (
+                      <button
+                        type="button"
+                        key={pkg.id}
+                        onClick={() => { if (usable) { setSelectedId(String(pkg.id)); setNotice(''); } }}
+                        disabled={!usable}
+                        aria-pressed={active}
+                        className={`text-left rounded-xl border p-4 transition-colors ${
+                          active
+                            ? 'border-brand-500 bg-brand-50 ring-2 ring-brand-500'
+                            : 'border-slate-200 hover:border-brand-300 hover:bg-slate-50'
+                        } ${usable ? '' : 'opacity-60 cursor-not-allowed'}`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="font-semibold text-slate-900 truncate flex items-center gap-1.5">
+                              {pkg.name}
+                              {active && <CheckCircle2 size={14} className="text-brand-600 shrink-0" />}
+                            </div>
+                            <div className="text-xs text-slate-500 mt-0.5">{Number(pkg.points || 0).toLocaleString()} 点</div>
+                          </div>
+                          <div className="text-brand-600 font-bold shrink-0">{priceText(pkg.price)}</div>
+                        </div>
+                        {/* 上架状态徽标已移除：列表只会有已上架套餐，再显示「已上架」是纯噪声 */}
+                        <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                          <span className="text-[11px] text-slate-400">{pkgValidityText(pkg)}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {notice && (
+                <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2.5 text-xs text-amber-800 leading-relaxed">
+                  {notice}
+                </div>
+              )}
+
+              {/* 收银条：已选套餐 + 应付金额 + 主操作（与上方套餐卡片保持同一视觉层级） */}
+              <div className="mt-5 rounded-xl border border-slate-200 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs text-slate-500">
+                    {user ? `当前算力余额 ${Number(points || 0).toLocaleString()} 点` : '登录后可查看当前算力余额'}
+                  </div>
+                  <div className="text-sm text-slate-900 mt-1 truncate">
+                    {selected ? (
+                      <>已选 <span className="font-semibold">{selected.name}</span> · {Number(selected.points || 0).toLocaleString()} 点</>
+                    ) : '请选择套餐'}
+                  </div>
+                </div>
+                <button
+                  onClick={startPay}
+                  disabled={busy || !selected || !payable(selected)}
+                  className="shrink-0 px-5 py-2.5 rounded-xl bg-brand-600 text-white font-medium hover:bg-brand-700 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1.5"
+                >
+                  {busy ? <Loader2 size={15} className="animate-spin" /> : <QrCode size={15} />}
+                  {selected ? `立即支付 ${priceText(selected.price)}` : '立即支付'}
+                </button>
+              </div>
+              <div className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-400">
+                <ShieldCheck size={13} /> 微信安全支付 · 支付成功后算力自动到账
+              </div>
+
+              {/* 充值须知：后台「充值提示信息」原文展示（不做任何改写） */}
+              <div className="rounded-xl bg-slate-50 p-4 mt-5">
+                <h3 className="font-semibold text-slate-900 mb-2 text-sm">充值须知</h3>
+                {info && info.trim() ? (
+                  <p className="text-sm text-slate-600 whitespace-pre-line leading-relaxed">{info}</p>
+                ) : (
+                  <ul className="text-xs text-slate-500 leading-relaxed space-y-1">
+                    <li>· 支付成功后算力立即到账，可在「算力明细」查看记录。</li>
+                    <li>· 套餐有效期自购买成功起算，到期后账户剩余算力仍会保留。</li>
+                    <li>· 二维码有效期 15 分钟，超时未支付请重新获取。</li>
+                  </ul>
+                )}
+              </div>
             </div>
           )}
-
-          {/* 联系客服二维码 + 提示信息 两栏 */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
-            <div className="rounded-xl bg-slate-50 p-4">
-              <h3 className="font-semibold text-slate-900 mb-3 text-sm">联系客服充值</h3>
-              {qr ? (
-                <img src={qr} alt="客服微信二维码" className="w-32 h-32 object-contain mx-auto rounded-lg border border-slate-100 bg-white" />
-              ) : (
-                <div className="w-32 h-32 rounded-lg bg-white border border-dashed border-slate-200 flex items-center justify-center text-xs text-slate-400 text-center px-2">后台未上传客服二维码</div>
-              )}
-              <p className="text-xs text-slate-500 text-center mt-2">扫码添加客服微信，人工充值</p>
-            </div>
-            <div className="rounded-xl bg-slate-50 p-4">
-              <h3 className="font-semibold text-slate-900 mb-3 text-sm">提示信息</h3>
-              {info && info.trim() ? (
-                <p className="text-sm text-slate-600 whitespace-pre-line leading-relaxed">{info}</p>
-              ) : (
-                <p className="text-xs text-slate-400">管理员暂未设置提示信息</p>
-              )}
-            </div>
-          </div>
         </div>
       </div>
     </div>

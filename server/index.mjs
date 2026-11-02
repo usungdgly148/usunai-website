@@ -36,6 +36,8 @@ import { exchangeWechatPhoneCode } from './wechat-phone.mjs';
 import { handleMiniappAuth, identityStorageKeys } from './miniapp-auth.mjs';
 import { handleMiniappRuntime } from './miniapp-runtime.mjs';
 import { handleMiniappLayout } from './miniapp-layout.mjs';
+// 网页端算力充值（微信扫码 Native 支付）：下单 / 查单 / 支付通知 / 定时对账。
+import { handleWebRecharge, reconcilePendingNativeOrders } from './web-recharge.mjs';
 import {
   DOC_SIZE_LIMIT,
   SUPPORTED_DOC_EXTS,
@@ -2738,6 +2740,9 @@ const server = http.createServer(async (req, res) => {
     // 灵感广场（AI全能设计 作品墙）：列表公开可读，发布/点赞/删除需登录。
     // 模块自带路径判断，非 /api/inspiration/* 直接返回 false 继续往下走。
     if (await handleInspiration(req, res, u, { KV, readBody, requireUser, getSession, isAdminSession })) return;
+    // 网页端算力充值（微信扫码支付）。模块自带路径判断，非 /api/recharge/* 直接返回 false 继续往下走。
+    // ⚠️ 必须排在下面的通用鉴权分支之前：/api/recharge/notify 是微信服务器直连，没有会话。
+    if (await handleWebRecharge(req, res, u, { KV, readBody, getSession, isAdminSession, sanitizeId: sanitizeIdSafe })) return;
     if (await handleMiniappObservability(req, res, u, { KV, requireAdmin, readBody })) return;
     if (await handleMiniappAuth(req, res, u, {
       KV,
@@ -6064,6 +6069,9 @@ server.listen(PORT, '127.0.0.1', () => {
   // 会导致前端停止轮询，这类漏单由服务端定时兜底（失败不阻断，下一轮重试）。
   const rechargeReconcileTimer = setInterval(() => {
     reconcilePendingVirtualOrders(KV, sanitizeIdForKV).catch(() => {});
+    // 网页端扫码支付订单的另一路对账：用户付完就关页面时，靠它兜底到账。
+    // 两者都极轻（只扫最近 24h、只动 pending），合并到一个定时器里跑，不额外起周期任务。
+    reconcilePendingNativeOrders(KV, sanitizeIdForKV).catch(() => {});
   }, RECHARGE_RECONCILE_INTERVAL_MS);
   if (typeof rechargeReconcileTimer.unref === 'function') rechargeReconcileTimer.unref();
   console.log(`[recharge] 虚拟支付订单对账已启动，间隔 ${RECHARGE_RECONCILE_INTERVAL_MS / 1000}s`);

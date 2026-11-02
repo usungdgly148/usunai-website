@@ -392,7 +392,9 @@ async function changePassword(req, res, requestId, session, deps) {
 // 发货 = 加算力（KV.kvAdminAdjustPoints，requestId = outTradeNo 天然幂等）。
 
 // 发货（幂等）：给订单用户加算力并标记订单已支付。推送 / 轮询兜底两处共用。
-async function deliverRechargeOrder({ KV, sanitizeId, order, payment, transactionId = '', wxOrderId = '' }) {
+// ⚠️ 导出给 server/web-recharge.mjs 复用（网页端扫码支付）：两端**必须**共用这一份加算力实现，
+//    否则「有效期不叠加 / 永久优先 / 试用置位 trialPurchased」的规则会各写一份、必然漂移。
+export async function deliverRechargeOrder({ KV, sanitizeId, order, payment, transactionId = '', wxOrderId = '' }) {
   const outTradeNo = String(order.id || '');
   if (String(order.status) === 'paid') return { ok: true, reason: 'already_paid' };
   const userId = String(order.userId || '');

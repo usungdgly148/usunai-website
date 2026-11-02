@@ -12,6 +12,9 @@ import crypto from 'node:crypto';
 
 const API_HOST = 'https://api.mch.weixin.qq.com';
 const JSAPI_PATH = '/v3/pay/transactions/jsapi';
+// Native 支付（扫码支付）：网页端收银台用。与 JSAPI 同一套商户凭证，区别只有两点——
+// 不需要 payer.openid（买家在微信里扫码后才完成身份绑定），返回值是 code_url 而不是 prepay_id。
+const NATIVE_PATH = '/v3/pay/transactions/native';
 const QUERY_PATH_PREFIX = '/v3/pay/transactions/out-trade-no/';
 
 // 从环境变量读取支付配置（PEM 私钥允许以 \n 字面量传入，统一还原为真实换行）。
@@ -109,12 +112,33 @@ async function requestWechat(method, canonicalUrl, body) {
   return data;
 }
 
+// 商品描述清洗。
+//
+// ⚠️ 微信 v3 的 description 不接受 emoji：套餐名里带「🥈 银卡」这类字符时，下单会直接报
+//    INVALID_REQUEST 「请求内容传入了非UTF8参数」（2026-11-02 实测踩到）。
+//    这是平台限制，不是我们的编码问题 —— 所以在这里统一剥掉 emoji / 变体选择符 / 控制字符，
+//    而不是要求管理员去改后台套餐名。
+export function plainDescription(input, fallback = '算力充值') {
+  let text = String(input == null ? '' : input);
+  // ① 星光平面以上（emoji 主体，4 字节 UTF-8）
+  text = text.replace(/[\u{10000}-\u{10FFFF}]/gu, '');
+  // ② 杂项符号 / 装饰符号 / 变体选择符（⭐ ✅ ❗ 之类留在 BMP 里的图形字符）
+  text = text.replace(/[\u2190-\u21FF\u2300-\u23FF\u25A0-\u27BF\u2B00-\u2BFF\uFE0F]/g, '');
+  // ③ 控制字符与零宽字符
+  text = text.replace(/[\u0000-\u001F\u007F\u200B-\u200F\u2028\u2029\uFEFF]/g, '');
+  text = text.replace(/\s+/g, ' ').trim();
+  // ④ 去掉剥离后残留的分隔符（例如「 · 算力充值」开头那个点）
+  text = text.replace(/^[·•\-—|/\\]+/, '').replace(/[·•\-—|/\\]+$/, '').trim();
+  if (!text) text = fallback;
+  return text.slice(0, 127);
+}
+
 // JSAPI 下单：返回 prepay_id。
 export async function createJsapiOrder({ openid, outTradeNo, description, amountCents }) {
   const body = {
     appid: WECHAT_PAY.appId,
     mchid: WECHAT_PAY.mchid,
-    description: String(description || '算力充值').slice(0, 127),
+    description: plainDescription(description),
     out_trade_no: outTradeNo,
     notify_url: WECHAT_PAY.notifyUrl,
     amount: { total: Math.round(Number(amountCents) || 0), currency: 'CNY' },
@@ -127,6 +151,38 @@ export async function createJsapiOrder({ openid, outTradeNo, description, amount
     throw err;
   }
   return data.prepay_id;
+}
+
+// Native 下单（扫码支付）：返回 code_url（weixin://wxpay/bizpayurl?pr=xxx）。
+// 前端用二维码库把它画成二维码，用户用微信「扫一扫」扫码后在自己手机上付款。
+// 与 JSAPI 的差异：无 payer.openid；notify_url 必须单独传（网页端与小程序端的回调不是同一条路径）。
+export async function createNativeOrder({ outTradeNo, description, amountCents, notifyUrl, timeExpire }) {
+  const body = {
+    appid: WECHAT_PAY.appId,
+    mchid: WECHAT_PAY.mchid,
+    description: plainDescription(description),
+    out_trade_no: String(outTradeNo || ''),
+    notify_url: String(notifyUrl || WECHAT_PAY.notifyUrl),
+    amount: { total: Math.round(Number(amountCents) || 0), currency: 'CNY' },
+  };
+  // time_expire：RFC3339，形如 2026-11-03T12:30:00+08:00。不传则是微信默认（2 小时）。
+  if (timeExpire) body.time_expire = String(timeExpire);
+  const data = await requestWechat('POST', NATIVE_PATH, body);
+  if (!data || !data.code_url) {
+    const err = new Error('微信支付下单失败：未返回 code_url');
+    err.code = 'WECHAT_PAY_NO_CODE_URL';
+    err.detail = data;
+    throw err;
+  }
+  return data.code_url;
+}
+
+// 关闭未支付订单（用户把二维码晾到过期、或点了「重新生成」时清理旧单）。
+// 微信侧已支付的订单调用会报错 —— 调用方据此判断「其实已经付了」，转去查单发货。
+export async function closeOrderByOutTradeNo(outTradeNo) {
+  const canonicalUrl = `${QUERY_PATH_PREFIX}${encodeURIComponent(outTradeNo)}/close`;
+  await requestWechat('POST', canonicalUrl, { mchid: WECHAT_PAY.mchid });
+  return true;
 }
 
 // 生成小程序端 Taro.requestPayment 所需的参数（paySign 用商户私钥对支付参数签名）。

@@ -59,7 +59,7 @@ function FrontLayout() {
   if (location.pathname.startsWith('/admin')) return null;
 
   const isInternal = location.pathname.startsWith('/chat/') || location.pathname.startsWith('/workflow/');
-  const { computePackages, customerService, rechargeInfo, rechargeModalOpen, rechargeExpiryDate, rechargeHideExpiry, closeRechargeModal } = useStore();
+  const { computePackages, rechargeInfo, rechargeModalOpen, rechargeExpiryDate, rechargeHideExpiry, closeRechargeModal } = useStore();
 
   return (
     <div className="min-h-screen bg-[#f0f4f9]">
@@ -89,7 +89,7 @@ function FrontLayout() {
       </div>
       {/* 充值弹窗提升到 App 顶层，由 store 全局控制（Header / 到期拦截 均可触发） */}
       {rechargeModalOpen && createPortal(
-        <RechargeDialog packages={computePackages} qr={customerService?.qr} info={rechargeInfo} expiryDate={rechargeExpiryDate} hideExpiry={rechargeHideExpiry} onClose={closeRechargeModal} />,
+        <RechargeDialog packages={computePackages} info={rechargeInfo} expiryDate={rechargeExpiryDate} hideExpiry={rechargeHideExpiry} onClose={closeRechargeModal} />,
         document.body
       )}
     </div>
