@@ -77,12 +77,15 @@ export function Sidebar() {
   const hasDesignEntryGroup = groupEntries.some((group) => group.name === DESIGN_ENTRY_GROUP);
 
 
+  // 选中态 = 实心橙胶囊 + 白色图标/文字（2026-11-03 主人指定：底色 #D65800 = brand-600，与主按钮同色）。
+  // ⚠️ hover 变色只能挂在「未选中」分支：若选中态同时带 hover:text-brand-700，
+  //    悬停时文字会变回深橙压在深橙底上，等于消失（伪类权重高于普通 text-white）。
   const homeItemClass = (active) =>
-    `group flex items-center gap-4 px-5 py-3.5 rounded-full text-[15px] font-medium transition-all duration-200 ease-out hover:translate-x-1 hover:text-brand-700 active:scale-[0.98] motion-reduce:hover:translate-x-0 motion-reduce:active:scale-100 ${active ? 'bg-brand-100 text-slate-900' : 'text-slate-700 hover:bg-slate-200/50'}`;
+    `group flex items-center gap-4 px-5 py-3.5 rounded-full text-[15px] font-medium transition-all duration-200 ease-out hover:translate-x-1 active:scale-[0.98] motion-reduce:hover:translate-x-0 motion-reduce:active:scale-100 ${active ? 'bg-brand-600 text-white' : 'text-slate-700 hover:bg-slate-200/50 hover:text-brand-700'}`;
 
-  // 选中态 = 大圆弧胶囊 + 浅蓝底，**不再画左侧竖线**（2026-10-28 主人指定，参考稿是无竖线的胶囊）
+  // 选中态与首页项同款：实心橙胶囊 bg-brand-600 + 白字白图标（图标继承 currentColor，无需单独上色）
   const subItemClass = (active) =>
-    `group flex items-center gap-3 px-5 py-2.5 rounded-full text-[14px] font-medium transition-all duration-200 ease-out hover:translate-x-1 hover:text-brand-700 active:scale-[0.98] motion-reduce:hover:translate-x-0 motion-reduce:active:scale-100 ${active ? 'bg-brand-100 text-brand-700' : 'text-slate-600 hover:bg-slate-200/50'}`;
+    `group flex items-center gap-3 px-5 py-2.5 rounded-full text-[14px] font-medium transition-all duration-200 ease-out hover:translate-x-1 active:scale-[0.98] motion-reduce:hover:translate-x-0 motion-reduce:active:scale-100 ${active ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-200/50 hover:text-brand-700'}`;
 
   return (
     <>

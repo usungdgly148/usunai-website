@@ -13,10 +13,11 @@
   --font-display: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STSong', 'PingFang SC', 'Microsoft YaHei', serif;
   --font-num: 'Sora', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', sans-serif;
 
-  /* 品牌双色（2026-11-03 起为「橙色 + 琥珀金」）：主色 #FF6900 与 Tailwind 的 brand 色阶同源，
-     改色阶时这里必须一起改，否则 .text-brand / .bg-brand 系列会和 Tailwind 类不一致 */
-  --brand: #FF6900;
-  --brand-dark: #E85D00;
+  /* 品牌双色（2026-11-03 起为「橙色 + 琥珀金」）：主填充 #D65800 与 Tailwind 的 brand-600 同源，
+     改色阶时这里必须一起改，否则 .text-brand / .bg-brand 系列会和 Tailwind 类不一致。
+     亮橙 #FF6900 保留为 brand-500（焦点环/装饰），不再作为填充底色 */
+  --brand: #D65800;
+  --brand-dark: #B84A00;
   --brand-light: #FFF4EC;
   --accent: #C8881A;
   --accent-dark: #875710;
@@ -150,9 +151,10 @@ body {
 .bg-accent       { background-color: var(--accent); }
 .border-accent   { border-color: var(--accent); }
 
-/* 品牌渐变文字（深橙 → 主橙 → 浅橙，仅用于关键大数字/标题，克制使用） */
+/* 品牌渐变文字（深橙 → 主填充橙 → 浅橙，仅用于关键大数字/标题，克制使用）
+   中段 2026-11-03 跟随主填充由 #FF6900 加深到 #D65800，否则首页大数字会比按钮明显发飘 */
 .gradient-brand {
-  background: linear-gradient(135deg, #C24F00 0%, #FF6900 55%, #FFA96E 120%);
+  background: linear-gradient(135deg, #A84700 0%, #D65800 55%, #FFA96E 120%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
