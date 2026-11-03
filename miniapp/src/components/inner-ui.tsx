@@ -61,7 +61,9 @@ export function EntityInfoCard({ entity, type }: { entity: ContentItem; type: 'a
             ? <Image src={entity.avatar} mode='aspectFill' className='info-avatar-img' />
             : <Text className='info-avatar-char'>{(entity.name || '?').slice(0, 1)}</Text>}
         </View>
-        <Text className='info-type-badge'>{type === 'agent' ? '智能体' : '工作流'}</Text>
+        {/* 2026-11-03：头像右下角的「智能体 / 工作流」角标已按主人要求移除，
+            与网页端 InfoCard（2026-10-19 同一决定）对齐；它 absolute 定位、还故意溢出容器，
+            删掉不影响 132px 头像的占位与下方名称间距。`type` 仍被「千 token / 次」使用，不能删参数。 */}
       </View>
       <Text className='info-name'>{entity.name}</Text>
       {!!entity.desc && <Text className='info-desc'>{entity.desc}</Text>}

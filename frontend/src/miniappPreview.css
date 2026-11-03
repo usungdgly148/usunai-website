@@ -2,7 +2,7 @@
  * 自动生成，请勿手改 —— 源文件是 miniapp/src/app.scss（真机那份）。
  * 生成器：frontend/scripts/gen-miniapp-preview-style.mjs
  * 作用：后台「小程序设计」画布直接复用真机样式，保证画布 = 真机的构造性一致。
- * 本次：748 条规则 / 14 条图标 / 2 组 keyframes（跳过 2 个 @media，画布不渲染那两个页面）
+ * 本次：746 条规则 / 14 条图标 / 2 组 keyframes（跳过 2 个 @media，画布不渲染那两个页面）
  * ========================================================================== */
 .miniapp-stage .mini-tab-icon { width: 22px; height: 22px; background-repeat: no-repeat; background-position: center; background-size: contain; }
 .miniapp-stage .mini-tab-icon-home { background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAACXBIWXMAACxLAAAsSwGlPZapAAAEQElEQVR42u1dTWgTQRgdUVEERQUvioqgHkQQFNQKojd/DooHBRFE8eBRBUXwknrQJtkUidZsUi0BPYib2W1pRRQLRShYtRUvFkFPHhT1oChYBWv9vtb+YNvsbjOzze6+Bx/ksDuz33uTb/ZldyZCAAAAAAAAAAAAAAAQElxusFZzgImAkc47Nam8/Sqdtwc4hj47NWAmAKRM+0jatPuGyR8J0/5lmPIEGNIEy7Jmpk2ZHEf8eCEKhNlgTCHqb1iLidh2V/JHRWjnc8CcAmQanbVE6mvP5A/PC6Z8a+Ts9WCwonov99Jo/uqX/DHxnc4/ACZ9YmBgYAbd2VwgAvsrIH84+rktbhPMekCiWJxLpN1SQPx/84K0EoXWeWC4XL2/3ryciOrxVuPt36m8PDcY9NmjCD3cB5ieAMlCaRuVig8eifyWytn7Rs7NyV00X3zxODl/NszSTjDuxVxNHG8M01o3wYS9Jp2XvR5vU2HafJmr0bLzsC53b9Fk7WWztxfQMa0+/EJ8TRsbJSLrkR+yEomOWRpEfXypyVoCczUZQXn5M5m3j/sva6XDNKf8gGmrwFzRse+TOXvrlPsq2BtJwHcwbaPm6rxXc0XHvkgWrBUVC36tZSmVmS6Pgv/h8hU50+bXXNGovaPSNGWz9+eQoMVYmrZ601pGI+uZ1xFIo7VWY/k75dm05eVLo0GujK250nZNcTFtKsyVxm9CdE2banOlC5E0bbrMVRUNluo1bUGYK30lKeSmLUhzpS2HMJq26TJX2kQIk2mbbnOlb3L2Z9ro2LuB51VN5ip2ps2vuUqbzn4R2lcg7d1VZdqq2VxF3rRRDTd8vIXw4EqxeWFUfkzkXDgnH/OdofQC6Kt1yIe5yrDBEZF8fGpnvPLAnCmshbLNA/F9FEdFxME5eivDsk1l+el2M1dGobRFxAScK+fsUoa6gxHAtJ/zbamIGThnzr0aBDgpYgrOHQJAAAgAASAABIAAEAACQAAIAAFCKwA/YaPnDCk3i19JcNvcB/cFAcb34egifgJyHAgwBplc86agyB8O7hMC/AO/IxS0ACreS4qMAOUS0RaarxsCQAAIEBEBZC9PmFOJsm8zQAD9iYT1uiEABIAAEAACQAAIAAEgAASAABAAAkAACAABIECsBbA7y/y0ezquAtCauTNllq92qhRAlumoo9LFymEUYHCROu0dUW7TJ6FwdWStywOOpkp2pA2bALza330xt0wo3Uch8CdWIY86094gVO4JQYo+BbFeQz4RQvluIs6OwQ0qQLD71gy50nYh9CzdvwiSXUd/Qgid29OY8ipInnT0ZwPZvoZusY7RXcQnkD5yp/Yx8EXqg5veDf15QpeivxoJW/TzZEvEn03dbJkvxDRvcmQ0Wqum+v7O2DBypT3pgnOw3nQ2q2iPg9viNrltJddIuXLOAgAAAAAAAAAAAAAAn/gLqFo/Lp8+vjkAAAAASUVORK5CYII="); }
@@ -191,8 +191,7 @@
 .miniapp-stage .mini-shortcut-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .miniapp-stage .mini-content-grid { gap: 9px; }
 .miniapp-stage .mini-content-grid .mini-content-card { min-height: 191px; padding-bottom: 8px; border: 0.5px solid var(--mini-line); border-radius: 13px; background: var(--mini-surface); box-shadow: 0 6px 14px rgba(47, 78, 135, .08); }
-.miniapp-stage .mini-content-card-cover { position: relative; height: 79px; background: linear-gradient(135deg, var(--mini-primary-soft), var(--mini-primary-pale)); }
-.miniapp-stage .mini-content-card-kind { position: absolute; z-index: 1; top: 7px; left: 7px; padding: 3px 5.5px; border: 0.5px solid var(--mini-glass); border-radius: 499.5px; background: var(--mini-glass); color: var(--mini-subtle); font-size: 8.5px; }
+.miniapp-stage .mini-content-card-cover { height: 79px; background: linear-gradient(135deg, var(--mini-primary-soft), var(--mini-primary-pale)); }
 .miniapp-stage .mini-content-card-avatar { width: 41px; height: 41px; border-radius: 12.5px; }
 .miniapp-stage .mini-content-card-fallback { width: 41px; height: 41px; border-radius: 12.5px; background: linear-gradient(135deg, var(--mini-primary), #665be5); font-size: 14px; }
 .miniapp-stage .mini-content-grid .card-title { min-height: 34px; padding: 8px 8px 0; color: var(--mini-ink); font-size: 13.5px; font-weight: 740; line-height: 1.3; }
@@ -392,11 +391,10 @@
 .miniapp-stage .history-item-time { display: block; margin-top: 3px; color: var(--mini-subtle-2); font-size: 11px; }
 .miniapp-stage .history-empty { display: block; padding: 35px 10px; color: var(--mini-subtle-2); font-size: 13px; line-height: 1.6; text-align: center; }
 .miniapp-stage .info-hero { display: flex; padding: 8px 0 4px; flex-direction: column; align-items: center; text-align: center; }
-.miniapp-stage .info-avatar-wrap { position: relative; margin-bottom: 10px; }
+.miniapp-stage .info-avatar-wrap { margin-bottom: 10px; }
 .miniapp-stage .info-avatar { display: flex; width: 66px; height: 66px; align-items: center; justify-content: center; border-radius: 15px; background: var(--mini-primary); }
 .miniapp-stage .info-avatar-img { width: 66px; height: 66px; border-radius: 15px; }
 .miniapp-stage .info-avatar-char { color: #fff; font-size: 28px; font-weight: 700; }
-.miniapp-stage .info-type-badge { position: absolute; right: -7px; bottom: -4px; padding: 2px 7px; border: 0.5px solid var(--mini-line-faint); border-radius: 499.5px; background: var(--mini-surface); color: var(--mini-subtle); font-size: 10px; box-shadow: 0 2px 6px rgba(17, 42, 88, .08); }
 .miniapp-stage .info-name { font-size: 17px; font-weight: 700; }
 .miniapp-stage .info-desc { margin-top: 6px; color: var(--mini-subtle); font-size: 12.5px; line-height: 1.6; }
 .miniapp-stage .info-meta { margin-top: 13px; }

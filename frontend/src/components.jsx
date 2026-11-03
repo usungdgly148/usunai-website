@@ -1551,13 +1551,12 @@ export function AgentCard({ item, to, featured = false, className = '' }) {
   const isDark = !!useTheme?.dark;
   const headerBg = useTheme ? useTheme.header : gradientCss(item, preset.from, preset.to);
 
-  const kindBadge = (
-    <span className={`absolute top-3 left-3 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium backdrop-blur-sm ${isDark ? 'bg-white/15 text-white' : 'bg-white/70 text-slate-600'}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${item.kind === 'agent' ? (isDark ? 'bg-brand-400' : 'bg-brand-500') : (isDark ? 'bg-accent-400' : 'bg-orange-500')}`}></span>
-      {item.kind === 'agent' ? '智能体' : '工作流'}
-    </span>
-  );
-
+  /*
+   * 2026-11-03：卡片左上角的「智能体 / 工作流」类型角标已按主人要求整体移除（网页端 + 小程序端）。
+   * 它是 absolute 定位，删掉不占文档流，`relative overflow-hidden` 的封面层与居中头像位都不受影响。
+   * ⚠️ `item.kind` 仍在别处使用（搜索下拉、后台列表），别顺手删数据字段。
+   * ⚠️ 不要因为"左上角看起来空了"而加回来。
+   */
   const vipBadge = item.vip && (
     <span className="absolute top-3 right-3 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200/60">
       VIP
@@ -1574,7 +1573,6 @@ export function AgentCard({ item, to, featured = false, className = '' }) {
   const Header = ({ cls }) => (
     <div className={`relative overflow-hidden ${cls}`} style={{ background: headerBg }}>
       {headerDecor}
-      {kindBadge}
       {vipBadge}
       {!featured && (
         <div className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-12 h-12 rounded-full ${item.iconColor || (isDark ? 'bg-white/20' : 'bg-slate-400')} text-white flex items-center justify-center shadow-md overflow-hidden`}>

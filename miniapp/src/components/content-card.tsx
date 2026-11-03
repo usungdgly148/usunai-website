@@ -87,7 +87,8 @@ export function ContentCard({ item, type, variant = 'cover', link }: {
     onClick={handleOpen}
   >
     <View className='mini-content-card-cover' style={{ background: getCoverBackground(item) }}>
-      <Text className='mini-content-card-kind'>{type === 'agent' ? '智能体' : '工作流'}</Text>
+      {/* 2026-11-03：左上角「智能体 / 工作流」类型角标已按主人要求移除（与网页端 AgentCard 同步）。
+          该角标原本 absolute 定位、不占流，封面的居中头像位与 158px 高度都不受影响。 */}
       {avatarUrl
         ? <Image className='mini-content-card-avatar' mode='aspectFill' src={avatarUrl} lazyLoad webp />
         : <Text className='mini-content-card-fallback' style={fallbackStyle}>{fallback}</Text>}
