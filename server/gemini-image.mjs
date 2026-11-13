@@ -67,6 +67,24 @@ export const IMAGE_MODEL_CANDIDATES = [
   'gpt-image-2.5-sunburst',
 ];
 
+/**
+ * 中转站 /v1/models 会把对话模型和图片模型混在一起返回（实测：一条对话授权下有 9 个 claude/gpt 模型，
+ * 一条生图授权下只有 1 个 gpt-image-*）。判断「是不是图片生成模型」只用名称特征，不设白名单：
+ * 以后上游新增任意图片模型，后台会自动列出来，不需要改代码、也不需要再绑死某一条授权。
+ * ⚠️ 只是筛出候选，**不等于能出图** —— /v1/models 列得出但分组没渠道时调用仍会 503，
+ *    所以最终是否上架仍由后台「模型与定价」的 enabled + prices 决定。
+ */
+export function isImageModelId(id) {
+  const name = String(id || '').toLowerCase();
+  return /(^|[-_./])(image|images|imagen|banana|flux|seedream|dall[-_.]?e|sdxl|stable[-_.]?diffusion|midjourney|qwen[-_.]?image)([-_./]|$)/.test(name);
+}
+
+/** 从 /v1/models 的原始清单里筛出图片模型，去重排序。 */
+export function filterImageModels(ids) {
+  const list = Array.isArray(ids) ? ids : [];
+  return [...new Set(list.map((item) => String(item || '').trim()).filter((item) => item && isImageModelId(item)))].sort();
+}
+
 // ===== 两套上游接口风格（同一个中转站、同一把 Key，但端点与请求体完全不同）=====
 // A. gemini-native（默认）：POST {root}/v1beta/models/{model}:generateContent
 //    contents[].parts[] + generationConfig.imageConfig.aspectRatio / imageSize；**支持参考图**（inlineData）。
@@ -414,7 +432,7 @@ export function describeUpstreamError(statusCode, bodyText) {
     return { code: 'IMAGE_QUOTA_EXHAUSTED', status: 503, message: `生图通道余额不足，请联系管理员给中转站充值后再试${detail ? '（上游：' + detail + '）' : ''}` };
   }
   if (statusCode === 401 || statusCode === 403) {
-    return { code: 'IMAGE_AUTH_INVALID', status: 502, message: '图片模型授权无效或该令牌没有图片模型权限，请到「AI 授权管理」检查 usun-img 凭证的分组' };
+    return { code: 'IMAGE_AUTH_INVALID', status: 502, message: '图片模型授权无效或该令牌没有图片模型权限，请到「AI 授权管理」换一条可用的图片处理授权' };
   }
   if (statusCode === 404) {
     return { code: 'IMAGE_MODEL_NOT_FOUND', status: 502, message: `图片模型不存在或接口路径不对${detail ? '（上游：' + detail + '）' : ''}` };

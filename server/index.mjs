@@ -64,6 +64,7 @@ import {
   downloadImage,
   extractImageResult,
   extractOpenAIImageResult,
+  filterImageModels,
   imageApiStyle,
   imageModelSupportsRefs,
   makeImageStorageKey,
@@ -1309,6 +1310,147 @@ async function getImageProvider(providerId) {
   }
   if (!provider.apiKeyEncrypted) throw new Error('生图授权凭证没有 API Key');
   return { ...provider, apiKey: decryptConfigSecret(provider.apiKeyEncrypted), baseUrl: normalizeRelayBaseUrl(provider.baseUrl) };
+}
+
+// ===== 图片处理授权：动态解析（2026-11-13）=====
+// 旧实现把 imageGenSettings.providerId 当成唯一凭证硬绑定：那条凭证一旦失效，整个板块跟着一起死
+// （线上实测：原先生图专用授权已失效，其 /v1/models 回 403「无权访问生图分组」）。
+// 现在规则：
+//   ① 候选 = 所有启用中的 relay 授权，不认任何写死 id、也不依赖某条授权的名字；
+//   ② 每个候选实时拉 /v1/models 并筛出图片模型，结果缓存 60s（密钥不出服务器）；
+//   ③ 当前选中的授权可用就用它，否则自动切到「有图片模型、且优先已有上架定价」的另一条；
+//   ④ 全部探测失败也不把页面打空：按已配置模型继续展示，仅记录原因。
+const IMAGE_MODEL_PROBE_TTL_MS = 60 * 1000;
+// 上游 /v1/models 实测偶发 6~10s 超时：一次网络抖动不能把整页模型清空。
+// 成功结果额外保留 10 分钟，只有「软失败」（超时/网络）才沿用；401/403 等明确失效绝不复用。
+const IMAGE_MODEL_LAST_OK_TTL_MS = 10 * 60 * 1000;
+const imageModelProbeCache = new Map();
+const imageModelProbeLastOk = new Map();
+
+function imageProviderPublic(provider, probe) {
+  return {
+    id: String(provider.id),
+    name: String(provider.name || provider.id),
+    status: provider.status || 'active',
+    available: !!(probe && probe.ok && probe.models.length),
+    imageModels: probe ? probe.models : [],
+    error: probe ? probe.error : '',
+    stale: !!(probe && probe.stale),
+  };
+}
+
+async function listImageProviderCandidates() {
+  const stored = (await KV.kvGet('authProviders')) || [];
+  const list = Array.isArray(stored) ? stored : Object.values(stored);
+  return list.filter((item) => item && item.type === RELAY_PROVIDER_TYPE
+    && item.status !== 'inactive' && item.status !== 'disabled' && item.apiKeyEncrypted);
+}
+
+const IMAGE_PROBE_HARD_FAIL = /40[13]|无权|无权限|未授权|invalid|forbidden|unauthorized/i;
+
+async function probeImageModels(providerId) {
+  const id = String(providerId || '');
+  const cached = imageModelProbeCache.get(id);
+  if (cached && Date.now() - cached.at < IMAGE_MODEL_PROBE_TTL_MS) return cached;
+  let entry;
+  try {
+    const provider = await getImageProvider(id);
+    const models = filterImageModels(await fetchRelayModels(provider.baseUrl, provider.apiKey, 10000));
+    entry = { at: Date.now(), ok: true, models, error: '' };
+    imageModelProbeLastOk.set(id, { at: Date.now(), models });
+  } catch (error) {
+    const message = String(error.message || error).slice(0, 160);
+    const lastOk = imageModelProbeLastOk.get(id);
+    // 超时/网络抖动 ≠ 授权失效：沿用 10 分钟内最后一次成功的模型清单。
+    // 明确的 401/403（令牌无生图分组权限）必须如实判失败，否则会一直拿死授权出图。
+    if (!IMAGE_PROBE_HARD_FAIL.test(message) && lastOk && Date.now() - lastOk.at < IMAGE_MODEL_LAST_OK_TTL_MS) {
+      entry = { at: Date.now(), ok: true, models: lastOk.models, error: '', stale: true };
+    } else {
+      entry = { at: Date.now(), ok: false, models: [], error: message };
+    }
+  }
+  imageModelProbeCache.set(id, entry);
+  return entry;
+}
+
+async function probeImageProviders(providers) {
+  const entries = await Promise.all(providers.map(async (item) => [String(item.id), await probeImageModels(item.id)]));
+  return new Map(entries);
+}
+
+/** 唯一有效的授权解析器：后台配置页、用户页配置、两条生成路由全部走这里，保证前后端口径一致。 */
+async function resolveImageProvider(settings) {
+  const candidates = await listImageProviderCandidates();
+  const configuredId = String((settings && settings.providerId) || '').trim();
+  const pricedIds = new Set(((settings && settings.models) || [])
+    .filter((item) => item && item.enabled !== false && Object.keys(item.prices || {}).length)
+    .map((item) => item.id));
+  const probes = new Map();
+  let chosen = null;
+  let reason = '';
+
+  const configured = candidates.find((item) => String(item.id) === configuredId);
+  if (configured) {
+    const probe = await probeImageModels(configuredId);
+    probes.set(configuredId, probe);
+    if (probe.ok && probe.models.length) chosen = configured;
+    else reason = probe.ok ? '当前授权下没有可用的图片模型' : `当前授权不可用：${probe.error}`;
+  } else if (configuredId) {
+    reason = '当前授权已被删除或停用';
+  } else {
+    reason = '尚未指定图片处理授权';
+  }
+
+  if (!chosen) {
+    const others = candidates.filter((item) => String(item.id) !== configuredId);
+    const rest = await probeImageProviders(others);
+    for (const [id, probe] of rest) probes.set(id, probe);
+    const usable = others.filter((item) => {
+      const probe = rest.get(String(item.id));
+      return probe && probe.ok && probe.models.length;
+    });
+    // 优先挑「已有上架定价模型」的那条，切过去用户立刻就能继续出图。
+    chosen = usable.find((item) => (rest.get(String(item.id)).models || []).some((id) => pricedIds.has(id)))
+      || usable[0]
+      || null;
+    if (chosen) reason = `已自动切换到可用授权「${imageProviderPublic(chosen, rest.get(String(chosen.id))).name}」`;
+    else {
+      const anyProbeFailed = [...probes.values()].some((probe) => !probe || !probe.ok);
+      // 只要有任一授权探测失败，就不能断言「其余授权下没有图片模型」：
+      // 保留一条授权继续按已配置模型展示，models 返回 null ⇒ 不做过滤，页面不会突然变空。
+      // 原授权已被删除时也必须兜住，否则 effectiveProviderId 为空会直接拒绝生成。
+      // （全部探测成功却都没有图片模型 = 确实没有生图能力，由用户页空态明确提示。）
+      if (anyProbeFailed && candidates.length) {
+        chosen = configured || candidates[0];
+        reason = '部分授权的图片模型清单暂时获取失败，暂按已配置模型展示；可到「AI 授权管理」重新指定';
+      }
+    }
+  }
+
+  const probe = chosen ? (probes.get(String(chosen.id)) || await probeImageModels(chosen.id)) : null;
+  return {
+    provider: chosen,
+    // null 表示探测失败：此时**不做**模型过滤，避免一次网络抖动把整页模型清空。
+    models: probe && probe.ok ? probe.models : null,
+    configuredProviderId: configuredId,
+    effectiveProviderId: chosen ? String(chosen.id) : '',
+    fallback: !!(configuredId && chosen && String(chosen.id) !== configuredId),
+    reason,
+  };
+}
+
+/** 后台授权选择用：把每条候选的可用性、图片模型清单、失效原因一次性列出。 */
+async function describeImageProviders(settings) {
+  const candidates = await listImageProviderCandidates();
+  const probeMap = await probeImageProviders(candidates);
+  const resolved = await resolveImageProvider(settings);
+  return {
+    configuredProviderId: resolved.configuredProviderId,
+    effectiveProviderId: resolved.effectiveProviderId,
+    fallback: resolved.fallback,
+    reason: resolved.reason,
+    providers: candidates.map((item) => imageProviderPublic(item, probeMap.get(String(item.id)))),
+  };
 }
 
 // 生图配置走 KV（无需发版即可调价/换模型/上下架）：
@@ -2873,12 +3015,55 @@ const server = http.createServer(async (req, res) => {
         const providerId = String(u.searchParams.get('providerId') || '').trim();
         if (!providerId) throw new Error('请先选择中转站授权凭证');
         const provider = await getRelayProvider(providerId);
-        const models = await fetchRelayModels(provider.baseUrl, provider.apiKey);
+        const allModels = await fetchRelayModels(provider.baseUrl, provider.apiKey);
+        // capability=image：只回图片生成模型，供「AI全能设计」按授权联动展示。
+        // 不传时保持原行为（对话用的完整模型清单），老调用方不受影响。
+        const models = u.searchParams.get('capability') === 'image' ? filterImageModels(allModels) : allModels;
         // 只回模型名，密钥绝不下发。
         res.end(JSON.stringify({ ok: true, baseUrl: provider.baseUrl, models }));
       } catch (error) {
         res.statusCode = 400;
         res.end(JSON.stringify({ ok: false, error: String(error.message || error) }));
+      }
+      return;
+    }
+    // 后台「AI全能设计 / 授权中心」共用：列出全部可选的图片处理授权及其真实可用模型。
+    if (p === '/api/admin/image-gen/providers' && req.method === 'GET') {
+      if (!requireAdmin(req, res)) return;
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Cache-Control', 'no-store');
+      try {
+        res.end(JSON.stringify({ ok: true, ...(await describeImageProviders(await loadImageGenSettings())) }));
+      } catch (error) {
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, error: String(error.message || error) }));
+      }
+      return;
+    }
+    // 授权中心直接「设为图片处理授权」：只改 providerId，不动模型定价表，避免整份配置被重写。
+    if (p === '/api/admin/image-gen/provider' && req.method === 'POST') {
+      if (!requireAdmin(req, res)) return;
+      const body = await readBody(req);
+      res.setHeader('Content-Type', 'application/json');
+      try {
+        const providerId = String(body.providerId || '').trim();
+        const hit = (await listImageProviderCandidates()).find((item) => String(item.id) === providerId);
+        if (!hit) {
+          throw Object.assign(new Error('该授权不存在或未启用，请选择一条启用中的中转站授权'), { status: 400, code: 'IMAGE_PROVIDER_INVALID' });
+        }
+        const current = (await KV.kvGet('imageGenSettings')) || {};
+        await KV.kvPut('imageGenSettings', { ...current, providerId, updatedAt: new Date().toISOString() });
+        imageModelProbeCache.delete(providerId);
+        imageModelProbeLastOk.delete(providerId);
+        const settings = await loadImageGenSettings();
+        res.end(JSON.stringify({
+          ok: true,
+          settings: withRefSupport(settings),
+          ...(await describeImageProviders(settings)),
+        }));
+      } catch (error) {
+        res.statusCode = error.status || 400;
+        res.end(JSON.stringify({ ok: false, error: String(error.message || error), code: error.code || 'IMAGE_PROVIDER_SAVE_FAILED' }));
       }
       return;
     }
@@ -2888,10 +3073,20 @@ const server = http.createServer(async (req, res) => {
     // 不含凭证与密钥，未登录也允许读 —— 未登录时页面同样要显示「本次消耗多少点」。
     if (p === '/api/image-gen/config' && req.method === 'GET') {
       res.setHeader('Content-Type', 'application/json');
+      // 管理员换授权 / 上游模型下架后，用户刷新页面就要看到最新有效配置，不能被 CDN 缓存住。
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
       try {
         const settings = await loadImageGenSettings();
+        // 有效授权由统一解析器决定：原授权失效会自动切到另一条可用授权。
+        // models 为 null 表示上游探测失败 → 不过滤（不能用一次网络抖动清空整页模型）。
+        const effective = await resolveImageProvider(settings);
+        const liveModels = effective.models;
         const models = settings.models
+          // 没有任何有效授权时不能把模型下发成「可选」：否则页面显示模型、点生成才报未配置。
+          .filter(() => !!effective.effectiveProviderId)
           .filter((item) => item.enabled !== false)
+          // 只保留「当前有效授权下真实可用」的图片模型：授权换了、模型下架了，这里立刻同步。
+          .filter((item) => !liveModels || liveModels.includes(item.id))
           .map((item) => ({
             id: item.id,
             label: item.label || item.id,
@@ -2908,6 +3103,10 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({
           ok: true,
           models,
+          // 管理员当前选择的授权（实际生效的那条）；只给名称和 id，不含 Base URL / 密钥。
+          provider: effective.provider
+            ? { id: effective.effectiveProviderId, name: imageProviderPublic(effective.provider, null).name }
+            : null,
           defaultModel: settings.defaultModel,
           defaultResolution: settings.defaultResolution,
           resolutions: IMAGE_RESOLUTIONS,
@@ -2933,10 +3132,19 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Content-Type', 'application/json');
       try {
         const settings = await loadImageGenSettings();
+        const effective = await resolveImageProvider(settings);
         res.end(JSON.stringify({
           ok: true,
           // supportsRefs 只加在**下发副本**上，不写回 KV（KV 里只存 id/label/enabled/prices）
           settings: withRefSupport(settings),
+          // 与用户页同一解析器：后台看到的有效授权 = 用户页看到的有效授权。
+          provider: effective.provider
+            ? imageProviderPublic(effective.provider, effective.models ? { ok: true, models: effective.models, error: '' } : null)
+            : null,
+          effectiveProviderId: effective.effectiveProviderId,
+          availableModels: effective.models,
+          fallback: effective.fallback,
+          reason: effective.reason,
           resolutions: IMAGE_RESOLUTIONS,
           maxRefImages: IMAGE_MAX_REF_IMAGES,
         }));
@@ -2995,6 +3203,9 @@ const server = http.createServer(async (req, res) => {
           updatedAt: new Date().toISOString(),
         };
         await KV.kvPut('imageGenSettings', next);
+        // 换了授权立刻按新凭证重新探测，别让 60s 缓存把刚保存的配置显示成旧的。
+        imageModelProbeCache.clear();
+        imageModelProbeLastOk.clear();
         res.end(JSON.stringify({ ok: true, settings: withRefSupport(await loadImageGenSettings()) }));
       } catch (error) {
         res.statusCode = error.status || 400;
@@ -3010,8 +3221,10 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Content-Type', 'application/json');
       try {
         const settings = await loadImageGenSettings();
-        const providerId = String(body.authProviderId || '').trim() || settings.providerId;
-        if (!providerId) throw new Error('请选择生图授权凭证（usun-img）');
+        // 默认走「当前有效授权」：管理员没显式改凭证时，后台测试与用户页用的是同一条。
+        const providerId = String(body.authProviderId || '').trim()
+          || (await resolveImageProvider(settings)).effectiveProviderId;
+        if (!providerId) throw new Error('请先在「AI 授权管理」选择一条图片处理授权');
         const model = String(body.model || '').trim() || settings.model;
         // 2026-10-18：这条路由原本**完全不校验比例**，`body.aspectRatio` 直接透传上游，
         // 等于给后台留了个绕过能力表的缺口（gpt-image 传 21:9 会被静默换成方图）。
@@ -3055,10 +3268,12 @@ const server = http.createServer(async (req, res) => {
       let charged = null;
       try {
         const settings = await loadImageGenSettings();
-        if (!settings.providerId) {
-          throw Object.assign(new Error('平台还没有配置生图凭证，请联系管理员'), { code: 'IMAGE_NOT_CONFIGURED', status: 503 });
+        // 统一解析器：配置里的授权失效时自动切到当前可用的那条，不再把整个板块拖成 503。
+        const effective = await resolveImageProvider(settings);
+        if (!effective.effectiveProviderId) {
+          throw Object.assign(new Error('平台还没有配置可用的图片处理授权，请联系管理员'), { code: 'IMAGE_NOT_CONFIGURED', status: 503 });
         }
-        const provider = await getImageProvider(settings.providerId);
+        const provider = await getImageProvider(effective.effectiveProviderId);
         const prompt = String(body.prompt || '').trim();
         if (!prompt) throw Object.assign(new Error('请填写画面描述'), { code: 'IMAGE_PROMPT_REQUIRED', status: 400 });
         if (prompt.length > 2000) throw Object.assign(new Error('画面描述过长（上限 2000 字）'), { code: 'IMAGE_PROMPT_TOO_LONG', status: 400 });
@@ -3069,6 +3284,13 @@ const server = http.createServer(async (req, res) => {
         const selection = resolveImageSelection(settings, body.model, body.resolution);
         if (!selection.ok) {
           throw Object.assign(new Error(selection.message || '当前模型或分辨率不可用'), { code: selection.code, status: 400 });
+        }
+        // 模型在当前有效授权下被下架 / 换授权后不在新分组里 → 直接拒绝，不去上游白跑一次。
+        if (effective.models && !effective.models.includes(selection.model)) {
+          throw Object.assign(
+            new Error(`模型 ${selection.model} 在当前授权下不可用，请换一个模型`),
+            { code: 'IMAGE_MODEL_NOT_AVAILABLE', status: 400 },
+          );
         }
         const model = selection.model;
         const resolution = selection.resolution;

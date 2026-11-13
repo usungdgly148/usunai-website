@@ -145,7 +145,9 @@ check('发布可选分类来自服务端（不再用死常量）',
 check('发布按钮文案用动态分类名', pageSrc.includes('{labelOf(publishCategory)}'));
 
 // ===== 9. 参数配置未被改版破坏（原有能力必须保留）=====
-check('页面仍从服务端取模型/档位配置', pageSrc.includes("apiFetch('/api/image-gen/config')"));
+// 请求新增 { cache: 'no-store' }（后台换授权/模型下架后用户页要立刻看到最新配置），
+// 所以只锚到路径，不再要求右括号紧跟其后。
+check('页面仍从服务端取模型/档位配置', pageSrc.includes("apiFetch('/api/image-gen/config'"));
 check('页面仍提交 model/resolution/aspectRatio/images', pageSrc.includes('aspectRatio: aspect') && pageSrc.includes('model,') && pageSrc.includes('resolution,') && pageSrc.includes('images: toApiImages(refs)'));
 check('页面仍处理 402 充值引导', pageSrc.includes('POINTS_INSUFFICIENT') && pageSrc.includes('openRechargeModal?.()'));
 

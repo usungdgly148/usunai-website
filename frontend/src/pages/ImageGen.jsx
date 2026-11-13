@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertCircle, ArrowUp, Check, ChevronDown, Crop, Download, FolderPlus,
-  ImagePlus, Loader2, Monitor, Sparkles, Wand2, X, ZoomIn,
+  ImagePlus, KeyRound, Loader2, Monitor, RefreshCw, Sparkles, Wand2, X, ZoomIn,
 } from 'lucide-react';
 import { useStore } from '../store.jsx';
 import { apiFetch } from '../authFetch.js';
@@ -118,6 +118,13 @@ export default function ImageGen() {
   const [refs, setRefs] = useState([]);
   const [models, setModels] = useState([]);
   const [model, setModel] = useState('');
+  // 当前生效的图片处理授权：后台「授权中心 / AI全能设计」指定，服务端动态解析后下发，
+  // 只有 id + name，不含 Base URL / 密钥。前端不认任何写死的授权 id 或名称。
+  const [provider, setProvider] = useState(null);
+  const [configLoaded, setConfigLoaded] = useState(false);
+  const [configError, setConfigError] = useState('');
+  const modelRef = useRef('');
+  const aliveRef = useRef(true);
   // 顶层比例列表：只在服务端没给 models[].aspectRatios 时兜底（老服务端 / 字段缺失）
   const [fallbackRatios, setFallbackRatios] = useState([]);
   const [resolution, setResolution] = useState('');
@@ -143,31 +150,51 @@ export default function ImageGen() {
   // 分类清单以服务端为准（后台「灵感广场」可增删改序），与广场 chips 共用同一次请求
   const { publishable, labelOf } = useInspirationCategories();
 
-  // 模型/分辨率/点数都由服务端下发，避免前端硬编码与服务端脱节（后台改 KV 后刷新即生效）
+  // 模型/分辨率/点数/当前授权都由服务端下发：后台换授权或上游模型下架后，
+  // 用户刷新页面、切回标签页或每 60 秒自动拿到最新有效配置，不需要发版。
+  // 服务端 resolveImageProvider() 是后台与用户页的唯一真源；探测整体失败时服务端
+  // 会保留已配置模型（models 为 null → 不过滤），单次网络抖动不会把整页清空。
+  useEffect(() => { modelRef.current = model; }, [model]);
   useEffect(() => {
-    let alive = true;
-    apiFetch('/api/image-gen/config')
-      .then((res) => res.json())
-      .then((data) => {
-        if (!alive || !data || !data.ok) return;
-        const list = Array.isArray(data.models) ? data.models : [];
-        setModels(list);
-        const topRatios = Array.isArray(data.aspectRatios) ? data.aspectRatios : [];
-        setFallbackRatios(topRatios);
-        const pickedModel = list.find((item) => item.id === data.defaultModel) || list[0];
-        if (pickedModel) {
-          setModel(pickedModel.id);
-          const wanted = (pickedModel.resolutions || []).find((item) => item.value === data.defaultResolution);
-          setResolution((wanted || (pickedModel.resolutions || [])[0] || {}).value || '');
-          // 初始比例也要落在该模型支持范围内：后台配的默认比例可能是另一个模型才有的值
-          const ratios = (Array.isArray(pickedModel.aspectRatios) && pickedModel.aspectRatios.length)
-            ? pickedModel.aspectRatios
-            : topRatios;
-          if (ratios.length) setAspect((prev) => (ratios.includes(prev) ? prev : ratios[0]));
-        }
-      })
-      .catch(() => {});
-    return () => { alive = false; };
+    aliveRef.current = true;
+    return () => { aliveRef.current = false; };
+  }, []);
+
+  const applyConfig = (data) => {
+    if (!aliveRef.current || !data || !data.ok) return;
+    const list = Array.isArray(data.models) ? data.models : [];
+    const topRatios = Array.isArray(data.aspectRatios) ? data.aspectRatios : [];
+    setModels(list);
+    setProvider(data.provider || null);
+    setFallbackRatios(topRatios);
+    setConfigLoaded(true);
+    setConfigError('');
+    // 已选模型仍可用时不动用户的选择，只更新它的能力/价格；
+    // 模型被下架或授权被换掉时才回落到默认模型，并同步收敛分辨率与比例。
+    if (list.some((item) => item.id === modelRef.current)) return;
+    const picked = list.find((item) => item.id === data.defaultModel) || list[0];
+    modelRef.current = picked ? picked.id : '';
+    setModel(modelRef.current);
+    if (!picked) return;
+    const wanted = (picked.resolutions || []).find((item) => item.value === data.defaultResolution);
+    setResolution((wanted || (picked.resolutions || [])[0] || {}).value || '');
+    const ratios = (Array.isArray(picked.aspectRatios) && picked.aspectRatios.length)
+      ? picked.aspectRatios
+      : topRatios;
+    if (ratios.length) setAspect((prev) => (ratios.includes(prev) ? prev : ratios[0]));
+  };
+
+  const loadConfig = () => apiFetch('/api/image-gen/config', { cache: 'no-store' })
+    .then((res) => res.json())
+    .then(applyConfig)
+    .catch(() => { if (aliveRef.current) setConfigError('图片模型配置获取失败，可点「刷新配置」重试'); });
+
+  useEffect(() => {
+    loadConfig();
+    const onVisible = () => { if (!document.hidden) loadConfig(); };
+    document.addEventListener('visibilitychange', onVisible);
+    const timer = setInterval(() => { if (!document.hidden) loadConfig(); }, 60 * 1000);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
   }, []);
 
   // 当前模型的可用档位（每个档位自带点数，直接标在按钮上）
@@ -269,7 +296,8 @@ export default function ImageGen() {
     const item = aspects.find((one) => one.value === aspect);
     return item ? `${item.hint} ${item.label}` : aspect;
   })();
-  const canSubmit = Boolean(prompt.trim()) && !busy && Boolean(user);
+  // 没有可用模型 / 没有生效授权时不允许提交，避免点了生成才报「模型不可用」。
+  const canSubmit = Boolean(prompt.trim()) && !busy && Boolean(user) && models.length > 0;
 
   const generate = async () => {
     const text = prompt.trim();
@@ -403,6 +431,31 @@ export default function ImageGen() {
         <div className="mx-auto mb-4 max-w-5xl rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
           请先 <Link to="/profile" className="font-medium underline">登录</Link> 后再使用。
         </div>
+      )}
+
+      {/* 当前生效的图片处理授权：与后台「授权中心 / AI全能设计」同源，管理员改完刷新即变 */}
+      {configLoaded && (
+        <div className="mx-auto mb-3 flex max-w-5xl flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+          <KeyRound size={13} className="shrink-0 text-slate-400" />
+          <span>图片处理授权：<span className="font-medium text-slate-700">{provider?.name || '暂无可用授权'}</span></span>
+          <span className="text-slate-300">·</span>
+          <span>{models.length ? `可选 ${models.length} 个图片模型` : '暂无已上架的可用图片模型'}</span>
+          <button
+            type="button"
+            onClick={loadConfig}
+            className="ml-auto inline-flex items-center gap-1 rounded-full border border-slate-200 px-2.5 py-1 text-[11px] text-slate-500 transition hover:border-brand-600 hover:text-brand-700"
+          >
+            <RefreshCw size={11} />刷新配置
+          </button>
+        </div>
+      )}
+      {configLoaded && !models.length && (
+        <div className="mx-auto mb-4 max-w-5xl rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          当前授权下没有已上架且可用的图片模型，暂时无法生成。请稍后点「刷新配置」，或联系管理员在「授权中心」切换一条可用的图片处理授权；页面其他功能不受影响。
+        </div>
+      )}
+      {configError && (
+        <div className="mx-auto mb-4 max-w-5xl rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{configError}</div>
       )}
 
       {/* ===== 输入卡 ===== */}

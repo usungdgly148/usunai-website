@@ -140,7 +140,11 @@ check('每次点击都重新拉取（loadRelayModels 无「已有列表就跳过
   const body = agentEditSrc.slice(i, j);
   return body.includes('await fetchRelayModels(form.authProviderId)') && !/relayModels\.length\s*>\s*0\s*\)\s*return/.test(body);
 })());
-check('前端拉取显式禁用缓存 + 时间戳破缓存', cozeApiSrc.includes("cache: 'no-store'") && /_t=\$\{Date\.now\(\)\}/.test(cozeApiSrc));
+// 时间戳从模板字符串改为 URLSearchParams.set()（同时支持 capability=image 过滤），
+// 语义不变：每次拉取都带新时间戳 + no-store，拿到的必须是最新模型清单。
+check('前端拉取显式禁用缓存 + 时间戳破缓存',
+  cozeApiSrc.includes("cache: 'no-store'")
+  && cozeApiSrc.includes("query.set('_t', String(Date.now()))"));
 check('服务端模型列表端点声明 no-store', /Cache-Control',\s*'no-store/.test(modelsRoute));
 
 // ---------- 3b. 上游「200 但正文全空」的兜底（2026-10-16 线上故障） ----------

@@ -24,6 +24,8 @@ import {
   imageApiStyle,
   imageEndpoint,
   imageModelSupportsRefs,
+  isImageModelId,
+  filterImageModels,
   normalizeImageModels,
   normalizeResolution,
   openAIImageSize,
@@ -39,6 +41,9 @@ const userPageSrc = read('frontend/src/pages/ImageGen.jsx');
 const adminPageSrc = read('frontend/src/pages/AdminImageGen.jsx');
 const pickerSrc = read('frontend/src/RefImagePicker.jsx');
 const compressSrc = read('frontend/src/imageCompress.js');
+const adminAuthSrc = read('frontend/src/pages/AdminAuthProviders.jsx');
+const cozeApiSrc = read('frontend/src/cozeApi.js');
+const geminiImageSrc = read('server/gemini-image.mjs');
 
 let pass = 0;
 const failures = [];
@@ -158,7 +163,7 @@ check('后台页引用参考图选择器', adminPageSrc.includes("from '../RefIm
 check('用户页提交参考图', userPageSrc.includes('images: toApiImages(refs)'));
 check('后台页提交参考图', adminPageSrc.includes('images: toApiImages(refs)'));
 check('用户页不再硬编码 20 点', !/PRICE_HINT\s*=\s*20/.test(userPageSrc));
-check('用户页从接口取价格', userPageSrc.includes("apiFetch('/api/image-gen/config')"));
+check('用户页从接口取价格', userPageSrc.includes("apiFetch('/api/image-gen/config'"));
 check('选择器张数上限与服务端一致', pickerSrc.includes(`export const MAX_REF_IMAGES = ${IMAGE_MAX_REF_IMAGES};`));
 check('选择器单张上限与服务端一致（均为 2MB）', pickerSrc.includes('export const REF_MAX_BYTES = 2 * 1024 * 1024;') && IMAGE_REF_MAX_BYTES === 2 * 1024 * 1024);
 check('参考图压缩输出 JPEG（WebP 未实测，不用）', pickerSrc.includes("mimeType: 'image/jpeg'"));
@@ -442,6 +447,84 @@ check('网页端按当前模型的 aspectRatios 渲染', webImageGenSrc.includes
 const mpImageGenSrc = read('miniapp/src/pages/image-gen/index.tsx');
 check('小程序按当前模型的比例渲染', mpImageGenSrc.includes('currentModel.aspectRatios'));
 check('小程序比例也做归一化（防回填值越界）', mpImageGenSrc.includes('effectiveAspect'));
+
+// ===== 15. 图片处理授权动态化（2026-11-13）=====
+// 旧实现把生图能力硬绑定在单条生图授权上：那条授权失效、或其下模型被下架，整个板块跟着一起废。
+// 现在服务端 resolveImageProvider() 是「后台配置 / 用户页配置 / 两条生成路由」的唯一真源：
+// 候选 = 所有启用中的中转站授权，逐条实时探测图片模型，失效自动切换，探测全失败也不清空页面。
+check('全仓不再出现写死的生图授权名',
+  !/usun-img/.test(serverSrc) && !/usun-img/.test(geminiImageSrc)
+  && !/usun-img/.test(userPageSrc) && !/usun-img/.test(adminPageSrc) && !/usun-img/.test(adminAuthSrc));
+check('401/403 文案改为引导换授权', geminiImageSrc.includes('请到「AI 授权管理」换一条可用的图片处理授权'));
+check('图片模型识别函数已导出', typeof isImageModelId === 'function' && typeof filterImageModels === 'function');
+check('能识别 gpt-image 系列', isImageModelId('gpt-image-2.6') && isImageModelId('gpt-image-2.5-flare'));
+check('能识别 gemini-nano-banana', isImageModelId('gemini-nano-banana-2.1'));
+check('能识别 seedream / flux / dall-e', isImageModelId('doubao-seedream-4.0') && isImageModelId('flux-1.1-pro') && isImageModelId('dall-e-3'));
+check('聊天模型被排除', !isImageModelId('gpt-4o') && !isImageModelId('deepseek-chat') && !isImageModelId('claude-3-7-sonnet'));
+check('混合清单只留图片模型、去重并排序',
+  JSON.stringify(filterImageModels(['gpt-4o', 'gpt-image-2.6', 'gpt-image-2.6', 'flux-pro', 'deepseek-chat']))
+  === JSON.stringify(['flux-pro', 'gpt-image-2.6']));
+check('过滤空输入返回空数组', JSON.stringify(filterImageModels(null)) === '[]');
+
+check('候选授权按类型枚举、不认写死 id', serverSrc.includes('item.type === RELAY_PROVIDER_TYPE') && serverSrc.includes('listImageProviderCandidates'));
+check('每条候选实时探测图片模型', serverSrc.includes('filterImageModels(await fetchRelayModels('));
+check('探测结果带 TTL 缓存', serverSrc.includes('IMAGE_MODEL_PROBE_TTL_MS') && serverSrc.includes('imageModelProbeCache'));
+check('配置授权失效时自动切换', serverSrc.includes('已自动切换到可用授权'));
+check('整体探测失败时保留已配置模型', serverSrc.includes('models: probe && probe.ok ? probe.models : null') && serverSrc.includes('暂按已配置模型展示'));
+check('部分授权探测失败也不会把板块置空', serverSrc.includes('anyProbeFailed && candidates.length') && serverSrc.includes('chosen = configured || candidates[0]'));
+check('超时可沿用 10 分钟内最后一次成功结果', serverSrc.includes('IMAGE_MODEL_LAST_OK_TTL_MS = 10 * 60 * 1000') && serverSrc.includes('imageModelProbeLastOk.get(id)') && serverSrc.includes('stale: true'));
+check('401/403 明确失效绝不复用旧模型清单', serverSrc.includes('IMAGE_PROBE_HARD_FAIL') && serverSrc.includes('!IMAGE_PROBE_HARD_FAIL.test(message)'));
+check('换授权与保存配置都会清掉粘性缓存', serverSrc.includes('imageModelProbeLastOk.delete(providerId)') && serverSrc.includes('imageModelProbeLastOk.clear()'));
+check('探测超时放宽到 10 秒', serverSrc.includes('fetchRelayModels(provider.baseUrl, provider.apiKey, 10000)'));
+check('fallback 优先已有上架定价的授权', serverSrc.includes('pricedIds.has(id)'));
+check('唯一解析器被至少四处调用', (serverSrc.match(/resolveImageProvider\(settings\)/g) || []).length >= 4);
+
+check('新增授权清单接口 GET', serverSrc.includes("'/api/admin/image-gen/providers' && req.method === 'GET'"));
+check('新增设为图片授权接口 POST', serverSrc.includes("'/api/admin/image-gen/provider' && req.method === 'POST'"));
+check('设为图片授权只改 providerId', serverSrc.includes("await KV.kvPut('imageGenSettings', { ...current, providerId"));
+check('授权清单回吐生效 / 回退 / 原因',
+  serverSrc.includes('configuredProviderId: resolved.configuredProviderId')
+  && serverSrc.includes('effectiveProviderId: resolved.effectiveProviderId')
+  && serverSrc.includes('fallback: resolved.fallback'));
+check('每条授权回吐 available / imageModels / error',
+  serverSrc.includes('available: !!(probe && probe.ok && probe.models.length)')
+  && serverSrc.includes('imageModels: probe ? probe.models : []'));
+check('两个新接口都要管理员权限', (() => {
+  const listAt = serverSrc.indexOf("'/api/admin/image-gen/providers'");
+  const setAt = serverSrc.indexOf("'/api/admin/image-gen/provider'");
+  return listAt > 0 && setAt > 0
+    && serverSrc.slice(listAt, listAt + 180).includes('requireAdmin')
+    && serverSrc.slice(setAt, setAt + 180).includes('requireAdmin');
+})());
+check('/v1/models 支持 capability=image 过滤', serverSrc.includes("u.searchParams.get('capability') === 'image' ? filterImageModels(allModels) : allModels"));
+
+check('用户页 config 走统一解析器', configRoute.includes('resolveImageProvider(settings)'));
+check('用户页 config 按有效授权过滤模型', configRoute.includes('liveModels.includes(item.id)'));
+check('用户页 config 下发当前授权', configRoute.includes('provider: effective.provider'));
+check('用户页 config 禁用 CDN 缓存', configRoute.includes('no-store'));
+check('无有效授权时不下发「可选模型」', configRoute.includes('!!effective.effectiveProviderId'));
+check('后台 settings 下发有效授权与可用模型', serverSrc.includes('availableModels: effective.models') && serverSrc.includes('fallback: effective.fallback'));
+check('用户生成按有效授权取凭证', serverSrc.includes('getImageProvider(effective.effectiveProviderId)'));
+check('用户生成拒绝不在有效授权下的模型', serverSrc.includes("code: 'IMAGE_MODEL_NOT_AVAILABLE'") && serverSrc.includes('!effective.models.includes(selection.model)'));
+check('后台测试默认用有效授权', serverSrc.includes('(await resolveImageProvider(settings)).effectiveProviderId'));
+
+check('前端拉模型支持 capability=image', cozeApiSrc.includes("if (capability) query.set('capability', capability)") && adminPageSrc.includes("{ capability: 'image' }"));
+check('后台配置页读授权清单', adminPageSrc.includes("'/api/admin/image-gen/providers'"));
+check('后台配置页展示当前生效授权', adminPageSrc.includes('当前生效的图片处理授权') && adminPageSrc.includes('effectiveProviderInfo'));
+check('后台配置页按授权联动模型', adminPageSrc.includes('selectedProviderInfo?.available') && adminPageSrc.includes('availableIds'));
+check('后台配置页标注已下架模型', adminPageSrc.includes('当前授权下不可用'));
+check('后台配置页保存后刷新授权状态', adminPageSrc.includes('const state = await loadProviders();'));
+check('后台试生成模型来自联动清单', adminPageSrc.includes('availableIds.forEach((id) => ids.add(id))'));
+check('授权中心读同一份授权清单', adminAuthSrc.includes("'/api/admin/image-gen/providers'"));
+check('授权中心可设为图片授权', adminAuthSrc.includes("'/api/admin/image-gen/provider'") && adminAuthSrc.includes('设为图片授权'));
+check('授权中心显示生效中标记', adminAuthSrc.includes('图片授权·生效中') && adminAuthSrc.includes('effectiveProviderId'));
+check('授权中心逐条展示图片模型', adminAuthSrc.includes('imageInfo.imageModels') && adminAuthSrc.includes('imageInfo?.available'));
+check('授权中心增删改后重新探测', (adminAuthSrc.match(/await loadImageAuth\(\)/g) || []).length >= 2);
+check('用户页展示当前授权名称', userPageSrc.includes('provider?.name') && userPageSrc.includes('图片处理授权：'));
+check('用户页配置定时与可见性刷新', userPageSrc.includes('visibilitychange') && userPageSrc.includes('setInterval'));
+check('用户页无可用模型有空态', userPageSrc.includes('当前授权下没有已上架且可用的图片模型'));
+check('用户页无可用模型禁止生成', /canSubmit = .*models\.length > 0/.test(userPageSrc));
+check('用户页有刷新配置入口', userPageSrc.includes('刷新配置') && userPageSrc.includes('onClick={loadConfig}'));
 
 // ===== 结果 =====
 const total = pass + failures.length;

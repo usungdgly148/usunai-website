@@ -46,11 +46,31 @@ export default function AdminImageGen() {
   const [savingSettings, setSavingSettings] = useState(false);
   const [pulling, setPulling] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState(null);
+  // 图片处理授权清单：和「授权中心」、用户页配置共用服务端 resolveImageProvider()，
+  // 每条授权自带实时探测到的 imageModels / available / error。前端不认任何写死的授权 id。
+  const [providerState, setProviderState] = useState(null);
 
-  // 凭证列表是异步到货的，默认选中第一条（通常是生图专用的那条）
+  const loadProviders = async () => {
+    try {
+      const res = await adminFetch('/api/admin/image-gen/providers', { cache: 'no-store' });
+      const data = await res.json().catch(() => ({}));
+      if (data.ok) { setProviderState(data); return data; }
+    } catch { /* 授权探测失败不应挡住配置页正常编辑 */ }
+    return null;
+  };
+
+  // 凭证列表是异步到货的：优先回显「实际生效」的那条，其次「后台已指定」的那条，
+  // 最后才落到第一条。旧写法固定 relays[0]（常是对话专用凭证、没有图片模型）会让前后台不一致。
   useEffect(() => {
-    if (!providerId && relays.length) setProviderId(relays[0].id);
-  }, [relays, providerId]);
+    if (providerId || !relays.length) return;
+    const effective = providerState?.effectiveProviderId;
+    const hit = relays.find((p) => p.id === effective)
+      || relays.find((p) => p.id === providerState?.configuredProviderId);
+    setProviderId((hit || relays[0]).id);
+  }, [relays, providerId, providerState]);
+
+  // 换授权立刻联动：重新拉一次各授权的实时可用图片模型，不需要手动点「拉取」。
+  useEffect(() => { loadProviders(); }, [providerId]);
 
   // 单张实测 20~23 秒（4K 约 47 秒），没有进度可拿，只能显示已等待秒数让用户知道没卡死
   useEffect(() => {
@@ -102,19 +122,28 @@ export default function AdminImageGen() {
 
   useEffect(() => { loadSettings(); }, []);
 
-  const modelOptions = useMemo(() => {
-    const fromDraft = (draft?.models || []).map((item) => item.id);
-    const merged = [...fromDraft];
-    for (const id of MODEL_FALLBACKS) if (!merged.includes(id)) merged.push(id);
-    return merged;
-  }, [draft]);
+  const selectedProviderInfo = (providerState?.providers || []).find((item) => item.id === providerId) || null;
+  const availableIds = selectedProviderInfo?.imageModels || [];
+  // 用户页真正生效的授权（原授权失效时服务端会自动切换）；定价表的可用性标记按它算。
+  const effectiveProviderInfo = (providerState?.providers || []).find((item) => item.id === providerState?.effectiveProviderId) || null;
+  const effectiveIds = effectiveProviderInfo?.imageModels || [];
+  const relayName = (id) => relays.find((p) => p.id === id)?.name || id;
 
-  // 从中转站实时拉模型列表（服务端转发，密钥不下发），新增的默认「不上架、不填价」
+  // 试生成的模型下拉 = 当前授权下的真实图片模型 ∪ 已配置模型；两者都空才用内置兜底。
+  const modelOptions = useMemo(() => {
+    const ids = new Set();
+    (draft?.models || []).forEach((item) => ids.add(item.id));
+    availableIds.forEach((id) => ids.add(id));
+    if (!ids.size) MODEL_FALLBACKS.forEach((id) => ids.add(id));
+    return [...ids];
+  }, [draft, selectedProviderInfo]);
+
+  // 只拉「图片模型」：中转站 /v1/models 会混返聊天模型，不过滤会把对话模型塞进定价表。
   const pullModels = async () => {
     const target = providerId || draft?.providerId;
-    if (!target) { setSettingsMsg({ ok: false, msg: '请先选择生图凭证' }); return; }
+    if (!target) { setSettingsMsg({ ok: false, msg: '请先选择图片处理授权' }); return; }
     setPulling(true);
-    const r = await fetchRelayModels(target);
+    const r = await fetchRelayModels(target, { capability: 'image' });
     setPulling(false);
     if (!r || r.ok === false) {
       setSettingsMsg({ ok: false, msg: '拉取失败：' + ((r && r.error) || '未知错误') });
@@ -127,7 +156,8 @@ export default function AdminImageGen() {
       const added = ids.filter((id) => !existing.has(id)).map((id) => ({ id, label: '', enabled: false, prices: {} }));
       return { ...base, models: [...(base.models || []), ...added] };
     });
-    setSettingsMsg({ ok: true, msg: `已从中转站取到 ${ids.length} 个模型；新增的默认「不上架」，填价并勾选后才会出现在用户页。` });
+    await loadProviders();
+    setSettingsMsg({ ok: true, msg: `已从「${relayName(target)}」取到 ${ids.length} 个图片模型；新增的默认「不上架」，填价并勾选后才会出现在用户页。` });
   };
 
   const patchModel = (index, patch) => {
@@ -180,7 +210,14 @@ export default function AdminImageGen() {
       setDraft(toDraft(data.settings));
       setCaps(toCaps(data.settings));
       if (data.settings.providerId) setProviderId(data.settings.providerId);
-      setSettingsMsg({ ok: true, msg: '已保存，用户页刷新即生效（无需发版）' });
+      const state = await loadProviders();
+      const effectiveName = (state?.providers || []).find((p) => p.id === state?.effectiveProviderId)?.name;
+      setSettingsMsg({
+        ok: true,
+        msg: state?.fallback || state?.reason
+          ? `已保存。当前实际生效授权「${effectiveName || '无'}」：${state?.reason || '按有效配置下发'}；用户页只展示该授权下可用且已上架的模型。`
+          : `已保存，用户页刷新即生效（无需发版）；当前图片处理授权「${effectiveName || providerId}」。`,
+      });
     } catch (e) {
       setSettingsMsg({ ok: false, msg: String(e.message || e) });
     } finally {
@@ -219,8 +256,18 @@ export default function AdminImageGen() {
     <div>
       <AdminPageHeader
         title="AI全能设计"
-        subtitle="调用 Gemini 原生图片模型，支持文生图、参考图（图生图）与 1K/2K/4K 清晰度。此页测试不扣用户算力。"
+        subtitle="图片处理授权与模型由后台动态指定，支持文生图、参考图（图生图）与 1K/2K/4K 清晰度。此页测试不扣用户算力。"
       />
+
+      {providerState && (
+        <div className={`mb-6 rounded-xl px-4 py-3 text-sm ${providerState.reason || !providerState.effectiveProviderId ? 'bg-amber-50 text-amber-700' : 'bg-slate-50 text-slate-600'}`}>
+          <span className="font-medium">当前生效的图片处理授权：</span>
+          {providerState.effectiveProviderId
+            ? <>「{effectiveProviderInfo?.name || providerState.effectiveProviderId}」，其下 {effectiveIds.length} 个可用图片模型。用户页只展示这条授权下真实可用且已上架的模型；也可到「授权中心」点「设为图片授权」切换。</>
+            : <>暂无可用授权，请到「授权中心」新增或启用一条包含图片模型的中转站授权。</>}
+          {providerState.reason && <div className="mt-1">{providerState.reason}</div>}
+        </div>
+      )}
 
       {/* ===== 模型与定价：用户生成时按这里的「模型 × 清晰度」扣点，改完即生效 ===== */}
       <Card className="p-5 mb-6">
@@ -239,7 +286,7 @@ export default function AdminImageGen() {
               disabled={pulling}
               className="px-3 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
-              {pulling ? '拉取中…' : '从 API 拉取模型列表'}
+              {pulling ? '拉取中…' : '拉取当前授权的图片模型'}
             </button>
             <PrimaryButton onClick={saveSettings} disabled={savingSettings || !draft}>
               {savingSettings ? '保存中…' : '保存配置'}
@@ -265,10 +312,15 @@ export default function AdminImageGen() {
                 </thead>
                 <tbody>
                   {draft.models.length === 0 && (
-                    <tr><td colSpan={6} className="px-2 py-3 text-slate-400">还没有模型。点右上角「从 API 拉取模型列表」。</td></tr>
+                    <tr><td colSpan={6} className="px-2 py-3 text-slate-400">还没有模型。点右上角「拉取当前授权的图片模型」。</td></tr>
                   )}
                   {draft.models.map((item, index) => {
                     const priced = Object.keys(item.prices || {}).length > 0;
+                    // 可用性按「实际生效授权」判断：授权换过 / 模型被上游下架都会被标出来。
+                    // 只提示不强制禁用 —— 服务端 config 会自动过滤，单条失效不会让整页不可用。
+                    const liveState = !providerState || !effectiveProviderInfo?.available
+                      ? 'unknown'
+                      : (effectiveIds.includes(item.id) ? 'ok' : 'missing');
                     return (
                       <tr key={item.id} className="bg-slate-50/60">
                         <td className="px-2 py-1.5 align-middle">
@@ -283,6 +335,8 @@ export default function AdminImageGen() {
                         <td className="px-2 py-1.5 align-middle">
                           <span className="font-mono text-xs text-slate-600">{item.id}</span>
                           {!priced && <span className="ml-1.5 text-[11px] text-amber-600">未定价</span>}
+                          {liveState === 'missing' && <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-700">当前授权下不可用</span>}
+                          {liveState === 'ok' && <span className="ml-1.5 rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-700">可用</span>}
                         </td>
                         <td className="px-2 py-1.5 align-middle">
                           <input
@@ -355,8 +409,7 @@ export default function AdminImageGen() {
             </div>
 
             <p className="text-xs text-slate-400 mt-2">
-              当前用户可选：{activeCount} 个模型。
-              <span className="ml-1">（模型清单来自中转站真实可用列表；gpt-image-2.5-flare / -sunburst 目前上游无可用渠道，实测 503，建议先不上架。）</span>
+              已上架且定价：{activeCount} 个模型。用户页最终可见的是「当前生效授权下真实可用」的那部分，由服务端实时过滤；某条授权或模型失效会自动切换或隐藏，不影响页面其他功能。
             </p>
           </>
         )}
@@ -369,14 +422,28 @@ export default function AdminImageGen() {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
         <Card className="p-5 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">生图凭证</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">图片处理授权</label>
             <select value={providerId} onChange={(e) => setProviderId(e.target.value)} className={inputCls}>
-              <option value="">请选择授权凭证</option>
-              {relays.map((p) => <option key={p.id} value={p.id}>{p.name}（{p.baseUrl}）</option>)}
+              <option value="">请选择图片处理授权</option>
+              {relays.map((p) => {
+                const info = (providerState?.providers || []).find((item) => item.id === p.id);
+                const count = info?.imageModels?.length || 0;
+                return <option key={p.id} value={p.id}>{p.name}{info ? `（图片模型 ${count} 个${info.available ? '' : '·不可用'}）` : '（未探测）'}</option>;
+              })}
             </select>
             <p className="text-xs text-slate-400 mt-1">
-              这条凭证既是本页测试用的，也是用户生成时真正使用的 —— 改完要点「保存配置」才会生效。
+              保存后即为「AI全能设计」的图片处理授权；也可在「授权中心」直接点「设为图片授权」。若这条授权失效，服务端会自动切到其他可用授权，用户页不会因此不可用。
             </p>
+            {/* 选择后自动联动：展示这条授权下实时探测到的可用图片模型 */}
+            <div className="mt-2 rounded-xl bg-slate-50 px-3 py-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-slate-600">该授权下可用图片模型</span>
+                <button type="button" onClick={loadProviders} className="text-[11px] text-brand-700 hover:underline">重新探测</button>
+              </div>
+              {selectedProviderInfo?.available
+                ? <div className="mt-1.5 flex flex-wrap gap-1.5">{availableIds.map((id) => <span key={id} className="rounded-md bg-white px-2 py-1 font-mono text-[11px] text-slate-600 ring-1 ring-slate-200">{id}</span>)}</div>
+                : <div className="mt-1 text-xs text-amber-700">{selectedProviderInfo?.error || '正在探测该授权的图片模型，或该授权暂不可用'}</div>}
+            </div>
             {!relays.length && (
               <p className="text-xs text-amber-600 mt-1">还没有中转站凭证，请先到「授权中心」新增一条。</p>
             )}

@@ -366,11 +366,16 @@ export async function listCozeBots(cfg) {
 // cfg = { authProviderId, botId, mock? }
 // 返回 { ok, bot: { bot_id, bot_name, description, icon_url, opening_dialog, suggested_questions } }
 // 拉取中转站（OpenAI 兼容）的可用模型列表。密钥只在服务端使用，这里只回模型名。
-export async function fetchRelayModels(providerId) {
+export async function fetchRelayModels(providerId, { capability = '' } = {}) {
   try {
     // 每次都必须拿最新列表：显式 no-store 禁用浏览器缓存，并加时间戳破缓存。
     // 主人在中转站那边增减模型后，重新点「拉取模型列表」应当立刻看到新结果。
-    const res = await adminFetch(`/api/admin/relay/models?providerId=${encodeURIComponent(providerId)}&_t=${Date.now()}`, { method: 'GET', cache: 'no-store' });
+    // capability=image 时服务端只回图片生成模型（AI全能设计 按授权联动用）；
+    // 不传则仍是完整清单（聊天智能体配置用），老调用方不受影响。
+    const query = new URLSearchParams({ providerId });
+    if (capability) query.set('capability', capability);
+    query.set('_t', String(Date.now()));
+    const res = await adminFetch(`/api/admin/relay/models?${query.toString()}`, { method: 'GET', cache: 'no-store' });
     return await res.json();
   } catch (e) {
     return { ok: false, error: '网络错误：' + String(e.message || e) };
