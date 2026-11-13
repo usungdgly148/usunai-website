@@ -75,6 +75,11 @@ import {
   IMAGE_API_STYLE_OPENAI,
 } from './gemini-image.mjs';
 import {
+  TEXT_IMAGE_RETRY_HINT,
+  looksLikeTextDocumentImage,
+  wantsTextInImage,
+} from './text-image-guard.mjs';
+import {
   configureKnowledgeService,
   handleKnowledgeAdminRoute,
   retrieveKnowledgeContext,
@@ -1505,19 +1510,15 @@ function withRefSupport(settings) {
   };
 }
 
-// 生成 + 落盘。**上游返回的是第三方 CDN 链接（实测不是 base64）**，必须立刻下载转存本站：
-// 那个链接带日期目录、不保证长期有效，也绝不能直接交给前端（会暴露上游域名且随时失效）。
-async function generateAndStoreImage({ provider, prompt, aspectRatio, resolution, model, images }) {
-  // images 是前端传来的参考图（可空）。校验在 buildImagePayload → prepareReferenceImages 里做，
-  // 但用户侧路由会**先校验再预扣**，避免「参数不合法还先扣钱再退钱」。
-  const refs = prepareReferenceImages(images);
+// 单次上游请求 + 取到图片字节（不含落盘）。
+// 抽出来是为了「文字排版图自愈」能原样重发一次，不必把分流/取图逻辑复制一遍。
+async function requestImageBytes({ provider, prompt, aspectRatio, resolution, model, refs, openaiStyle }) {
   // 三路分流（2026-10-27 实测确定，判据是上游响应的 image_tokens）：
   //   · gemini 原生               → :generateContent + parts[].inlineData（参考图塞 parts）
   //   · gpt-image-* 且**有**参考图 → /v1/images/edits + multipart（唯一会让上游真读参考图的路径）
   //   · gpt-image-* 且**无**参考图 → /v1/images/generations + JSON
   // ⚠️ 带参考图时绝不能走 /generations：实测 image_urls / images[].image_url 都回 200 但
   //    image_tokens=0，等于「扣了点、给了张跟参考图无关的图」。
-  const openaiStyle = imageApiStyle(model) === IMAGE_API_STYLE_OPENAI;
   let request;
   if (!openaiStyle) {
     request = { payload: buildImagePayload({ prompt, aspectRatio, resolution, images: refs }) };
@@ -1538,16 +1539,63 @@ async function generateAndStoreImage({ provider, prompt, aspectRatio, resolution
       status: 502,
     });
   }
-  let buffer;
-  let mimeType;
   if (extracted.inline) {
-    buffer = Buffer.from(extracted.inline.base64, 'base64');
-    mimeType = extracted.inline.mimeType;
-  } else {
-    const downloaded = await downloadImage(extracted.file.url);
-    buffer = downloaded.buffer;
-    mimeType = extracted.file.mimeType || downloaded.contentType || 'image/jpeg';
+    return { buffer: Buffer.from(extracted.inline.base64, 'base64'), mimeType: extracted.inline.mimeType };
   }
+  const downloaded = await downloadImage(extracted.file.url);
+  return {
+    buffer: downloaded.buffer,
+    mimeType: extracted.file.mimeType || downloaded.contentType || 'image/jpeg',
+  };
+}
+
+// 生成 + 落盘。**上游返回的是第三方 CDN 链接（实测不是 base64）**，必须立刻下载转存本站：
+// 那个链接带日期目录、不保证长期有效，也绝不能直接交给前端（会暴露上游域名且随时失效）。
+//
+// 🔴 文字排版图自愈（2026-11-13 线上）：上游偶尔会把**分节结构的提示词当成要排版的内容**，
+// 返回一张「深灰底 + 全文正文」的图文文档图（用户看到的现象像「提示词被叠到了图上」）。
+// 这里在落盘前判一次，疑似就带着「只输出画面本体」的约束重发一次（详见 text-image-guard.mjs）。
+// 三条硬规矩：
+//   ① 用户 prompt 里本来就要字（海报/标题/书法…）→ 整个跳过，否则会把正确结果毁掉；
+//   ② 只重试 1 次，重试后仍疑似也照常交付（自愈绝不能把成功请求变成报错）；
+//   ③ 任何判定异常都按「不疑似」处理（自愈是增强，不能影响主流程）。
+async function generateAndStoreImage({ provider, prompt, aspectRatio, resolution, model, images }) {
+  // images 是前端传来的参考图（可空）。校验在 buildImagePayload → prepareReferenceImages 里做，
+  // 但用户侧路由会**先校验再预扣**，避免「参数不合法还先扣钱再退钱」。
+  const refs = prepareReferenceImages(images);
+  const openaiStyle = imageApiStyle(model) === IMAGE_API_STYLE_OPENAI;
+  let { buffer, mimeType } = await requestImageBytes({
+    provider, prompt, aspectRatio, resolution, model, refs, openaiStyle,
+  });
+
+  if (!wantsTextInImage(prompt)) {
+    const verdict = await looksLikeTextDocumentImage(buffer);
+    if (verdict.suspected) {
+      console.warn('[image-gen] 输出疑似「文字排版图」，按画面本体重试一次', JSON.stringify(verdict.metrics));
+      try {
+        const retried = await requestImageBytes({
+          provider,
+          prompt: `${String(prompt).trim()}${TEXT_IMAGE_RETRY_HINT}`,
+          aspectRatio,
+          resolution,
+          model,
+          refs,
+          openaiStyle,
+        });
+        const again = await looksLikeTextDocumentImage(retried.buffer);
+        if (again.suspected) {
+          console.warn('[image-gen] 重试后仍疑似「文字排版图」，仍交付该结果', JSON.stringify(again.metrics));
+        } else {
+          buffer = retried.buffer;
+          mimeType = retried.mimeType;
+        }
+      } catch (error) {
+        // 重试失败不许吞掉首次成果：首次已经出一张图了，退回报错等于「本来有图却告诉用户失败」。
+        console.warn('[image-gen] 文字图重试失败，交付首次结果：', String((error && error.message) || error));
+      }
+    }
+  }
+
   if (!buffer || !buffer.length) throw Object.assign(new Error('生成的图片内容为空'), { code: 'IMAGE_EMPTY', status: 502 });
   // key 必须落在 uploads/ 下：其它路径（如 localUploadPathFromUrl）按这个前缀认本站文件。
   const key = makeImageStorageKey(mimeType);

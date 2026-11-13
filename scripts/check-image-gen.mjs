@@ -35,6 +35,14 @@ import {
   prepareReferenceImages,
   resolveImageSelection,
 } from '../server/gemini-image.mjs';
+import {
+  TEXT_IMAGE_MAX_COLORS,
+  TEXT_IMAGE_MIN_EDGE,
+  TEXT_IMAGE_RETRY_HINT,
+  analyzeTextDocumentPixels,
+  looksLikeTextDocumentImage,
+  wantsTextInImage,
+} from '../server/text-image-guard.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
@@ -47,6 +55,7 @@ const compressSrc = read('frontend/src/imageCompress.js');
 const adminAuthSrc = read('frontend/src/pages/AdminAuthProviders.jsx');
 const cozeApiSrc = read('frontend/src/cozeApi.js');
 const geminiImageSrc = read('server/gemini-image.mjs');
+const textGuardSrc = read('server/text-image-guard.mjs');
 
 let pass = 0;
 const failures = [];
@@ -557,6 +566,81 @@ check('fileData.fileUri 优先级高于 text', (() => {
 check('扩展名 → MIME 映射', mimeTypeFromUrl('https://a/b.png') === 'image/png' && mimeTypeFromUrl('https://a/b.webp') === 'image/webp' && mimeTypeFromUrl('https://a/b') === 'image/jpeg');
 check('下载上游图片带 UA（空 UA 会被 CDN 403）', geminiImageSrc.includes("'User-Agent': 'Mozilla/5.0 (compatible; usun-image-fetch/1.0)'"));
 check('text 取到链接后仍走转存（不直接把上游地址给前端）', serverSrc.includes('downloadImage(extracted.file.url)') && serverSrc.includes("url: `/api/blob/serve?key=${encodeURIComponent(key)}`"));
+
+// ===== 17. 「文字排版图」自愈（2026-11-13 线上故障）=====
+// 线上现象：用户在小程序生图，拿到的那张图**内容就是自己输入的提示词全文**（看起来像「文字被叠到图上」）。
+// 真相不是渲染器叠加：提示词是【构图与空间】…这种分节文档结构，上游把它当成了"要排版的内容"，
+// 输出一张图文文档图；服务端对上游字节不做内容判定、原样落盘，前端原样展示。
+// 已用同一授权 + 同一提示词实测复现，且验证「追加约束后能出正常画面」。
+const GUARD_SIZE = 256;
+
+/** 造一张「深底 + 浅色文字行」的图：用色极少、边缘极密（与真实文字排版图同构）。 */
+function makeTextLikePixels(size = GUARD_SIZE) {
+  const rgb = new Uint8Array(size * size * 3);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const i = (y * size + x) * 3;
+      const on = (y % 8) < 3 && (x % 6) < 3;
+      const v = on ? 230 : 30;
+      rgb[i] = v;
+      rgb[i + 1] = v;
+      rgb[i + 2] = v;
+    }
+  }
+  return rgb;
+}
+
+const textLike = analyzeTextDocumentPixels({ width: GUARD_SIZE, height: GUARD_SIZE, rgb: makeTextLikePixels() });
+check('文字排版图被判疑似', textLike.suspected === true, JSON.stringify(textLike.metrics));
+check('文字图用色极少', textLike.metrics.colors <= TEXT_IMAGE_MAX_COLORS, String(textLike.metrics.colors));
+check('文字图边缘极密', textLike.metrics.edgeSum >= TEXT_IMAGE_MIN_EDGE, String(textLike.metrics.edgeSum));
+
+// 照片：三通道独立跳变的彩色噪声 —— 边缘同样密，但用色远超阈值 ⇒ 必须放过
+const noiseRgb = new Uint8Array(GUARD_SIZE * GUARD_SIZE * 3);
+for (let p = 0; p < GUARD_SIZE * GUARD_SIZE; p += 1) {
+  noiseRgb[p * 3] = (p * 73) % 256;
+  noiseRgb[p * 3 + 1] = (p * 151 + 41) % 256;
+  noiseRgb[p * 3 + 2] = (p * 199 + 97) % 256;
+}
+const noiseVerdict = analyzeTextDocumentPixels({ width: GUARD_SIZE, height: GUARD_SIZE, rgb: noiseRgb });
+check('彩色噪声图不误判（用色多）', noiseVerdict.suspected === false, JSON.stringify(noiseVerdict.metrics));
+
+// 纯色 / 平滑渐变：用色少但几乎没有边缘 ⇒ 必须放过
+check('纯色图不误判（无边缘）', analyzeTextDocumentPixels({ width: GUARD_SIZE, height: GUARD_SIZE, rgb: new Uint8Array(GUARD_SIZE * GUARD_SIZE * 3).fill(200) }).suspected === false);
+const gradRgb = new Uint8Array(GUARD_SIZE * GUARD_SIZE * 3);
+for (let y = 0; y < GUARD_SIZE; y += 1) {
+  for (let x = 0; x < GUARD_SIZE; x += 1) {
+    const i = (y * GUARD_SIZE + x) * 3;
+    const v = Math.round((x / GUARD_SIZE) * 255);
+    gradRgb[i] = v;
+    gradRgb[i + 1] = v;
+    gradRgb[i + 2] = v;
+  }
+}
+check('平滑渐变图不误判（边缘不足）', analyzeTextDocumentPixels({ width: GUARD_SIZE, height: GUARD_SIZE, rgb: gradRgb }).suspected === false);
+
+// 这条校验是增强项：任何异常都必须退回「不疑似」，绝不能把主流程搞挂
+check('空像素不崩且不疑似', analyzeTextDocumentPixels({ width: GUARD_SIZE, height: GUARD_SIZE, rgb: new Uint8Array(0) }).suspected === false);
+check('缺参数不崩且不疑似', analyzeTextDocumentPixels({}).suspected === false);
+check('空 buffer 不疑似', (await looksLikeTextDocumentImage(Buffer.alloc(0))).suspected === false);
+check('非图片字节不疑似', (await looksLikeTextDocumentImage(Buffer.from('definitely not an image'))).suspected === false);
+
+// 安全阀：用户本来就要字时绝不重试 —— 否则会把「开业海报」换成一张没有标题的空海报
+check('分节电影静帧提示词不认为要字', wantsTextInImage('一幅极具东方哲学美学的电影静帧，采用35mm定焦镜头拍摄') === false);
+check('普通画面描述不认为要字', wantsTextInImage('一只橘猫趴在窗台上晒太阳') === false);
+check('海报类提示词识别为要字', wantsTextInImage('设计一张咖啡店开业海报，标题写「开业大吉」') === true);
+check('书法类提示词识别为要字', wantsTextInImage('一幅书法作品，写着「家和万事兴」') === true);
+check('主视觉/logo 识别为要字', wantsTextInImage('产品主视觉，右下角要放 logo') === true);
+
+// 服务端接线：只在「用户没要字」时判一次 → 疑似就带约束重发一次 → 无论如何都交付已有结果
+check('服务端仅在用户未要求文字时才自愈', serverSrc.includes('if (!wantsTextInImage(prompt))'));
+check('重试时追加「只输出画面本体」约束', serverSrc.includes('prompt: `${String(prompt).trim()}${TEXT_IMAGE_RETRY_HINT}`'));
+check('重试失败仍交付首次结果（不能把成功请求变成报错）', serverSrc.includes('文字图重试失败，交付首次结果'));
+check('重试后仍疑似也照常交付，不无限重试', serverSrc.includes('重试后仍疑似'));
+check('落盘记录的仍是用户原始提示词（约束不写进历史）', /return \{\s*\n\s*key,/.test(serverSrc) && serverSrc.includes('\n    prompt,\n    aspectRatio:'));
+check('上游请求被抽成可复用的单次调用', serverSrc.includes('async function requestImageBytes('));
+check('判定逻辑独立成模块', textGuardSrc.includes('export function analyzeTextDocumentPixels') && textGuardSrc.includes('export function wantsTextInImage'));
+check('sharp 动态加载，缺依赖不阻断生图', textGuardSrc.includes("await import('sharp')") && textGuardSrc.includes('sharp-unavailable'));
 
 // ===== 结果 =====
 const total = pass + failures.length;
