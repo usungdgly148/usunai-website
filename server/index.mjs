@@ -1329,6 +1329,8 @@ const IMAGE_MODEL_PROBE_TTL_MS = 60 * 1000;
 // 上游 /v1/models 实测偶发 6~10s 超时：一次网络抖动不能把整页模型清空。
 // 成功结果额外保留 10 分钟，只有「软失败」（超时/网络）才沿用；401/403 等明确失效绝不复用。
 const IMAGE_MODEL_LAST_OK_TTL_MS = 10 * 60 * 1000;
+/** 探针预热/定期刷新间隔：5 分钟。起「保证缓存总是热的」作用，新鲜度仍由 TTL + 请求触发刷新决定。 */
+const IMAGE_PROBE_WARM_MS = 5 * 60 * 1000;
 const imageModelProbeCache = new Map();
 const imageModelProbeLastOk = new Map();
 
@@ -1383,8 +1385,56 @@ async function probeImageProviders(providers) {
   return new Map(entries);
 }
 
-/** 唯一有效的授权解析器：后台配置页、用户页配置、两条生成路由全部走这里，保证前后端口径一致。 */
-async function resolveImageProvider(settings) {
+// ===== 探针的非阻塞层（2026-11-13，修小程序首屏 5~6 秒）=====
+// `/api/image-gen/config` 是用户打开「AI全能设计」**必经的首屏阻塞接口**（小程序骨架屏的解除条件
+// 就是它返回），可它却要同步等上游 `/v1/models` 探测完成。探针缓存 TTL 只有 60 秒，用户隔一会儿
+// 再进来必然赶上一轮完整探测 —— 线上实测：**冷请求 2.85 秒 / 热请求 1 毫秒**，首屏因此 5~6 秒。
+//
+// 所以用户页配置接口改成 stale-while-revalidate：
+//   ① 有任何缓存（哪怕已过期）→ **立刻返回**，同时在后台刷新，绝不把探测放进响应路径；
+//   ② 完全没有缓存（进程刚起、或该授权刚添加）→ 才同步探一次，否则页面根本没内容可渲染。
+// 后台页 / 生成路由仍走同步探针 —— 它们要么是管理员主动「重新探测」，要么必须拿到真实可用授权
+// 才敢扣费出图，慢一点是应该的。
+const imageModelProbeInflight = new Set();
+
+/** 后台刷新某条授权的探针（同一 id 并发去重，不 await 调用方）。 */
+async function refreshImageProbe(providerId) {
+  const id = String(providerId || '');
+  if (!id || imageModelProbeInflight.has(id)) return;
+  imageModelProbeInflight.add(id);
+  try {
+    await probeImageModels(id);
+  } catch {
+    // 后台刷新失败就保留旧缓存：用户页宁可显示上一次的结果，也不能变成空白或报错
+  } finally {
+    imageModelProbeInflight.delete(id);
+  }
+}
+
+/** 缓存优先：有缓存立即返回（过期也返回）并触发后台刷新；只有完全没缓存才同步探测。 */
+function probeImageModelsCached(providerId) {
+  const id = String(providerId || '');
+  const cached = imageModelProbeCache.get(id);
+  if (!cached) return probeImageModels(id);
+  if (Date.now() - cached.at >= IMAGE_MODEL_PROBE_TTL_MS) void refreshImageProbe(id);
+  return Promise.resolve(cached);
+}
+
+async function probeImageProvidersCached(providers) {
+  const entries = await Promise.all(providers.map(async (item) => [String(item.id), await probeImageModelsCached(item.id)]));
+  return new Map(entries);
+}
+
+/**
+ * 唯一有效的授权解析器：后台配置页、用户页配置、两条生成路由全部走这里，保证前后端口径一致。
+ *
+ * `nonBlocking: true` 只给「用户页配置」用 —— 走缓存优先探针，绝不把上游探测放进首屏响应路径
+ * （见上方「探针的非阻塞层」）。其余调用方必须保持默认同步，尤其是生成路由：拿不到真实可用授权
+ * 就出图，等于扣了用户算力却给了张图不出来的结果。
+ */
+async function resolveImageProvider(settings, { nonBlocking = false } = {}) {
+  const getProbe = nonBlocking ? probeImageModelsCached : probeImageModels;
+  const getProbes = nonBlocking ? probeImageProvidersCached : probeImageProviders;
   const candidates = await listImageProviderCandidates();
   const configuredId = String((settings && settings.providerId) || '').trim();
   const pricedIds = new Set(((settings && settings.models) || [])
@@ -1396,7 +1446,7 @@ async function resolveImageProvider(settings) {
 
   const configured = candidates.find((item) => String(item.id) === configuredId);
   if (configured) {
-    const probe = await probeImageModels(configuredId);
+    const probe = await getProbe(configuredId);
     probes.set(configuredId, probe);
     if (probe.ok && probe.models.length) chosen = configured;
     else reason = probe.ok ? '当前授权下没有可用的图片模型' : `当前授权不可用：${probe.error}`;
@@ -1408,7 +1458,7 @@ async function resolveImageProvider(settings) {
 
   if (!chosen) {
     const others = candidates.filter((item) => String(item.id) !== configuredId);
-    const rest = await probeImageProviders(others);
+    const rest = await getProbes(others);
     for (const [id, probe] of rest) probes.set(id, probe);
     const usable = others.filter((item) => {
       const probe = rest.get(String(item.id));
@@ -1432,7 +1482,7 @@ async function resolveImageProvider(settings) {
     }
   }
 
-  const probe = chosen ? (probes.get(String(chosen.id)) || await probeImageModels(chosen.id)) : null;
+  const probe = chosen ? (probes.get(String(chosen.id)) || await getProbe(chosen.id)) : null;
   return {
     provider: chosen,
     // null 表示探测失败：此时**不做**模型过滤，避免一次网络抖动把整页模型清空。
@@ -3127,7 +3177,9 @@ const server = http.createServer(async (req, res) => {
         const settings = await loadImageGenSettings();
         // 有效授权由统一解析器决定：原授权失效会自动切到另一条可用授权。
         // models 为 null 表示上游探测失败 → 不过滤（不能用一次网络抖动清空整页模型）。
-        const effective = await resolveImageProvider(settings);
+        // 🔴 nonBlocking：这是用户页**首屏阻塞接口**（小程序骨架屏就等它）。探上游 /v1/models
+        // 单条要 2~3 秒，绝不能放在这里同步等 —— 详见「探针的非阻塞层」。
+        const effective = await resolveImageProvider(settings, { nonBlocking: true });
         const liveModels = effective.models;
         const models = settings.models
           // 没有任何有效授权时不能把模型下发成「可选」：否则页面显示模型、点生成才报未配置。
@@ -6345,4 +6397,18 @@ server.listen(PORT, '127.0.0.1', () => {
   }, RECHARGE_RECONCILE_INTERVAL_MS);
   if (typeof rechargeReconcileTimer.unref === 'function') rechargeReconcileTimer.unref();
   console.log(`[recharge] 虚拟支付订单对账已启动，间隔 ${RECHARGE_RECONCILE_INTERVAL_MS / 1000}s`);
+
+  // 生图探针预热：进程起来后立刻探一轮，之后每 5 分钟刷一次。
+  // 目的是让用户页配置接口的「缓存优先」几乎总能命中 —— 否则「进程刚重启 + 第一个用户进来」
+  // 那一次仍要同步探测（最坏 10 秒超时），首屏就白优化了。
+  // 每条授权只是 GET /v1/models，很轻；失败静默，业务请求本身有兜底。
+  const warmImageProbes = () => {
+    listImageProviderCandidates()
+      .then((candidates) => Promise.all(candidates.map((item) => refreshImageProbe(String(item.id)))))
+      .catch(() => {});
+  };
+  void warmImageProbes();
+  const imageProbeWarmTimer = setInterval(warmImageProbes, IMAGE_PROBE_WARM_MS);
+  if (typeof imageProbeWarmTimer.unref === 'function') imageProbeWarmTimer.unref();
+  console.log(`[image-gen] 图片授权探针预热已启动，间隔 ${IMAGE_PROBE_WARM_MS / 1000}s`);
 });

@@ -642,6 +642,20 @@ check('上游请求被抽成可复用的单次调用', serverSrc.includes('async
 check('判定逻辑独立成模块', textGuardSrc.includes('export function analyzeTextDocumentPixels') && textGuardSrc.includes('export function wantsTextInImage'));
 check('sharp 动态加载，缺依赖不阻断生图', textGuardSrc.includes("await import('sharp')") && textGuardSrc.includes('sharp-unavailable'));
 
+// ===== 18. 首屏不阻塞：探针的非阻塞层（2026-11-13，小程序首屏 5~6 秒）=====
+// 故障：小程序「AI全能设计」首屏骨架屏要等 5~6 秒。
+// 根因：首屏唯一阻塞接口 `/api/image-gen/config` 会同步等上游 `/v1/models` 探测，
+// 而探针缓存 TTL 只有 60 秒 —— 用户隔一会儿进来必然赶上一轮完整探测。
+// 线上实测：冷请求 2.85s / 热请求 1ms。修复后 TTL 过期也只需 2.8ms（探测转后台）。
+check('用户页配置接口走非阻塞探针', serverSrc.includes('resolveImageProvider(settings, { nonBlocking: true })'));
+check('非阻塞探针缓存优先且过期也立即返回', serverSrc.includes('function probeImageModelsCached') && serverSrc.includes('return Promise.resolve(cached)'));
+check('过期缓存只触发后台刷新、不 await', serverSrc.includes('void refreshImageProbe(id)'));
+check('后台刷新并发去重（避免同一授权被重复探测）', serverSrc.includes('imageModelProbeInflight') && serverSrc.includes('imageModelProbeInflight.has(id)'));
+check('缓存完全为空时才同步探测一次（否则页面没有内容可渲染）', serverSrc.includes('if (!cached) return probeImageModels(id)'));
+check('只有用户页配置接口用非阻塞探针（生成路由必须拿真实可用授权才敢扣费）', (serverSrc.match(/\{ nonBlocking: true \}/g) || []).length === 1);
+check('探针预热在启动时立即跑一次', serverSrc.includes('void warmImageProbes()'));
+check('预热定时器 unref（不阻止进程退出）', serverSrc.includes('imageProbeWarmTimer.unref'));
+
 // ===== 结果 =====
 const total = pass + failures.length;
 if (failures.length) {
