@@ -388,10 +388,48 @@ export function extractOpenAIImageResult(json) {
   return { ok: false, reason: 'no_image', blockReason: null, finishReason: null, text: String(reason) };
 }
 
+// 上游把图片地址写在 text 里的三种常见写法（2026-11-13 线上实测第三条）：
+//   ① markdown 图片 `![alt](https://…/a.jpg)`；
+//   ② 正文里夹一条带图片扩展名的链接；
+//   ③ **整个正文就是一条裸链接**（`nano banana` 分组就是这种，finishReason=STOP、无 inlineData/fileData）。
+// 只认前两种会把它判成「没生成」，用户看到的是「图片没有生成出来（finishReason=STOP）：https://…」。
+const URL_IN_TEXT_RE = /https?:\/\/[^\s"'<>()\[\]\\，。；、]+/gi;
+const IMAGE_EXT_RE = /\.(png|jpe?g|webp|gif|bmp|avif)(?:\?|#|$)/i;
+const MARKDOWN_IMAGE_RE = /!\[[^\]]*\]\(\s*(https?:\/\/[^\s)]+)\s*\)/i;
+
+/** 从一段文本里挑出图片地址；挑不到返回空串。 */
+export function pickImageUrl(input) {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+  const markdown = MARKDOWN_IMAGE_RE.exec(raw);
+  if (markdown) return markdown[1];
+  const urls = raw.match(URL_IN_TEXT_RE) || [];
+  const withImageExt = urls.find((item) => IMAGE_EXT_RE.test(item));
+  if (withImageExt) return withImageExt;
+  // 「正文就是一条链接」才接受（否则可能把无关链接误当成品图，反而掩盖真实故障）
+  const trimmed = raw.replace(/[)\]}>】。，,;；!！?？]+$/g, '').trim();
+  if (urls.length === 1 && trimmed === urls[0]) return urls[0];
+  return '';
+}
+
+/** 按扩展名推 MIME；拿不到就按 jpeg 处理（上游 CDN 大多是 jpg）。 */
+export function mimeTypeFromUrl(url) {
+  const hit = /\.(png|jpe?g|webp|gif|bmp|avif)(?:\?|#|$)/i.exec(String(url || ''));
+  const ext = hit ? hit[1].toLowerCase() : '';
+  if (ext === 'png') return 'image/png';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'gif') return 'image/gif';
+  if (ext === 'bmp') return 'image/bmp';
+  if (ext === 'avif') return 'image/avif';
+  return 'image/jpeg';
+}
+
 /**
- * 从上游响应里取图。两种形态都要认：
+ * 从上游响应里取图。三种形态都要认：
  *   · inlineData（base64）—— 部分模型/网关会这样回；
- *   · fileData.fileUri（CDN URL）—— 实测 gemini-nano-banana-2.1 走这条。
+ *   · fileData.fileUri（CDN URL）—— 实测 gemini-nano-banana-2.1 走这条；
+ *   · **text 里的一条图片地址** —— 实测 nano banana 分组这样回，必须当成功，否则用户看到
+ *     「图片没有生成出来（finishReason=STOP）：https://…」明明图已经有了。
  * ⚠️ 只有 HTTP 200 是不够的：安全策略拦截会回 200 + 无图，必须显式判「没有图」。
  */
 export function extractImageResult(json) {
@@ -416,6 +454,10 @@ export function extractImageResult(json) {
   }
   const finishReason = cand.finishReason || null;
   if (inline || file) return { ok: true, inline, file, text, finishReason, blockReason };
+  const textUrl = pickImageUrl(text);
+  if (textUrl) {
+    return { ok: true, inline: null, file: { mimeType: mimeTypeFromUrl(textUrl), url: textUrl }, text, finishReason, blockReason, fromText: true };
+  }
   return { ok: false, reason: blockReason ? 'blocked' : 'no_image', blockReason, finishReason, text };
 }
 
@@ -544,7 +586,8 @@ export function downloadImage(url, { timeoutMs = 60000, maxBytes = IMAGE_MAX_BYT
       path: `${parsed.pathname}${parsed.search}`,
       method: 'GET',
       timeout: timeoutMs,
-      headers: { Accept: 'image/*' },
+      // 带上 UA：部分 CDN 对空 UA 直接回 403（实测该 CDN 带 UA 稳定 200）。
+      headers: { Accept: 'image/*', 'User-Agent': 'Mozilla/5.0 (compatible; usun-image-fetch/1.0)' },
     }, (response) => {
       if (response.statusCode < 200 || response.statusCode >= 300) {
         response.resume();

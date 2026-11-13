@@ -20,6 +20,7 @@ import {
   buildImagePayload,
   buildOpenAIImageEditBody,
   buildOpenAIImagePayload,
+  extractImageResult,
   extractOpenAIImageResult,
   imageApiStyle,
   imageEndpoint,
@@ -29,6 +30,8 @@ import {
   normalizeImageModels,
   normalizeResolution,
   openAIImageSize,
+  mimeTypeFromUrl,
+  pickImageUrl,
   prepareReferenceImages,
   resolveImageSelection,
 } from '../server/gemini-image.mjs';
@@ -515,6 +518,9 @@ check('后台配置页按授权联动模型', adminPageSrc.includes('selectedPro
 check('后台配置页标注已下架模型', adminPageSrc.includes('当前授权下不可用'));
 check('后台配置页保存后刷新授权状态', adminPageSrc.includes('const state = await loadProviders();'));
 check('后台试生成模型来自联动清单', adminPageSrc.includes('availableIds.forEach((id) => ids.add(id))'));
+// 2026-11-13 线上踩过：下拉回填了已失效的 providerId，后台测试生成把它显式传上去 ⇒ 一直 403
+check('后台页选中授权不可用时自动收敛到生效授权', adminPageSrc.includes('currentUnusable') && adminPageSrc.includes('next !== providerId'));
+check('后台页探测期间有进度提示', adminPageSrc.includes('正在探测各中转站授权的可用图片模型'));
 check('授权中心读同一份授权清单', adminAuthSrc.includes("'/api/admin/image-gen/providers'"));
 check('授权中心可设为图片授权', adminAuthSrc.includes("'/api/admin/image-gen/provider'") && adminAuthSrc.includes('设为图片授权'));
 check('授权中心显示生效中标记', adminAuthSrc.includes('图片授权·生效中') && adminAuthSrc.includes('effectiveProviderId'));
@@ -525,6 +531,32 @@ check('用户页配置定时与可见性刷新', userPageSrc.includes('visibilit
 check('用户页无可用模型有空态', userPageSrc.includes('当前授权下没有已上架且可用的图片模型'));
 check('用户页无可用模型禁止生成', /canSubmit = .*models\.length > 0/.test(userPageSrc));
 check('用户页有刷新配置入口', userPageSrc.includes('刷新配置') && userPageSrc.includes('onClick={loadConfig}'));
+
+// ===== 16. 图片地址写在 text 里的上游（2026-11-13 线上故障）=====
+// 线上现象：图确实生成了，用户页却弹「图片没有生成出来（finishReason=STOP）：https://res.easy88ai.com/…jpg」，
+// 且结果区不渲染。根因是该分组把地址放在 candidates[].content.parts[].text 里（裸链接），
+// 而旧解析只认 inlineData / fileData.fileUri ⇒ 判成「没图」。
+const TEXT_URL = 'https://res.easy88ai.com/easy88ai-media/11/13/abc.jpg';
+const textUrlResult = extractImageResult({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: TEXT_URL }] } }] });
+check('text 里是裸图片链接时判成功', textUrlResult.ok === true && textUrlResult.file && textUrlResult.file.url === TEXT_URL, JSON.stringify(textUrlResult).slice(0, 180));
+check('从 text 取到的链接标记 fromText', textUrlResult.fromText === true);
+check('按扩展名推断 MIME 为 jpeg', textUrlResult.file.mimeType === 'image/jpeg', textUrlResult.file.mimeType);
+check('markdown 图片语法能识别', extractImageResult({ candidates: [{ content: { parts: [{ text: '这是结果：![图](https://cdn.example.com/a.png)' }] } }] }).file.url === 'https://cdn.example.com/a.png');
+check('正文夹带图片链接能识别', pickImageUrl('生成完成，地址：https://x.test/p/a.webp 请查收') === 'https://x.test/p/a.webp');
+check('正文只有一条链接时才当图片', pickImageUrl('参考 https://a.test/1 和 https://b.test/2') === '');
+check('纯文字不误判为图片', extractImageResult({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '抱歉，我无法生成这张图片' }] } }] }).ok === false);
+check('安全拦截仍判 blocked', extractImageResult({ promptFeedback: { blockReason: 'SAFETY' }, candidates: [] }).reason === 'blocked');
+check('inlineData 优先级高于 text', (() => {
+  const r = extractImageResult({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'AAAA' } }, { text: TEXT_URL }] } }] });
+  return r.ok && !!r.inline && r.inline.base64 === 'AAAA' && !r.file;
+})());
+check('fileData.fileUri 优先级高于 text', (() => {
+  const r = extractImageResult({ candidates: [{ content: { parts: [{ fileData: { fileUri: 'https://cdn.test/a.jpg' } }, { text: TEXT_URL }] } }] });
+  return r.ok && r.file.url === 'https://cdn.test/a.jpg';
+})());
+check('扩展名 → MIME 映射', mimeTypeFromUrl('https://a/b.png') === 'image/png' && mimeTypeFromUrl('https://a/b.webp') === 'image/webp' && mimeTypeFromUrl('https://a/b') === 'image/jpeg');
+check('下载上游图片带 UA（空 UA 会被 CDN 403）', geminiImageSrc.includes("'User-Agent': 'Mozilla/5.0 (compatible; usun-image-fetch/1.0)'"));
+check('text 取到链接后仍走转存（不直接把上游地址给前端）', serverSrc.includes('downloadImage(extracted.file.url)') && serverSrc.includes("url: `/api/blob/serve?key=${encodeURIComponent(key)}`"));
 
 // ===== 结果 =====
 const total = pass + failures.length;

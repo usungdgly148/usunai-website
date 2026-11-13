@@ -61,12 +61,21 @@ export default function AdminImageGen() {
 
   // 凭证列表是异步到货的：优先回显「实际生效」的那条，其次「后台已指定」的那条，
   // 最后才落到第一条。旧写法固定 relays[0]（常是对话专用凭证、没有图片模型）会让前后台不一致。
+  //
+  // 🔴 2026-11-13 线上踩过：`loadSettings()` 会把「已保存的 providerId」回填进下拉，而它可能是
+  // 一条已失效的授权；本页测试生成会把它当 authProviderId **显式**传给服务端，覆盖掉服务端的
+  // 自动 fallback ⇒ 后台一直 403、用户页却正常。所以「当前选中的授权已被探测为不可用」时，
+  // 必须自动收敛到 effectiveProviderId，而不是死守配置值。
   useEffect(() => {
-    if (providerId || !relays.length) return;
+    if (!relays.length) return;
     const effective = providerState?.effectiveProviderId;
+    const currentInfo = (providerState?.providers || []).find((p) => p.id === providerId);
+    const currentUnusable = !!currentInfo && !currentInfo.available;
+    if (providerId && !currentUnusable) return;
     const hit = relays.find((p) => p.id === effective)
       || relays.find((p) => p.id === providerState?.configuredProviderId);
-    setProviderId((hit || relays[0]).id);
+    const next = (hit || relays[0] || {}).id;
+    if (next && next !== providerId) setProviderId(next);
   }, [relays, providerId, providerState]);
 
   // 换授权立刻联动：重新拉一次各授权的实时可用图片模型，不需要手动点「拉取」。
@@ -259,6 +268,12 @@ export default function AdminImageGen() {
         subtitle="图片处理授权与模型由后台动态指定，支持文生图、参考图（图生图）与 1K/2K/4K 清晰度。此页测试不扣用户算力。"
       />
 
+      {/* 首次进入要逐条探测各授权（并行、单条上限 10s），先给一句进度提示，避免看着像没生效 */}
+      {!providerState && (
+        <div className="mb-6 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
+          正在探测各中转站授权的可用图片模型，约需数秒…
+        </div>
+      )}
       {providerState && (
         <div className={`mb-6 rounded-xl px-4 py-3 text-sm ${providerState.reason || !providerState.effectiveProviderId ? 'bg-amber-50 text-amber-700' : 'bg-slate-50 text-slate-600'}`}>
           <span className="font-medium">当前生效的图片处理授权：</span>
