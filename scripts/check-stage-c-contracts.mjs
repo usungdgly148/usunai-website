@@ -12,7 +12,11 @@ const checks = [
   ['frontend/src/blobUpload.js', ['adminFetch', 'const authenticatedFetch = admin ? adminFetch : apiFetch', 'authenticatedFetch(data.url']],
   ['frontend/src/store.jsx', ['const onUserUnauthorized', 'const onAdminUnauthorized', "addEventListener('usun:unauthorized', onUserUnauthorized)", "addEventListener('usun:admin-unauthorized', onAdminUnauthorized)"]],
   ['frontend/src/innerUI.jsx', ["aspectRatio: '21 / 9'", 'mobileActionTitle', 'SlidersHorizontal']],
-  ['frontend/src/components.jsx', ['(item.tags || []).slice(0, 3)', 'md:left-4 md:top-auto', 'formatCount(item.uses)']],
+  // 2026-11-17 卡片改版：旧断言是 featured 卡「图标绝对定位在左下」（md:left-4 md:top-auto），
+  // 该封面块已按主人要求整体取消（图标移到名称上方左侧、卡片高度统一降低 25%）。
+  // 现在改为守「卡片高度统一」的三段定高 + 标签行，防止有人把 h-[39px] / h-[21px] 换回 min-h 或 flex-1
+  // ——那样一来「带标签 / 不带标签」「一行描述 / 两行描述」的卡片就会重新差出 3~4px，同页两种高度。
+  ['frontend/src/components.jsx', ['(item.tags || []).slice(0, 3)', 'h-[39px]', 'h-[21px]', 'formatCount(item.uses)']],
   ['frontend/src/pages/Home.jsx', ['[refreshAllConfig, activeCat]', 'snap-x snap-mandatory', 'min-w-[82vw]']],
   ['frontend/src/pages/Workflow.jsx', ["useState(true)", "mobileActionTitle={mobileConfigView ? '历史记录' : '配置参数'}", 'inner-page-shell']],
   ['frontend/src/pages/Chat.jsx', ["matchMedia('(max-width: 767px)')", '添加附件或图片', 'inner-page-shell']],

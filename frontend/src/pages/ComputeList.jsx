@@ -5,7 +5,7 @@ export default function ComputeList() {
   const { computeRecords } = useStore();
   return (
     <div className="max-w-5xl mx-auto w-full bg-white rounded-xl border border-slate-200 p-6">
-      <h1 className="text-xl font-bold text-slate-900 mb-6">算力记录</h1>
+      <h1 className="font-title text-xl font-bold text-slate-900 mb-6">算力记录</h1>
       <div className="space-y-3">
         {computeRecords.map(r => (
           <div key={r.id} className="flex items-center justify-between p-4 rounded-lg border border-slate-100 hover:bg-slate-50">

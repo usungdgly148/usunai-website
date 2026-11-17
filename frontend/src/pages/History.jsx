@@ -11,7 +11,7 @@ export default function History() {
   return (
     <div className="max-w-5xl mx-auto">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-slate-900 mb-2">使用记录</h1>
+        <h1 className="font-title text-2xl font-bold text-slate-900 mb-2">使用记录</h1>
         <p className="text-slate-500 text-sm">你使用过的智能体、工作流及算力消耗明细</p>
       </div>
 

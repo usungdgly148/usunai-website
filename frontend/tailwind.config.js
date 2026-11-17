@@ -2,6 +2,15 @@ export default {
   content: ['./index.html', './src/**/*.{js,jsx}'],
   theme: {
     extend: {
+      // 标题字族（2026-11-17）：中文标题层改用思源黑体（Source Han Sans = Noto Sans SC，同源同形），
+      // 正文继续走系统字体栈，避免整站中文都变成网络字体拖慢首屏。
+      // ⚠️ 思源黑体是**开源**字体，与「Noto Serif SC」并列在 index.html 的 Google Fonts 链接里加载；
+      //    未加载成功时按顺序回落 系统苹方/微软雅黑，字形不会崩，只是字重细节略有差异。
+      // ⚠️ 只在标题层用 `font-title`，**不要挂到 body** —— 中文字体文件按 unicode-range 分片，
+      //    正文全量使用会把几十个分片都拉下来。
+      fontFamily: {
+        title: ['"Source Han Sans SC"', '"Noto Sans SC"', '"Source Han Sans CN"', '"思源黑体"', '"PingFang SC"', '"Hiragino Sans GB"', '"Microsoft YaHei"', 'sans-serif'],
+      },
       colors: {
         // 品牌主色：橙色（2026-11-03 第一轮：#FF6900 整体替换原深墨蓝体系；
         // 同日第二轮：填充色加深到 #D65800，解决 #FF6900 在白底只有 2.89:1 的可读性问题）

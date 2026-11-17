@@ -422,7 +422,7 @@ export default function ImageGen() {
     <div className="mx-auto w-full max-w-6xl px-1">
       {/* ===== 标题 ===== */}
       <div className="pb-6 pt-4 text-center sm:pt-8">
-        <h1 className="text-[26px] font-extrabold leading-tight tracking-tight text-slate-900 sm:text-[38px]">
+        <h1 className="font-title text-[26px] font-extrabold leading-tight tracking-tight text-slate-900 sm:text-[38px]">
           你的设计 <span className="text-brand-600">Agent</span>，开始创作
         </h1>
       </div>

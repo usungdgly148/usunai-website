@@ -8,6 +8,16 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700;900&family=Sora:wght@500;600;700&display=swap" rel="stylesheet" />
+    <!-- 思源黑体（= Noto Sans SC，同一套字形）只服务「标题层」（CSS 里 .font-title）。
+         中文字体 CSS 会按 unicode-range 展开成上百条 @font-face、体积远大于拉丁字体，
+         所以**单独走异步加载**：不挡首屏渲染，加载成功再换字，失败就回落系统苹方/雅黑。
+         ⚠️ 不要把它并回头上那条 rel=stylesheet 里 —— 那会让首页首屏等中文字体 CSS。 -->
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@500;600;700&display=swap"
+      onload="this.onload=null;this.rel='stylesheet'"
+    />
   </head>
   <body>
     <div id="root"></div>

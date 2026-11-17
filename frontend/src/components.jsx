@@ -33,7 +33,7 @@ export function Logo({ className = '', collapsed = false }) {
           <Sparkles size={26} className="text-brand-600" />
         )}
       </div>
-      {!collapsed && <span className="text-slate-900">{siteConfig.name}</span>}
+      {!collapsed && <span className="font-title text-slate-900">{siteConfig.name}</span>}
     </Link>
   );
 }
@@ -316,7 +316,7 @@ export function Header() {
           onClick={() => openRechargeModal()}
           title="算力充值"
           aria-label="算力充值"
-          className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-full bg-brand-600 hover:bg-brand-700 text-white text-sm shadow-sm transition-colors shrink-0"
+          className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-full border border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100 hover:border-brand-300 text-sm font-medium shadow-none hover:shadow-sm transition-colors shrink-0"
         >
           <span className="text-base leading-none" aria-hidden="true">💎</span>
           <span>算力充值</span>
@@ -640,7 +640,7 @@ export function RechargeDialog({ packages, info, expiryDate, hideExpiry, onClose
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Zap size={20} className="text-violet-600" />
-              <h2 className="text-xl font-bold text-slate-900">算力充值</h2>
+              <h2 className="font-title text-xl font-bold text-slate-900">算力充值</h2>
             </div>
             <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
           </div>
@@ -1126,7 +1126,7 @@ function LoginModal({ onClose }) {
         <div className="p-8 overflow-y-auto">
           <div className="flex justify-between items-start mb-6">
             <div>
-              <h2 className="text-2xl font-bold text-slate-900">欢迎来到友尚Ai+</h2>
+              <h2 className="font-title text-2xl font-bold text-slate-900">欢迎来到友尚Ai+</h2>
               <p className="text-sm text-slate-500 mt-1">登录后即可使用全部智能体</p>
             </div>
             <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
@@ -1473,7 +1473,7 @@ export function Footer() {
 export function PageTitle({ title, subtitle, children }) {
   return (
     <div className="mb-8">
-      <h2 className="text-2xl font-bold text-slate-900">{title}</h2>
+      <h2 className="font-title text-2xl font-bold text-slate-900">{title}</h2>
       {subtitle && <p className="text-sm text-slate-500 mt-1">{subtitle}</p>}
       {children}
     </div>
@@ -1505,31 +1505,40 @@ export function formatCount(n) {
   return num.toString();
 }
 
+// 图标色 → 卡片图标块的「浅底渐变 + 图标前景色」。
+// `from/to` 是渐变（后台渐变预览也复用同一张表），`fg` 是 2026-11-17 新增的**图标前景色**：
+// 纯中性的深灰图标在浅底上虽然能读，但 12 张卡会一起变成"灰卡片"，跟主人要求的「去同质化」相反；
+// 每个色相配自己的 700 档文字色，图标块就成了「同一套语法、各自的颜色」。
+// ⚠️ `fg` 必须是 700 档（白底对比 ≥4.5:1），别用 500/600 —— 浅底上会发飘。
+// ⚠️ 新增颜色时三样都要给全，缺 `fg` 会回落到中性深灰（不会报错，但视觉上会掉队）。
 const GRADIENT_PRESETS = {
-  'bg-blue-600': { from: '#DBEAFE', to: '#FFFFFF' },
-  'bg-rose-600': { from: '#FFE4E6', to: '#FFFFFF' },
-  'bg-green-600': { from: '#DCFCE7', to: '#FFFFFF' },
-  'bg-emerald-600': { from: '#D1FAE5', to: '#FFFFFF' },
-  'bg-amber-600': { from: '#FEF3C7', to: '#FFFFFF' },
-  'bg-violet-600': { from: '#EDE9FE', to: '#FFFFFF' },
-  'bg-slate-700': { from: '#F1F5F9', to: '#FFFFFF' },
-  'bg-cyan-600': { from: '#CFFAFE', to: '#FFFFFF' },
-  'bg-teal-600': { from: '#CCFBF1', to: '#FFFFFF' },
-  'bg-lime-600': { from: '#ECFCCB', to: '#FFFFFF' },
-  'bg-purple-600': { from: '#F3E8FF', to: '#FFFFFF' },
-  'bg-indigo-600': { from: '#E0E7FF', to: '#FFFFFF' },
-  'bg-red-600': { from: '#FEE2E2', to: '#FFFFFF' },
+  'bg-blue-600': { from: '#DBEAFE', to: '#FFFFFF', fg: 'text-blue-700' },
+  'bg-rose-600': { from: '#FFE4E6', to: '#FFFFFF', fg: 'text-rose-700' },
+  'bg-green-600': { from: '#DCFCE7', to: '#FFFFFF', fg: 'text-green-700' },
+  'bg-emerald-600': { from: '#D1FAE5', to: '#FFFFFF', fg: 'text-emerald-700' },
+  'bg-amber-600': { from: '#FEF3C7', to: '#FFFFFF', fg: 'text-amber-700' },
+  'bg-violet-600': { from: '#EDE9FE', to: '#FFFFFF', fg: 'text-violet-700' },
+  'bg-slate-700': { from: '#F1F5F9', to: '#FFFFFF', fg: 'text-slate-700' },
+  'bg-cyan-600': { from: '#CFFAFE', to: '#FFFFFF', fg: 'text-cyan-700' },
+  'bg-teal-600': { from: '#CCFBF1', to: '#FFFFFF', fg: 'text-teal-700' },
+  'bg-lime-600': { from: '#ECFCCB', to: '#FFFFFF', fg: 'text-lime-700' },
+  'bg-purple-600': { from: '#F3E8FF', to: '#FFFFFF', fg: 'text-purple-700' },
+  'bg-indigo-600': { from: '#E0E7FF', to: '#FFFFFF', fg: 'text-indigo-700' },
+  'bg-red-600': { from: '#FEE2E2', to: '#FFFFFF', fg: 'text-red-700' },
 };
 
-// 分类差异化主题（2026-08-03 视觉升级 #7）：让不同类目智能体/工作流有不同头部气质
+// 分类差异化主题：只保留「底色梯度 + 深浅」两件事。
+// 2026-11-17 卡片改版后，封面块取消，主题的 ribbon（短视频红橙斜角）/ grid（GEO 网格纹理）
+// 没有承载物了，随封面一起移除 —— 现在的类目差异由「图标块底色（= 这里的 header）+ 卡片图标」表达。
+// ⚠️ `dark` 仍必须保留：它决定图标块上的图标是白是深，删了 private 类目会变成深底深图标。
 const CATEGORY_THEME = {
-  // 短视频：红橙斜角 ribbon，强视觉冲击
-  'short-video': { dark: false, header: 'linear-gradient(135deg, #FFF1F0 0%, #FFFFFF 100%)', accent: '#F4511E', ribbon: true },
+  // 短视频：红橙暖底
+  'short-video': { dark: false, header: 'linear-gradient(135deg, #FFF1F0 0%, #FFFFFF 100%)' },
   // 私域 / 个人 IP：深色渐变，沉稳高级
-  'private': { dark: true, header: 'linear-gradient(135deg, #1E293B 0%, #334155 70%, #475569 100%)', accent: '#C8881A' },
-  // GEO / 本地获客：网格纹理，科技感
-  // 网格线原为品牌深蓝 #1E4A78（= 旧 brand-500），2026-11-03 品牌色改橙后同步换成 #FF6900。
-  'geo': { dark: false, header: 'linear-gradient(135deg, #EFF6FF 0%, #FFFFFF 100%)', accent: '#FF6900', grid: true },
+  'private': { dark: true, header: 'linear-gradient(135deg, #1E293B 0%, #334155 70%, #475569 100%)' },
+  // GEO / 本地获客：浅蓝底
+  // 底色原为品牌深蓝 #1E4A78（= 旧 brand-500），2026-11-03 品牌色改橙后同步换成 #FF6900。
+  'geo': { dark: false, header: 'linear-gradient(135deg, #EFF6FF 0%, #FFFFFF 100%)' },
 };
 
 export function AgentCard({ item, to, featured = false, className = '' }) {
@@ -1553,77 +1562,94 @@ export function AgentCard({ item, to, featured = false, className = '' }) {
 
   /*
    * 2026-11-03：卡片左上角的「智能体 / 工作流」类型角标已按主人要求整体移除（网页端 + 小程序端）。
-   * 它是 absolute 定位，删掉不占文档流，`relative overflow-hidden` 的封面层与居中头像位都不受影响。
-   * ⚠️ `item.kind` 仍在别处使用（搜索下拉、后台列表），别顺手删数据字段。
-   * ⚠️ 不要因为"左上角看起来空了"而加回来。
+   * `item.kind` 仍在别处使用（搜索下拉、后台列表），别顺手删数据字段；也别因为"左上角看起来空了"加回来。
+   */
+  /*
+   * 2026-11-17 卡片改版（主人指令）：卡片整体高度统一降低约 25%，图标从「封面上居中大圆」
+   * 改为「名称上方左侧的圆角方块」，与名称组成紧凑标题组。
+   *
+   * 因此**封面块整个没有了**（原 h-28 渐变封面 + 居中圆图标）。渐变没有被丢弃 ——
+   * `headerBg` 现在落在**图标块**上：后台配的 gradientFrom/To/Angle、分类主题的深浅，
+   * 依然原样可见，`check:card-gradient` 的三条契约（自定义优先 / 唯一实现 / 不许 `|| 30`）都还成立。
+   * ⚠️ 不要为了「让封面回来」把 headerBg 挪回卡片顶部：那会同时破坏 -25% 高度与标题组。
+   * ⚠️ 图标块用 `headerBg` 而不是 `item.iconColor`：后者是饱和底色（bg-blue-600），
+   *    白图标落在饱和块上会重新变成「几个色块打架」的同质化观感；浅渐变底 + 同色相的 700 档图标
+   *    在任意后台自定义渐变下都读得清（深底时由 isDark 翻成白图标）。
    */
   const vipBadge = item.vip && (
-    <span className="absolute top-3 right-3 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200/60">
-      VIP
+    <span className="shrink-0 rounded bg-brand-50 px-1.5 py-0.5 text-[11px] font-semibold leading-[1.4] text-brand-700">VIP</span>
+  );
+
+  /*
+   * ⚠️ `featured` 现在**只影响描边**（首页第一张卡给品牌浅橙边框），不再放大字号/内边距/图标。
+   *    原因：主人要求「所有卡片高度统一降低 25%」—— 首页那张 featured 卡在 xl 断点会和普通卡片
+   *    同处一行（col-span-2 + 第 3 张），只要它比普通卡高，整行就被它顶高，普通卡再被 flex 拉伸
+   *    → 同一页出现两种卡片高度。宽卡片靠 col-span 已经足够显眼，不需要再靠高度。
+   */
+  const tile = (
+    <span
+      className={`flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl ring-1 ${isDark ? 'text-white ring-white/20' : `${preset.fg || 'text-slate-700'} ring-slate-900/5`}`}
+      style={{ background: headerBg }}
+      aria-hidden="true"
+    >
+      {item.avatar ? (
+        <img src={item.avatar} alt="" className="h-full w-full object-cover" />
+      ) : (
+        <Icon size={20} strokeWidth={1.8} />
+      )}
     </span>
   );
 
-  // 头部装饰：短视频=红橙斜角 ribbon；geo=网格纹理
-  const headerDecor = theme?.ribbon ? (
-    <div className="absolute -top-3 -right-3 w-10 h-10 rotate-45" style={{ background: 'linear-gradient(135deg, #F4511E, #FB8C00)' }} />
-  ) : theme?.grid ? (
-    <div className="absolute inset-0 opacity-[0.10]" style={{ backgroundImage: 'linear-gradient(#FF6900 1px, transparent 1px), linear-gradient(90deg, #FF6900 1px, transparent 1px)', backgroundSize: '18px 18px' }} />
-  ) : null;
-
-  const Header = ({ cls }) => (
-    <div className={`relative overflow-hidden ${cls}`} style={{ background: headerBg }}>
-      {headerDecor}
-      {vipBadge}
-      {!featured && (
-        <div className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-12 h-12 rounded-full ${item.iconColor || (isDark ? 'bg-white/20' : 'bg-slate-400')} text-white flex items-center justify-center shadow-md overflow-hidden`}>
-          {item.avatar ? (
-            <img src={item.avatar} alt="" className="w-full h-full object-cover" />
-          ) : (
-            <Icon size={22} strokeWidth={1.8} />
-          )}
-        </div>
-      )}
-      {featured && (
-        <div className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 md:left-4 md:top-auto md:bottom-4 md:translate-x-0 md:translate-y-0 w-12 h-12 md:w-14 md:h-14 rounded-2xl ${item.iconColor || (isDark ? 'bg-white/20' : 'bg-white/70')} ${isDark ? 'text-white' : 'text-brand-700'} flex items-center justify-center shadow-md overflow-hidden`}>
-          {item.avatar ? (
-            <img src={item.avatar} alt="" className="w-full h-full object-cover" />
-          ) : (
-            <Icon size={26} strokeWidth={1.8} />
-          )}
-        </div>
-      )}
-    </div>
+  const titleBlock = (
+    <>
+      <h3 className={`font-title truncate font-semibold leading-snug text-slate-900 transition group-hover:text-brand-600 ${featured ? 'mt-2.5 text-base md:mt-0 md:text-lg' : 'mt-2.5 text-base'}`}>{item.name}</h3>
+      {/* 描述固定 39px（= 两行 text-xs / leading-relaxed）：一行与两行的卡片高度完全一致，
+          这是「所有卡片高度统一」的关键 —— 靠 min-h 只能保证下限，两行描述仍会把高度顶高 3px。 */}
+      <p className="mt-1 h-[39px] overflow-hidden text-xs leading-relaxed text-slate-500 line-clamp-2">{item.desc}</p>
+    </>
   );
 
-  const body = (
-    <div className={`flex flex-col ${featured ? 'p-4 md:p-7 flex-1 justify-center' : 'p-4 flex-1'}`}>
-      <h3 className={`font-semibold text-slate-900 leading-snug mb-1 truncate group-hover:text-brand-600 transition ${featured ? 'text-lg md:text-3xl' : 'text-lg'}`}>{item.name}</h3>
-      <p className={`text-slate-500 leading-relaxed flex-1 ${featured ? 'text-xs md:text-base line-clamp-2 md:line-clamp-3 md:max-w-md min-h-[2.25rem]' : 'text-xs line-clamp-2 min-h-[2.25rem]'}`}>{item.desc}</p>
-      <div className={`mt-3 flex min-w-0 items-center justify-between gap-2 text-[11px] text-slate-400 ${featured ? 'md:mt-4' : ''}`}>
-        <div className="flex min-w-0 items-center gap-1 overflow-hidden">
-          {(item.tags || []).slice(0, 3).map(tag => (
-            <span key={tag} className="max-w-[5rem] truncate rounded bg-slate-100 px-1.5 py-0.5 text-slate-500">{tag}</span>
-          ))}
-        </div>
-        <span className="ml-auto flex shrink-0 items-center gap-1"><Users size={13} /> {formatCount(item.uses)}人使用</span>
+  const metaRow = (
+    /* 底部行固定 21px（= 标签实际高度）：有的卡带标签、有的不带，不定高会差 4px，
+       同一页就会出现两种卡片高度 —— 这条和上面描述固定 39px 是同一件事的两半。 */
+    <div className="mt-auto flex min-w-0 items-center justify-between gap-2 pt-2 text-[11px] text-slate-400">
+      <div className="flex h-[21px] min-w-0 items-center gap-1 overflow-hidden">
+        {(item.tags || []).slice(0, 3).map(tag => (
+          <span key={tag} className="max-w-[5rem] truncate rounded bg-slate-100 px-1.5 py-0.5 text-slate-500">{tag}</span>
+        ))}
       </div>
+      <span className="ml-auto flex shrink-0 items-center gap-1"><Users size={13} /> {formatCount(item.uses)}人使用</span>
     </div>
   );
 
   return (
     <Link
       to={to}
-      className={`group flex flex-col h-full rounded-2xl bg-white border border-slate-200 overflow-hidden hover:shadow-[0_10px_28px_-8px_rgba(15,23,42,0.14)] hover:-translate-y-0.5 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 ${className}`}
+      className={`group flex h-full flex-col overflow-hidden rounded-2xl border bg-white transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_10px_28px_-8px_rgba(15,23,42,0.14)] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 ${featured ? 'border-brand-200' : 'border-slate-200'} ${className}`}
     >
       {featured ? (
-        <div className="flex flex-col md:flex-row h-full">
-          <Header cls="h-28 md:h-auto md:w-5/12 shrink-0" />
-          <div className="flex-1 flex">{body}</div>
+        /* 首页那张 2 列宽的卡：md 以上改成「图标在左、文字在右」的横排，
+           否则封面块取消后右半边全空、比普通卡片更空。竖排只在手机上兜底。 */
+        <div className="flex flex-1 flex-col p-4 md:flex-row md:items-center md:gap-5">
+          <div className="flex shrink-0 items-start justify-between gap-2 md:block">
+            {tile}
+            <span className="md:hidden">{vipBadge}</span>
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col md:mt-0">
+            {titleBlock}
+            {metaRow}
+          </div>
+          <span className="hidden md:block">{vipBadge}</span>
         </div>
       ) : (
-        <div className="flex flex-col h-full">
-          <Header cls="h-28 shrink-0" />
-          {body}
+        <div className="flex flex-1 flex-col p-4">
+          {/* 第一行：图标左对齐（压住标题），VIP 贴右上；第二行起才是名称 → 图标与名称成组 */}
+          <div className="flex items-start justify-between gap-2">
+            {tile}
+            {vipBadge}
+          </div>
+          {titleBlock}
+          {metaRow}
         </div>
       )}
     </Link>

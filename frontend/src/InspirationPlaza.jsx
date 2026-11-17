@@ -315,7 +315,7 @@ export default function InspirationPlaza({ onUsePrompt, refreshToken = 0 }) {
     <section className="mt-12">
       {/* 标题行：标题 + 分类 chips + 搜索 */}
       <div className="flex flex-wrap items-center gap-3">
-        <h2 className="flex items-center gap-2 text-xl font-bold tracking-tight text-slate-900">
+        <h2 className="font-title flex items-center gap-2 text-xl font-bold tracking-tight text-slate-900">
           <Sparkles size={18} className="text-brand-600" /> 发现灵感
         </h2>
 

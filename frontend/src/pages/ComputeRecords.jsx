@@ -63,7 +63,7 @@ export default function ComputeRecords() {
   return (
     <div className="max-w-6xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900 mb-2">算力记录</h1>
+        <h1 className="font-title text-2xl font-bold text-slate-900 mb-2">算力记录</h1>
         <p className="text-slate-500 text-sm">查看您的算力充值与消耗流水</p>
       </div>
 

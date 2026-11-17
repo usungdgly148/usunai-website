@@ -317,7 +317,7 @@ export default function Home() {
       {/* 信任数据条（社会证明）：主标题 + 副标题 + 数字（2026-08-03 改版：无蓝底 + 滚动计数动画） */}
       {activeCat === 'all' && stats.length > 0 && (
         <section ref={statsRef} className={`mb-10 text-center ${statsInView ? 'animate-fade-up' : 'opacity-0'}`}>
-          <h2 className="text-3xl md:text-5xl font-bold text-slate-900 mb-4">{statsTitle}</h2>
+          <h2 className="text-3xl md:text-5xl font-title font-bold text-slate-900 mb-4">{statsTitle}</h2>
           <p className="text-lg md:text-xl text-slate-500 max-w-3xl mx-auto">{statsSubtitle}</p>
           <div className="mt-8 grid grid-cols-3 gap-4 md:gap-10">
             {stats.map((s, i) => (
@@ -329,7 +329,7 @@ export default function Home() {
 
       {/* 区块标题 */}
       <div className="flex items-baseline justify-between mb-4">
-        <h2 className="text-xl font-semibold text-slate-900">
+        <h2 className="font-title text-xl font-semibold text-slate-900">
           {activeCat === 'all' ? '热门智能体' : (sortedCategories.find(c => c.id === activeCat)?.name || '全部')}
         </h2>
         <span className="text-sm text-slate-400">{displayedItems.length} 个应用</span>
@@ -370,7 +370,7 @@ export default function Home() {
             <span className="inline-block px-4 py-1.5 rounded-full bg-slate-100 text-slate-600 text-sm font-medium mb-6">
               {landing.heroTag}
             </span>
-            <h2 className="text-3xl md:text-5xl font-bold text-slate-900 mb-4">
+            <h2 className="text-3xl md:text-5xl font-title font-bold text-slate-900 mb-4">
               {landing.heroTitle}
             </h2>
             <p className="text-lg md:text-xl text-slate-500 leading-relaxed">
@@ -420,7 +420,7 @@ export default function Home() {
         <SectionReveal className="mt-8 mb-8">
           <div className="text-center max-w-3xl mx-auto mb-6">
             <span className="inline-block px-4 py-1.5 rounded-full bg-brand-50 text-brand-700 text-sm font-medium mb-4">真实结果</span>
-            <h2 className="text-3xl md:text-5xl font-bold text-slate-900 mb-4">客户用友尚AI拿到了结果</h2>
+            <h2 className="text-3xl md:text-5xl font-title font-bold text-slate-900 mb-4">客户用友尚AI拿到了结果</h2>
             <p className="text-lg md:text-xl text-slate-500">不是概念，是看得见的获客增长。</p>
           </div>
           <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-3 md:grid md:grid-cols-3 md:gap-6 md:overflow-visible md:pb-0">
@@ -478,7 +478,7 @@ export default function Home() {
       {activeCat === 'all' && (
         <SectionReveal className="mb-5">
           <div className="rounded-[3rem] bg-slate-100 px-6 md:px-12 py-8 md:py-10 text-center">
-            <h2 className="text-3xl md:text-5xl font-bold text-slate-900 mb-4 max-w-3xl mx-auto leading-tight">
+            <h2 className="text-3xl md:text-5xl font-title font-bold text-slate-900 mb-4 max-w-3xl mx-auto leading-tight">
               {landing.cta.title}
             </h2>
             <p className="text-slate-500 text-lg md:text-xl max-w-2xl mx-auto mb-7 leading-relaxed">

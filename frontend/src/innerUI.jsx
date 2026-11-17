@@ -112,7 +112,7 @@ export function InfoCard({ entity, type }) {
         <div className={`w-20 h-20 mx-auto mb-4 rounded-2xl ${entity.iconColor} flex items-center justify-center text-white shadow-pop`}>
           <CategoryIcon name={entity.icon} size={32} avatar={entity.avatar} imgClassName="rounded-2xl" />
         </div>
-        <h2 className="text-lg font-bold text-slate-900">{entity.name}</h2>
+        <h2 className="font-title text-lg font-bold text-slate-900">{entity.name}</h2>
         <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">{entity.desc}</p>
       </div>
 

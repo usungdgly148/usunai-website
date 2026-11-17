@@ -591,7 +591,7 @@ export default function Assets() {
   return (
     <div className="max-w-6xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900 mb-2">我的资产</h1>
+        <h1 className="font-title text-2xl font-bold text-slate-900 mb-2">我的资产</h1>
         <p className="text-slate-500 text-sm">管理您的所有创作资产与任务记录</p>
       </div>
 
