@@ -1569,12 +1569,12 @@ export function AgentCard({ item, to, featured = false, className = '' }) {
    * 改为「名称上方左侧的圆角方块」，与名称组成紧凑标题组。
    *
    * 因此**封面块整个没有了**（原 h-28 渐变封面 + 居中圆图标）。渐变没有被丢弃 ——
-   * `headerBg` 现在落在**图标块**上：后台配的 gradientFrom/To/Angle、分类主题的深浅，
-   * 依然原样可见，`check:card-gradient` 的三条契约（自定义优先 / 唯一实现 / 不许 `|| 30`）都还成立。
-   * ⚠️ 不要为了「让封面回来」把 headerBg 挪回卡片顶部：那会同时破坏 -25% 高度与标题组。
-   * ⚠️ 图标块用 `headerBg` 而不是 `item.iconColor`：后者是饱和底色（bg-blue-600），
-   *    白图标落在饱和块上会重新变成「几个色块打架」的同质化观感；浅渐变底 + 同色相的 700 档图标
-   *    在任意后台自定义渐变下都读得清（深底时由 isDark 翻成白图标）。
+   * `headerBg` 现在铺在**卡片根节点**（见下面 <Link> 的 style）：后台配的 gradientFrom/To/Angle、
+   * 分类主题的深浅，依然原样可见，`check:card-gradient` 的三条契约（自定义优先 / 唯一实现 / 不许 `|| 30`）都还成立。
+   * ⚠️ 2026-11-18 主人修正过一次：中间版本把渐变只放进图标块、卡片刷成白底，整页卡片一片白被否决。
+   *    现在渐变在卡片上、图标块是半透明白片 —— 别把这两者调回去。
+   * ⚠️ 图标块别用 `item.iconColor` 做底色：那是饱和底色（bg-blue-600），白图标落在上面会变成
+   *    「几个色块打架」的同质化观感；半透明白片 + 同色相 700 档图标在任意渐变上都读得清。
    */
   const vipBadge = item.vip && (
     <span className="shrink-0 rounded bg-brand-50 px-1.5 py-0.5 text-[11px] font-semibold leading-[1.4] text-brand-700">VIP</span>
