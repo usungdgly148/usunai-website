@@ -1586,10 +1586,15 @@ export function AgentCard({ item, to, featured = false, className = '' }) {
    *    同处一行（col-span-2 + 第 3 张），只要它比普通卡高，整行就被它顶高，普通卡再被 flex 拉伸
    *    → 同一页出现两种卡片高度。宽卡片靠 col-span 已经足够显眼，不需要再靠高度。
    */
+  /*
+   * 2026-11-18 主人修正：「不要把所有卡片刷成白底，卡片原有的渐变背景要保留」。
+   * 于是 `headerBg` 上移到**卡片根节点**（见下面 <Link> 的 style），
+   * 图标块就从"自己带渐变"改成"半透明白片" —— 否则它和卡片同色，等于消失。
+   * ⚠️ 图标块别再用 headerBg：同色 = 看不见圆角矩形，主人明确要保留这个形状。
+   */
   const tile = (
     <span
-      className={`flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl ring-1 ${isDark ? 'text-white ring-white/20' : `${preset.fg || 'text-slate-700'} ring-slate-900/5`}`}
-      style={{ background: headerBg }}
+      className={`flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl ring-1 backdrop-blur-[1px] ${isDark ? 'bg-white/10 text-white ring-white/20' : `bg-white/65 ring-white/70 ${preset.fg || 'text-slate-700'}`}`}
       aria-hidden="true"
     >
       {item.avatar ? (
@@ -1602,20 +1607,20 @@ export function AgentCard({ item, to, featured = false, className = '' }) {
 
   const titleBlock = (
     <>
-      <h3 className={`font-title truncate font-semibold leading-snug text-slate-900 transition group-hover:text-brand-600 ${featured ? 'mt-2.5 text-base md:mt-0 md:text-lg' : 'mt-2.5 text-base'}`}>{item.name}</h3>
+      <h3 className={`font-title truncate font-semibold leading-snug transition ${isDark ? 'text-white' : 'text-slate-900 group-hover:text-brand-600'} ${featured ? 'mt-2.5 text-base md:mt-0 md:text-lg' : 'mt-2.5 text-base'}`}>{item.name}</h3>
       {/* 描述固定 39px（= 两行 text-xs / leading-relaxed）：一行与两行的卡片高度完全一致，
           这是「所有卡片高度统一」的关键 —— 靠 min-h 只能保证下限，两行描述仍会把高度顶高 3px。 */}
-      <p className="mt-1 h-[39px] overflow-hidden text-xs leading-relaxed text-slate-500 line-clamp-2">{item.desc}</p>
+      <p className={`mt-1 h-[39px] overflow-hidden text-xs leading-relaxed line-clamp-2 ${isDark ? 'text-white/80' : 'text-slate-500'}`}>{item.desc}</p>
     </>
   );
 
   const metaRow = (
     /* 底部行固定 21px（= 标签实际高度）：有的卡带标签、有的不带，不定高会差 4px，
        同一页就会出现两种卡片高度 —— 这条和上面描述固定 39px 是同一件事的两半。 */
-    <div className="mt-auto flex min-w-0 items-center justify-between gap-2 pt-2 text-[11px] text-slate-400">
+    <div className={`mt-auto flex min-w-0 items-center justify-between gap-2 pt-2 text-[11px] ${isDark ? 'text-white/70' : 'text-slate-400'}`}>
       <div className="flex h-[21px] min-w-0 items-center gap-1 overflow-hidden">
         {(item.tags || []).slice(0, 3).map(tag => (
-          <span key={tag} className="max-w-[5rem] truncate rounded bg-slate-100 px-1.5 py-0.5 text-slate-500">{tag}</span>
+          <span key={tag} className={`max-w-[5rem] truncate rounded px-1.5 py-0.5 ${isDark ? 'bg-white/15 text-white/90' : 'bg-slate-100 text-slate-500'}`}>{tag}</span>
         ))}
       </div>
       <span className="ml-auto flex shrink-0 items-center gap-1"><Users size={13} /> {formatCount(item.uses)}人使用</span>
@@ -1625,7 +1630,13 @@ export function AgentCard({ item, to, featured = false, className = '' }) {
   return (
     <Link
       to={to}
-      className={`group flex h-full flex-col overflow-hidden rounded-2xl border bg-white transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_10px_28px_-8px_rgba(15,23,42,0.14)] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 ${featured ? 'border-brand-200' : 'border-slate-200'} ${className}`}
+      /* 卡片背景 = headerBg（后台渐变起始色/结束色/角度，或分类主题）—— 2026-11-18 起直接铺在卡片上，
+         不再像 11-17 那版那样只落在 44px 图标块里（那样整页卡片会变成一片白，主人已明确否决）。
+         ⚠️ 不要在这里再加 bg-white / bg-slate-50 之类的实心底色，会把渐变整段盖掉；
+            需要压一层浅色只在标题组内部用半透明（bg-white/65）解决，不动卡片底色。
+         ⚠️ 交互态（hover/focus）**不改背景**：与改版前一致，只做描边/阴影/位移，避免 hover 时渐变被打断。 */
+      style={{ background: headerBg }}
+      className={`group flex h-full flex-col overflow-hidden rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_10px_28px_-8px_rgba(15,23,42,0.14)] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 ${featured ? 'border-brand-200' : 'border-slate-200'} ${className}`}
     >
       {featured ? (
         /* 首页那张 2 列宽的卡：md 以上改成「图标在左、文字在右」的横排，
