@@ -13,7 +13,7 @@ import {
 import QRCode from 'qrcode';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { gradientCss, hasCustomGradient } from './cardGradient.js';
+import { cardSurfaceCss, gradientCss, hasCustomGradient } from './cardGradient.js';
 
 const ICON_MAP = {
   Home, FileText, Video, BookOpen, Radio, Image, Clapperboard, MessageCircle, Search, Briefcase, ShoppingBag,
@@ -77,15 +77,17 @@ export function Sidebar() {
   const hasDesignEntryGroup = groupEntries.some((group) => group.name === DESIGN_ENTRY_GROUP);
 
 
-  // 选中态 = 实心橙胶囊 + 白色图标/文字（2026-11-03 主人指定：底色 #D65800 = brand-600，与主按钮同色）。
+  // 选中态 = 浅橙 tonal 胶囊（2026-11-18 主人要求降级：原实心橙 bg-brand-600 + 白字视觉过重，
+  // 参照「算力充值」按钮的强度 —— bg-brand-50 浅橙底 + brand-700 深橙字 + brand-200 描边环）。
+  // ⚠️ 描边用 ring 不用 border：ring 是 box-shadow，不占盒模型，选中时不会把文字挤位移。
   // ⚠️ hover 变色只能挂在「未选中」分支：若选中态同时带 hover:text-brand-700，
-  //    悬停时文字会变回深橙压在深橙底上，等于消失（伪类权重高于普通 text-white）。
+  //    悬停时文字会变回深橙压在浅橙底上，对比度骤降（伪类权重高于普通 text-*）。
   const homeItemClass = (active) =>
-    `group flex items-center gap-4 px-5 py-3.5 rounded-full text-[15px] font-medium transition-all duration-200 ease-out hover:translate-x-1 active:scale-[0.98] motion-reduce:hover:translate-x-0 motion-reduce:active:scale-100 ${active ? 'bg-brand-600 text-white' : 'text-slate-700 hover:bg-slate-200/50 hover:text-brand-700'}`;
+    `group flex items-center gap-4 px-5 py-3.5 rounded-full text-[15px] font-medium transition-all duration-200 ease-out hover:translate-x-1 active:scale-[0.98] motion-reduce:hover:translate-x-0 motion-reduce:active:scale-100 ${active ? 'bg-brand-50 text-brand-700 font-semibold ring-1 ring-brand-200' : 'text-slate-700 hover:bg-slate-200/50 hover:text-brand-700'}`;
 
-  // 选中态与首页项同款：实心橙胶囊 bg-brand-600 + 白字白图标（图标继承 currentColor，无需单独上色）
+  // 选中态与首页项同款：浅橙 tonal 胶囊（bg-brand-50 + text-brand-700 + ring-brand-200），图标继承 currentColor
   const subItemClass = (active) =>
-    `group flex items-center gap-3 px-5 py-2.5 rounded-full text-[14px] font-medium transition-all duration-200 ease-out hover:translate-x-1 active:scale-[0.98] motion-reduce:hover:translate-x-0 motion-reduce:active:scale-100 ${active ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-200/50 hover:text-brand-700'}`;
+    `group flex items-center gap-3 px-5 py-2.5 rounded-full text-[14px] font-medium transition-all duration-200 ease-out hover:translate-x-1 active:scale-[0.98] motion-reduce:hover:translate-x-0 motion-reduce:active:scale-100 ${active ? 'bg-brand-50 text-brand-700 font-semibold ring-1 ring-brand-200' : 'text-slate-600 hover:bg-slate-200/50 hover:text-brand-700'}`;
 
   return (
     <>
@@ -1559,6 +1561,13 @@ export function AgentCard({ item, to, featured = false, className = '' }) {
   // 若自定义渐变（多半是浅色）赢了却仍按深色渲染，白色徽标/图标落到浅底上会看不清。
   const isDark = !!useTheme?.dark;
   const headerBg = useTheme ? useTheme.header : gradientCss(item, preset.from, preset.to);
+  /*
+   * 2026-11-18：卡片表面 = 白色半透明蒙版 + 渐变。浓度由后台「卡片蒙版透明度」逐张配（item.maskOpacity），
+   * 没配过时走 CARD_MASK_OPACITY_DEFAULT（20%），只为柔化偏重的颜色，不替换渐变的色相/方向。
+   * ⚠️ 深色类目（private）**不压白蒙版**：白蒙版会把深色卡提亮成灰，白字立刻掉对比度；
+   *    深色卡靠 isDark 自己保证可读性，蒙版对它只会帮倒忙。
+   */
+  const surfaceBg = isDark ? headerBg : cardSurfaceCss(headerBg, item.maskOpacity);
 
   /*
    * 2026-11-03：卡片左上角的「智能体 / 工作流」类型角标已按主人要求整体移除（网页端 + 小程序端）。
@@ -1630,12 +1639,12 @@ export function AgentCard({ item, to, featured = false, className = '' }) {
   return (
     <Link
       to={to}
-      /* 卡片背景 = headerBg（后台渐变起始色/结束色/角度，或分类主题）—— 2026-11-18 起直接铺在卡片上，
+      /* 卡片背景 = 白色蒙版 + headerBg（后台渐变起始色/结束色/角度，或分类主题）—— 2026-11-18 起直接铺在卡片上，
          不再像 11-17 那版那样只落在 44px 图标块里（那样整页卡片会变成一片白，主人已明确否决）。
          ⚠️ 不要在这里再加 bg-white / bg-slate-50 之类的实心底色，会把渐变整段盖掉；
-            需要压一层浅色只在标题组内部用半透明（bg-white/65）解决，不动卡片底色。
+            需要压一层浅色只用 `surfaceBg`（由 cardGradient.js 统一拼），不动卡片底色。
          ⚠️ 交互态（hover/focus）**不改背景**：与改版前一致，只做描边/阴影/位移，避免 hover 时渐变被打断。 */
-      style={{ background: headerBg }}
+      style={{ background: surfaceBg }}
       className={`group flex h-full flex-col overflow-hidden rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_10px_28px_-8px_rgba(15,23,42,0.14)] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 ${featured ? 'border-brand-200' : 'border-slate-200'} ${className}`}
     >
       {featured ? (

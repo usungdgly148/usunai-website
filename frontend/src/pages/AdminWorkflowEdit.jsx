@@ -9,7 +9,7 @@ import {
 import { Card, AdminIconPicker, TutorialSettings, renderIcon, Toggle, PrimaryButton, SecondaryButton, Modal } from '../adminUI.jsx';
 import { listCozeWorkspaces, listCozeWorkflows, getCozeWorkflowInfo, runWorkflow } from '../cozeApi.js';
 import { ASSET_CATEGORY_OPTIONS } from '../assetUtils.js';
-import { gradientCss } from '../cardGradient.js';
+import { cardSurfaceCss, gradientCss, resolveMaskOpacity } from '../cardGradient.js';
 
 const COLOR_OPTIONS = ['bg-blue-600', 'bg-rose-600', 'bg-emerald-600', 'bg-amber-600', 'bg-violet-600', 'bg-slate-700', 'bg-cyan-600', 'bg-teal-600'];
 
@@ -83,6 +83,8 @@ const blankForm = {
   apiKey: '', baseUrl: '',
   priceType: 'run', priceRate: 10,
   gradientFrom: '#CFFAFE', gradientTo: '#FFFFFF', gradientAngle: 30,
+  // 卡片白色蒙版浓度（%）：叠在渐变之上、只降饱和不换色。0 = 不蒙版。
+  maskOpacity: 20,
 };
 
 const GRADIENT_PRESETS = {
@@ -873,14 +875,28 @@ export default function AdminWorkflowEdit({ isNew: isNewProp }) {
             <Field label="渐变起始色"><div className="flex items-center gap-2"><input type="color" value={form.gradientFrom} onChange={e => set({ gradientFrom: e.target.value })} className="w-10 h-9 p-0 border border-slate-200 rounded-lg cursor-pointer" /><input value={form.gradientFrom} onChange={e => set({ gradientFrom: e.target.value })} className={inputCls} /></div></Field>
             <Field label="渐变结束色"><div className="flex items-center gap-2"><input type="color" value={form.gradientTo} onChange={e => set({ gradientTo: e.target.value })} className="w-10 h-9 p-0 border border-slate-200 rounded-lg cursor-pointer" /><input value={form.gradientTo} onChange={e => set({ gradientTo: e.target.value })} className={inputCls} /></div></Field>
           </div>
+          <Field label="蒙版透明度" hint="叠在渐变上的白色蒙版，值越大颜色越淡（0 = 不蒙版，100 = 全白）">
+            <div className="flex items-center gap-3">
+              <input type="range" min="0" max="100" value={resolveMaskOpacity(form.maskOpacity)} onChange={e => set({ maskOpacity: Number(e.target.value) })} className="flex-1 accent-blue-600" />
+              <input type="number" min="0" max="100" value={resolveMaskOpacity(form.maskOpacity)} onChange={e => set({ maskOpacity: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })} className={`${inputCls} w-16 text-center`} />
+              <span className="text-slate-400 text-xs">%</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {[0, 20, 30, 50, 70].map(o => (
+                <button type="button" key={o} onClick={() => set({ maskOpacity: o })}
+                  className={`px-2.5 py-1 rounded-lg text-xs border transition ${resolveMaskOpacity(form.maskOpacity) === o ? 'border-blue-500 bg-blue-50 text-blue-600 font-medium' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>{o}%</button>
+              ))}
+            </div>
+          </Field>
           <Field label="渐变角度" hint="0–360°">
             <div className="flex items-center gap-3">
               <input type="range" min="0" max="360" value={form.gradientAngle} onChange={e => set({ gradientAngle: Number(e.target.value) })} className="flex-1 accent-blue-600" />
               <input type="number" min="0" max="360" value={form.gradientAngle} onChange={e => set({ gradientAngle: Math.max(0, Math.min(360, Number(e.target.value) || 0)) })} className={`${inputCls} w-16 text-center`} />
               <span className="text-slate-400 text-xs">°</span>
             </div>
-            {/* 预览与线上卡片同一套算法（cardGradient.js）：旧写法的 `|| 30` 会把 0° 显示成 30°。 */}
-            <div className="h-12 rounded-lg border border-slate-200 mt-2" style={{ background: gradientCss(form, form.gradientFrom, form.gradientTo) }} />
+            {/* 预览与线上卡片同一套算法（cardGradient.js）：旧写法的 `|| 30` 会把 0° 显示成 30°；
+                蒙版同理，`|| 30` 会让 0% 关不掉。预览已叠蒙版层，所见即卡片所得。 */}
+            <div className="h-12 rounded-lg border border-slate-200 mt-2" style={{ background: cardSurfaceCss(gradientCss(form, form.gradientFrom, form.gradientTo), form.maskOpacity) }} />
           </Field>
           {/* 2026-10-21：「排序」输入框已按主人要求移除 —— 顺序统一由「项目管理」列表的上下箭头调整，
               这里不再暴露 sortOrder；编辑保存时仍带原值（来自 existing 展开），不会被清掉。 */}

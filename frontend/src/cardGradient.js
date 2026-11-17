@@ -55,3 +55,54 @@ export function gradientCss(item, fallbackFrom, fallbackTo) {
   const angle = resolveGradientAngle(item && item.gradientAngle);
   return 'linear-gradient(' + angle + 'deg, ' + from + ', ' + to + ')';
 }
+
+/**
+ * 卡片白色蒙版的默认浓度（%，0 = 不蒙版，100 = 全白）。后台没配时用它。
+ *
+ * 🔴 为什么是 20 而不是 30（2026-11-18 实测定的）：现网卡片渐变本身就很浅
+ *    （#DBEAFE→#FFFFFF 这类），30% 白一压几乎全成白底，色调只剩一点痕迹；
+ *    20% 还能清楚分辨粉/米黄/浅蓝/浅绿，同时明显柔化。主人上一轮刚因「渐变被刷白」否决过一版，
+ *    默认值宁可保守 —— 要更淡让管理员自己在后台往上拉。
+ */
+export const CARD_MASK_OPACITY_DEFAULT = 20;
+
+/**
+ * 解析后台配置的「卡片蒙版透明度」。
+ *
+ * ⚠️ 与角度同一个坑：**0 是合法值**（= 不要蒙版），不能写成 `Number(x) || 30`，
+ *    否则管理员把滑块拉到 0 会被悄悄换回 30%，表现为「蒙版关不掉」。
+ * ⚠️ 只接受 number / string，其余（数组、对象、布尔）一律回落默认值 —— 防脏数据。
+ * 返回值恒为 0–100 的整数（超出范围按边界夹紧，不报错）。
+ */
+export function resolveMaskOpacity(value) {
+  if (value === null || value === undefined || value === '') return CARD_MASK_OPACITY_DEFAULT;
+  if (typeof value !== 'number' && typeof value !== 'string') return CARD_MASK_OPACITY_DEFAULT;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return CARD_MASK_OPACITY_DEFAULT;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+/**
+ * 白色蒙版层（叠在渐变之上）。浓度 0 时返回空串 —— 调用方据此决定要不要拼。
+ * 两层都用同一个颜色，等价于「平铺一层半透明白」。
+ */
+export function maskOverlayCss(opacity) {
+  const alpha = resolveMaskOpacity(opacity) / 100;
+  if (alpha <= 0) return '';
+  return 'linear-gradient(rgba(255,255,255,' + alpha + '), rgba(255,255,255,' + alpha + '))';
+}
+
+/**
+ * 卡片最终 `background`：白色蒙版 + 渐变。
+ *
+ * 为什么要蒙版（2026-11-18 主人要求）：后台能配很饱和的渐变，直接铺满整张卡颜色偏重；
+ * 压一层白既保留色相又降饱和度。**只是叠加，不替换** —— 渐变的方向/角度/色值原样保留。
+ *
+ * ⚠️ 蒙版必须写在渐变**前面**（CSS 多背景里前者在上层）。
+ * @param bg      已算好的渐变（gradientCss 或分类主题 header）
+ * @param opacity 0–100
+ */
+export function cardSurfaceCss(bg, opacity) {
+  const mask = maskOverlayCss(opacity);
+  return mask ? mask + ', ' + bg : bg;
+}
