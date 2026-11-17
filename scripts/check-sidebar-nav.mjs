@@ -1,5 +1,5 @@
 // 侧边栏导航外观守卫（2026-10-28 立规 / 2026-11-03 改选中态配色 / 2026-11-18 选中态降级为浅橙 tonal）
-// 规则：分类选中态 = 大圆弧胶囊（rounded-full）+ 浅橙 tonal（bg-brand-50 底 + brand-700 字 + brand-200 环），
+// 规则：分类选中态 = 大圆弧胶囊（rounded-full）+ 浅橙 tonal（bg-brand-50 底 + brand-700 字，**无描边**），
 //      **不画左侧竖线**、**不用实心橙 bg-brand-600 + 白字**（视觉过重，已按主人要求降级）。
 //      这条规则只在 CSS 类里体现，函数行为完全不变，因此只能靠源码断言守。
 import fs from 'node:fs';
@@ -63,10 +63,10 @@ ok('首页选中态用浅橙底 bg-brand-50', homeActive.includes('bg-brand-50')
 ok('子项选中态用浅橙底 bg-brand-50', subActive.includes('bg-brand-50'), subActive.trim());
 ok('首页选中态文字/图标为 brand-700 深橙', homeActive.includes('text-brand-700'));
 ok('子项选中态文字/图标为 brand-700 深橙', subActive.includes('text-brand-700'));
-// 描边必须用 ring（box-shadow，不占盒模型），用 border 会让选中项文字被挤位移
-ok('首页选中态用 ring-brand-200 描边环', homeActive.includes('ring-brand-200'));
-ok('子项选中态用 ring-brand-200 描边环', subActive.includes('ring-brand-200'));
-ok('选中态不再用 border（避免选中/未选中文字位移）',
+// 选中态**不画描边**（2026-11-18 主人二次指定：胶囊只要底色 + 字色 + 字重，不要框）
+ok('首页选中态无描边环（ring-*）', !/\bring-/.test(homeActive), homeActive.trim());
+ok('子项选中态无描边环（ring-*）', !/\bring-/.test(subActive));
+ok('选中态不用 border（既避免文字位移，也避免胶囊多一圈框）',
   !homeActive.includes('border-') && !subActive.includes('border-'));
 // 实心橙 + 白字是已否决的旧方案，不许回归
 ok('选中态不再用实心橙 bg-brand-600', !homeActive.includes('bg-brand-600') && !subActive.includes('bg-brand-600'));

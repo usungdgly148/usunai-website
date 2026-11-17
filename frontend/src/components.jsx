@@ -78,16 +78,17 @@ export function Sidebar() {
 
 
   // 选中态 = 浅橙 tonal 胶囊（2026-11-18 主人要求降级：原实心橙 bg-brand-600 + 白字视觉过重，
-  // 参照「算力充值」按钮的强度 —— bg-brand-50 浅橙底 + brand-700 深橙字 + brand-200 描边环）。
-  // ⚠️ 描边用 ring 不用 border：ring 是 box-shadow，不占盒模型，选中时不会把文字挤位移。
+  // 参照「算力充值」按钮的强度 —— bg-brand-50 浅橙底 + brand-700 深橙字）。
+  // 🔴 **选中态不画描边**（2026-11-18 主人二次指定）：ring / border 一律不要，
+  //    靠底色 + 字色 + 字重 600 表达选中；描边会让胶囊多出一圈框、显得比未选中项"重"。
   // ⚠️ hover 变色只能挂在「未选中」分支：若选中态同时带 hover:text-brand-700，
   //    悬停时文字会变回深橙压在浅橙底上，对比度骤降（伪类权重高于普通 text-*）。
   const homeItemClass = (active) =>
-    `group flex items-center gap-4 px-5 py-3.5 rounded-full text-[15px] font-medium transition-all duration-200 ease-out hover:translate-x-1 active:scale-[0.98] motion-reduce:hover:translate-x-0 motion-reduce:active:scale-100 ${active ? 'bg-brand-50 text-brand-700 font-semibold ring-1 ring-brand-200' : 'text-slate-700 hover:bg-slate-200/50 hover:text-brand-700'}`;
+    `group flex items-center gap-4 px-5 py-3.5 rounded-full text-[15px] font-medium transition-all duration-200 ease-out hover:translate-x-1 active:scale-[0.98] motion-reduce:hover:translate-x-0 motion-reduce:active:scale-100 ${active ? 'bg-brand-50 text-brand-700 font-semibold' : 'text-slate-700 hover:bg-slate-200/50 hover:text-brand-700'}`;
 
-  // 选中态与首页项同款：浅橙 tonal 胶囊（bg-brand-50 + text-brand-700 + ring-brand-200），图标继承 currentColor
+  // 选中态与首页项同款：浅橙 tonal 胶囊（bg-brand-50 + text-brand-700，无描边），图标继承 currentColor
   const subItemClass = (active) =>
-    `group flex items-center gap-3 px-5 py-2.5 rounded-full text-[14px] font-medium transition-all duration-200 ease-out hover:translate-x-1 active:scale-[0.98] motion-reduce:hover:translate-x-0 motion-reduce:active:scale-100 ${active ? 'bg-brand-50 text-brand-700 font-semibold ring-1 ring-brand-200' : 'text-slate-600 hover:bg-slate-200/50 hover:text-brand-700'}`;
+    `group flex items-center gap-3 px-5 py-2.5 rounded-full text-[14px] font-medium transition-all duration-200 ease-out hover:translate-x-1 active:scale-[0.98] motion-reduce:hover:translate-x-0 motion-reduce:active:scale-100 ${active ? 'bg-brand-50 text-brand-700 font-semibold' : 'text-slate-600 hover:bg-slate-200/50 hover:text-brand-700'}`;
 
   return (
     <>
