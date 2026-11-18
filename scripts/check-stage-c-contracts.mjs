@@ -17,6 +17,10 @@ const checks = [
   // 现在改为守「卡片高度统一」的三段定高 + 标签行，防止有人把 h-[39px] / h-[21px] 换回 min-h 或 flex-1
   // ——那样一来「带标签 / 不带标签」「一行描述 / 两行描述」的卡片就会重新差出 3~4px，同页两种高度。
   ['frontend/src/components.jsx', ['(item.tags || []).slice(0, 3)', 'h-[39px]', 'h-[21px]', 'formatCount(item.uses)']],
+  // 2026-11-18 主人要求：卡片图标块缩到原 44px 的 70%（= 31px，44×0.7=30.8 取整），
+  // 圆角按比例 12px→8px（rounded-lg），内嵌图标 20→14（20/44 与 14/31 都是 45%，留白比例不变）。
+  // 守这一条是因为：卡片第一行高度 = max(图标块, VIP 角标)，图标块一改卡片总高就跟着变。
+  ['frontend/src/components.jsx', ['h-[31px] w-[31px]', 'rounded-lg ring-1', '<Icon size={14}']],
   ['frontend/src/pages/Home.jsx', ['[refreshAllConfig, activeCat]', 'snap-x snap-mandatory', 'min-w-[82vw]']],
   ['frontend/src/pages/Workflow.jsx', ["useState(true)", "mobileActionTitle={mobileConfigView ? '历史记录' : '配置参数'}", 'inner-page-shell']],
   ['frontend/src/pages/Chat.jsx', ["matchMedia('(max-width: 767px)')", '添加附件或图片', 'inner-page-shell']],

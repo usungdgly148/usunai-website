@@ -1602,15 +1602,23 @@ export function AgentCard({ item, to, featured = false, className = '' }) {
    * 图标块就从"自己带渐变"改成"半透明白片" —— 否则它和卡片同色，等于消失。
    * ⚠️ 图标块别再用 headerBg：同色 = 看不见圆角矩形，主人明确要保留这个形状。
    */
+  /*
+   * 🔴 图标块尺寸（2026-11-18 主人要求缩到 70%）：44×44 → 31×31（44×0.7=30.8，取整为 31）。
+   *    圆角同步按比例缩：rounded-xl(12px) → rounded-lg(8px)，否则 12px 圆角套在 31px 方块上
+   *    会显得比原来更"圆"，形状观感变了就不算等比缩放。
+   *    内嵌图标同样按 70% 缩：size 20 → 14（20/44 与 14/31 的占比都是 45%，留白比例不变）。
+   *    ⚠️ 不要再改回 h-11 w-11 —— 卡片总高由这个块撑起（第一行高度 = max(图标块, VIP 角标)），
+   *       改回去卡片会整体变高 13px，与「所有卡片高度统一」的既有约束打架。
+   */
   const tile = (
     <span
-      className={`flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl ring-1 backdrop-blur-[1px] ${isDark ? 'bg-white/10 text-white ring-white/20' : `bg-white/65 ring-white/70 ${preset.fg || 'text-slate-700'}`}`}
+      className={`flex h-[31px] w-[31px] shrink-0 items-center justify-center overflow-hidden rounded-lg ring-1 backdrop-blur-[1px] ${isDark ? 'bg-white/10 text-white ring-white/20' : `bg-white/65 ring-white/70 ${preset.fg || 'text-slate-700'}`}`}
       aria-hidden="true"
     >
       {item.avatar ? (
         <img src={item.avatar} alt="" className="h-full w-full object-cover" />
       ) : (
-        <Icon size={20} strokeWidth={1.8} />
+        <Icon size={14} strokeWidth={1.8} />
       )}
     </span>
   );
@@ -1641,7 +1649,7 @@ export function AgentCard({ item, to, featured = false, className = '' }) {
     <Link
       to={to}
       /* 卡片背景 = 白色蒙版 + headerBg（后台渐变起始色/结束色/角度，或分类主题）—— 2026-11-18 起直接铺在卡片上，
-         不再像 11-17 那版那样只落在 44px 图标块里（那样整页卡片会变成一片白，主人已明确否决）。
+         不再像 11-17 那版那样只落在图标块里（那样整页卡片会变成一片白，主人已明确否决）。
          ⚠️ 不要在这里再加 bg-white / bg-slate-50 之类的实心底色，会把渐变整段盖掉；
             需要压一层浅色只用 `surfaceBg`（由 cardGradient.js 统一拼），不动卡片底色。
          ⚠️ 交互态（hover/focus）**不改背景**：与改版前一致，只做描边/阴影/位移，避免 hover 时渐变被打断。 */
