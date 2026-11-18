@@ -40,7 +40,7 @@ const MAX_RECORD_SCAN = 5000;
 
 const AGENT_PUBLIC_FIELDS = [
   'id', 'kind', 'name', 'description', 'category', 'avatar', 'icon', 'iconColor',
-  'desc', 'cardGradient', 'cardBg', 'gradientFrom', 'gradientTo', 'gradientAngle',
+  'desc', 'cardGradient', 'cardBg', 'gradientFrom', 'gradientTo', 'gradientAngle', 'maskOpacity',
   'tags', 'tutorialImage', 'tutorialUrl', 'tutorialTitle',
   'published', 'sortOrder', 'views', 'uses', 'works', 'rating', 'vip', 'featured',
   'priceType', 'priceRate', 'opening', 'suggestedQuestions', 'assetCategory',
@@ -48,7 +48,7 @@ const AGENT_PUBLIC_FIELDS = [
 
 const WORKFLOW_PUBLIC_FIELDS = [
   'id', 'kind', 'name', 'description', 'category', 'avatar', 'icon', 'iconColor',
-  'desc', 'cardGradient', 'cardBg', 'gradientFrom', 'gradientTo', 'gradientAngle',
+  'desc', 'cardGradient', 'cardBg', 'gradientFrom', 'gradientTo', 'gradientAngle', 'maskOpacity',
   'tags', 'tutorialImage', 'tutorialUrl', 'tutorialTitle',
   'published', 'sortOrder', 'views', 'uses', 'works', 'rating', 'vip', 'featured',
   'priceType', 'priceRate', 'resultKind', 'formFields', 'outputFields', 'assetCategory',

@@ -13,6 +13,8 @@ export interface ContentItem {
   gradientFrom?: string;
   gradientTo?: string;
   gradientAngle?: number;
+  /** 卡片白色蒙版浓度 0–100（后台「智能体/工作流设置」逐张配）；0 = 不蒙版，缺省 = 20 */
+  maskOpacity?: number;
   tags?: string[];
   opening?: string;
   suggestedQuestions?: string[];

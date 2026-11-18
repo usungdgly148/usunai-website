@@ -125,14 +125,6 @@
 .miniapp-stage .mini-shortcut { display: flex; min-width: 0; align-items: center; flex-direction: column; gap: 3.5px; color: var(--mini-text-2); font-size: 10px; text-align: center; }
 .miniapp-stage .mini-shortcut-icon { display: flex; width: 31px; height: 31px; align-items: center; justify-content: center; border-radius: 10px; background: var(--mini-primary-soft); color: var(--mini-primary); font-size: 16px; font-weight: 700; }
 .miniapp-stage .mini-content-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.miniapp-stage .mini-content-grid .mini-content-card { min-width: 0; margin-bottom: 0; padding: 0 0 9px; overflow: hidden; border-radius: 11px; }
-.miniapp-stage .mini-content-card-cover { display: flex; height: 73px; align-items: center; justify-content: center; background: linear-gradient(145deg, var(--mini-primary-soft), var(--mini-primary-pale)); }
-.miniapp-stage .mini-content-card-avatar { width: 40px; height: 40px; border-radius: 13px; background: var(--mini-surface); box-shadow: 0 4px 9px rgba(31, 70, 150, .12); }
-.miniapp-stage .mini-content-card-fallback { display: flex; width: 39px; height: 39px; align-items: center; justify-content: center; border-radius: 12px; background: var(--mini-primary-strong); color: #fff; font-size: 15px; font-weight: 750; }
-.miniapp-stage .mini-content-grid .card-title { padding: 9px 9px 0; font-size: 14px; }
-.miniapp-stage .mini-content-grid .card-desc { min-height: 36px; margin: 4px 9px 0; font-size: 11px; }
-.miniapp-stage .mini-content-grid .tag-row { margin: 6px 9px 0; }
-.miniapp-stage .mini-content-grid .tag { padding: 2.5px 4.5px; font-size: 9px; }
 .miniapp-stage .mini-content-grid .record-main { margin: 8px 9px 0; font-size: 10px; }
 .miniapp-stage .mini-page-heading { display: block; margin: 5px 0 13px; color: var(--mini-ink); font-size: 21.5px; font-weight: 750; text-align: center; }
 .miniapp-stage .mini-profile-avatar { display: flex; width: 44px; height: 44px; align-items: center; justify-content: center; border-radius: 50%; background: linear-gradient(135deg, #2f69ec, #785de7); color: #fff; font-size: 18.5px; font-weight: 750; }
@@ -190,19 +182,27 @@
 .miniapp-stage .mini-shortcut-icon { width: 28px; height: 28px; border-radius: 9px; background: linear-gradient(135deg, var(--mini-primary-soft), var(--mini-primary-pale)); font-size: 13.5px; }
 .miniapp-stage .mini-shortcut-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .miniapp-stage .mini-content-grid { gap: 9px; }
-.miniapp-stage .mini-content-grid .mini-content-card { min-height: 191px; padding-bottom: 8px; border: 0.5px solid var(--mini-line); border-radius: 13px; background: var(--mini-surface); box-shadow: 0 6px 14px rgba(47, 78, 135, .08); }
-.miniapp-stage .mini-content-card-cover { height: 79px; background: linear-gradient(135deg, var(--mini-primary-soft), var(--mini-primary-pale)); }
-.miniapp-stage .mini-content-card-avatar { width: 41px; height: 41px; border-radius: 12.5px; }
-.miniapp-stage .mini-content-card-fallback { width: 41px; height: 41px; border-radius: 12.5px; background: linear-gradient(135deg, var(--mini-primary), #665be5); font-size: 14px; }
-.miniapp-stage .mini-content-grid .card-title { min-height: 34px; padding: 8px 8px 0; color: var(--mini-ink); font-size: 13.5px; font-weight: 740; line-height: 1.3; }
-.miniapp-stage .mini-content-grid .card-desc { min-height: 33px; margin: 3.5px 8px 0; color: var(--mini-subtle); font-size: 10px; line-height: 1.55; }
-.miniapp-stage .mini-content-card-footer { display: flex; min-height: 21.5px; align-items: flex-end; justify-content: space-between; gap: 4px; margin: 5px 8px 0; }
-.miniapp-stage .mini-content-grid .tag-row { max-width: 68%; gap: 3px; margin: 0; overflow: hidden; flex-wrap: nowrap; }
-.miniapp-stage .mini-content-grid .tag { overflow: hidden; padding: 2.5px 4px; background: var(--mini-primary-soft); color: var(--mini-primary-strong); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
-.miniapp-stage .mini-content-card-uses { flex-shrink: 0; max-width: 31%; overflow: hidden; color: var(--mini-subtle-2); font-size: 8.5px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.miniapp-stage .mini-content-grid .mini-content-card { display: flex; min-width: 0; min-height: 0; flex-direction: column; margin-bottom: 0; padding: 10px; overflow: hidden; border: 0.5px solid rgba(16, 31, 56, .08); border-radius: 12px; background: var(--mini-surface); box-shadow: 0 4px 10px rgba(47, 78, 135, .06); }
+.miniapp-stage .mini-content-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 4px; }
+.miniapp-stage .mini-content-card-tile { display: flex; width: 28px; height: 28px; flex-shrink: 0; align-items: center; justify-content: center; overflow: hidden; border-radius: 8px; background: rgba(255, 255, 255, .65); box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, .7); }
+.miniapp-stage .mini-content-card-tile-img { width: 100%; height: 100%; }
+.miniapp-stage .mini-content-card-tile-glyph { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; color: #fff; font-size: 13px; font-weight: 700; }
+.miniapp-stage .mini-content-card-vip { flex-shrink: 0; padding: 2px 5px; border-radius: 4px; background: var(--mini-primary-soft); color: var(--mini-primary-strong); font-size: 9px; font-weight: 600; line-height: 1.4; }
+.miniapp-stage .mini-content-grid .card-title { height: 36px; min-height: 0; margin-top: 6px; padding: 0; overflow: hidden; color: var(--mini-ink); font-size: 14px; font-weight: 700; line-height: 18px; text-overflow: ellipsis; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.miniapp-stage .mini-content-grid .card-desc { height: 34px; min-height: 0; margin: 3px 0 0; overflow: hidden; color: var(--mini-subtle); font-size: 11px; line-height: 17px; -webkit-line-clamp: 2; }
+.miniapp-stage .mini-content-card-footer { display: flex; min-height: 17px; align-items: center; justify-content: space-between; gap: 4px; margin-top: auto; padding-top: 6px; }
+.miniapp-stage .mini-content-grid .tag-row { flex: 1; min-width: 0; gap: 3px; margin: 0; overflow: hidden; flex-wrap: nowrap; }
+.miniapp-stage .mini-content-grid .tag { overflow: hidden; padding: 1.5px 4px; border-radius: 4px; background: var(--mini-primary-soft); color: var(--mini-primary-strong); font-size: 9px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
+.miniapp-stage .mini-content-card-uses { flex-shrink: 0; color: var(--mini-subtle-2); font-size: 9px; text-align: right; white-space: nowrap; }
+.miniapp-stage .mini-content-grid .mini-content-card--dark .card-title { color: #fff; }
+.miniapp-stage .mini-content-grid .mini-content-card--dark .card-desc { color: rgba(255, 255, 255, .8); }
+.miniapp-stage .mini-content-grid .mini-content-card--dark .tag { background: rgba(255, 255, 255, .15); color: rgba(255, 255, 255, .9); }
+.miniapp-stage .mini-content-card--dark .mini-content-card-uses { color: rgba(255, 255, 255, .7); }
+.miniapp-stage .mini-content-card--dark .mini-content-card-tile { background: rgba(255, 255, 255, .1); box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, .2); }
+.miniapp-stage .mini-content-card--dark .mini-content-card-vip { background: rgba(255, 255, 255, .16); color: #fff; }
 .miniapp-stage .mini-content-list { display: flex; flex-direction: column; gap: 10px; }
 .miniapp-stage .mini-content-card--compact { display: flex; align-items: center; gap: 12px; min-height: 0; margin-bottom: 0; padding: 13px 15px; border: 0.5px solid var(--mini-line-strong); border-radius: 16px; background: var(--mini-glass); box-shadow: var(--mini-shadow-sm); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); overflow: hidden; }
-.miniapp-stage .mini-content-card-hover { opacity: .92; transition: opacity .15s ease; }
+.miniapp-stage .mini-content-card-hover { opacity: .95; transform: scale(.985); transition: opacity .15s ease, transform .15s ease; }
 .miniapp-stage .mini-content-card-compact-avatar { flex-shrink: 0; width: 58px; height: 58px; border-radius: 50%; overflow: hidden; background: var(--mini-soft); box-shadow: 0 2px 6px rgba(30, 60, 120, .12); }
 .miniapp-stage .mini-content-card-compact-img { width: 58px; height: 58px; border-radius: 50%; }
 .miniapp-stage .mini-content-card-compact-fallback { display: flex; align-items: center; justify-content: center; color: #fff; font-size: 19px; font-weight: 750; }
