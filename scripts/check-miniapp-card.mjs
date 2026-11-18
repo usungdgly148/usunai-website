@@ -55,8 +55,16 @@ ok('仍保留「配了链接优先、否则打开自身」的跳转口径', card
 ok('卡片取消旧 382px 定高（改由内容撑）', !/min-height:\s*382px/.test(scss));
 ok('名称定高（两行），保证同页卡片等高', /\.mini-content-grid \.card-title \{[^}]*height:\s*72px/.test(scss));
 ok('描述定高（两行）', /\.mini-content-grid \.card-desc \{[^}]*height:\s*68px/.test(scss));
-ok('深色类目有翻白规则（标题/描述/标签/人数）',
-  ['card-title', 'card-desc', 'tag'].every((k) => scss.includes(`.mini-content-card--dark .${k}`)));
+ok('深色类目有翻白规则（标题/描述/人数/VIP）',
+  ['card-title', 'card-desc', 'mini-content-card-uses', 'mini-content-card-vip']
+    .every((k) => scss.includes(`.mini-content-card--dark .${k}`)));
+// 2026-11-18 主人要求：卡片左下角的文字标签整体移除，两类卡（智能体 / 工作流）都走同一个组件，
+// 所以这里正向锁「标签不回来」，反向锁「人数还在」—— 只删标签，别顺手把底行删空。
+ok('卡片不再渲染左下角文字标签（tag-row / tag 均已移除）',
+  !card.includes('tag-row') && !card.includes("className='tag'"),
+  card.includes('tag-row') ? '仍存在 tag-row' : '仍存在 className=\'tag\'');
+ok('不再有「立即体验」兜底标签', !card.includes('立即体验'));
+ok('底行仍保留「N 人在用」', card.includes('mini-content-card-uses') && card.includes('人在用'));
 ok('深色类目卡片修正类由组件按 category=private 挂上',
   card.includes('mini-content-card--dark') && card.includes("item.category === 'private'"));
 

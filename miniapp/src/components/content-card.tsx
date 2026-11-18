@@ -102,7 +102,8 @@ export function ContentCard({ item, type, variant = 'cover', link }: {
    */
   link?: MiniLinkValue;
 }) {
-  const tags = (item.tags || []).filter(Boolean).slice(0, 2);
+  // ⚠️ 卡片左下角的文字标签已于 2026-11-18 按主人要求整体移除（智能体卡 / 工作流卡一律不带标签）。
+  //    `item.tags` 仍是详情页与实体头部的数据源（`inner-ui.tsx` / `pages/detail`），只删卡片这里的展示。
   const description = item.description || item.desc || (type === 'agent'
     ? 'AI 智能助手，为你完成创作与获客任务'
     : '一键运行工作流，快速完成内容生产');
@@ -146,7 +147,8 @@ export function ContentCard({ item, type, variant = 'cover', link }: {
    *      按「图标块 ≈ 2× 名称字号」的同一比例取 56，与网页 31 : 16 的关系一致）。
    *   ③ 名称 / 描述各定高 2 行 —— 与网页端 `h-[39px]` / `h-[21px]` 同一个目的：
    *      有的卡一行、有的两行，不定高同页就会出现多种高度。
-   *   ④ 深色类目（private 主题）不压白蒙版、文字标签整体翻白，否则深底黑字读不出来。
+   *   ④ 深色类目（private 主题）不压白蒙版、标题/描述/人数整体翻白，否则深底黑字读不出来。
+   *   ⑤ 底行只保留「N 人在用」（左下角文字标签已按主人要求移除，两类卡一致）。
    */
   const themed = usesCategoryTheme(item);
   const isDark = themed && item.category === 'private';
@@ -172,9 +174,6 @@ export function ContentCard({ item, type, variant = 'cover', link }: {
     <Text className='card-title'>{item.name}</Text>
     <Text className='card-desc'>{description}</Text>
     <View className='mini-content-card-footer'>
-      <View className='tag-row'>
-        {tags.length ? tags.map(tag => <Text className='tag' key={tag}>{tag}</Text>) : <Text className='tag'>立即体验</Text>}
-      </View>
       <Text className='mini-content-card-uses'>{item.uses ? `${formatUses(item.uses)} 人在用` : ''}</Text>
     </View>
   </View>;

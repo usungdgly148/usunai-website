@@ -428,33 +428,18 @@ button::after { border: 0; }
   display: flex;
   min-height: 34px;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
   margin-top: auto;
   padding-top: 12px;
 }
-/* 底行：标签吃剩余空间、人数固定不缩 —— 与网页端「tags 左、uses 右 shrink-0」同一分配方式。
-   ⚠️ 旧写法给 tag-row 68% / uses 31% 的固定份额，两列卡片只有 338rpx 宽，两者相加就溢出，
-   实测会把「人在用」截成「2.9万 人…」——所以这里改成 flex 分配，人数字段不再缩。 */
-.mini-content-grid .tag-row { flex: 1; min-width: 0; gap: 6px; margin: 0; overflow: hidden; flex-wrap: nowrap; }
-/* 标签：圆角矩形（与网页端 rounded 一致），不再是胶囊 —— VIP 角标与其同语言 */
-.mini-content-grid .tag {
-  overflow: hidden;
-  padding: 3px 8px;
-  border-radius: 8px;
-  background: var(--mini-primary-soft);
-  color: var(--mini-primary-strong);
-  font-size: 18px;
-  line-height: 1.5;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* 底行：2026-11-18 起卡片**不再有左下角的文字标签**（智能体卡 / 工作流卡一律不带），只剩右侧「N 人在用」。
+   footer 的 min-height + margin-top:auto 必须留着 —— 卡片等高就靠它撑，删掉同页会立刻出现两种高度。 */
 .mini-content-card-uses { flex-shrink: 0; color: var(--mini-subtle-2); font-size: 18px; text-align: right; white-space: nowrap; }
-/* 深色类目（private 主题）：整卡压深 → 文字/标签/图标块同步翻白，否则深底深字读不出来。
+/* 深色类目（private 主题）：整卡压深 → 文字/人数/图标块/VIP 同步翻白，否则深底深字读不出来。
    选择器要多带一层 .mini-content-grid，权重才压得过上面的浅色规则。 */
 .mini-content-grid .mini-content-card--dark .card-title { color: #fff; }
 .mini-content-grid .mini-content-card--dark .card-desc { color: rgba(255, 255, 255, .8); }
-.mini-content-grid .mini-content-card--dark .tag { background: rgba(255, 255, 255, .15); color: rgba(255, 255, 255, .9); }
 .mini-content-card--dark .mini-content-card-uses { color: rgba(255, 255, 255, .7); }
 .mini-content-card--dark .mini-content-card-tile { background: rgba(255, 255, 255, .1); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .2); }
 .mini-content-card--dark .mini-content-card-vip { background: rgba(255, 255, 255, .16); color: #fff; }
