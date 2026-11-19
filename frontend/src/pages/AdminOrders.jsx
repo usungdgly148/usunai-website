@@ -146,7 +146,7 @@ export default function AdminOrders() {
             {filtered.length === 0 && <tr><td colSpan={9} className="px-5 py-12 text-center text-slate-400 text-sm">没有符合条件的订单</td></tr>}
           </tbody>
         </table>
-        <AdminPagination page={page} total={filtered.length} pageSize={pageSize} onPageChange={setPage} />
+        <AdminPagination page={page} total={filtered.length} pageSize={pageSize} onPageChange={setPage} showJump />
       </Card>
     </div>
   );

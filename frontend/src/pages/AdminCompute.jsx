@@ -253,7 +253,7 @@ export default function AdminCompute() {
             })}
           </tbody>
         </table>
-        <AdminPagination page={page} total={filteredRecords.length} pageSize={pageSize} onPageChange={setPage} />
+        <AdminPagination page={page} total={filteredRecords.length} pageSize={pageSize} onPageChange={setPage} showJump />
       </Card>
 
       {/* 套餐编辑弹窗 */}

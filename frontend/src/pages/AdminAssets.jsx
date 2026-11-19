@@ -278,7 +278,7 @@ export default function AdminAssets() {
             {!loading && !loadError && assets.length === 0 && <tr><td colSpan={7} className="px-5 py-12 text-center text-slate-400 text-sm">暂无资产</td></tr>}
           </tbody>
         </table>
-        <AdminPagination page={page} total={total} pageSize={pageSize} onPageChange={setPage} />
+        <AdminPagination page={page} total={total} pageSize={pageSize} onPageChange={setPage} showJump />
       </Card>
 
       {selected && <Detail asset={selected} onClose={() => setSelected(null)} />}

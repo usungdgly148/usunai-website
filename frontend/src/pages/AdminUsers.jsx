@@ -222,7 +222,7 @@ export default function AdminUsers() {
             )}
           </tbody>
         </table>
-        <AdminPagination page={page} total={filtered.length} pageSize={pageSize} onPageChange={setPage} />
+        <AdminPagination page={page} total={filtered.length} pageSize={pageSize} onPageChange={setPage} showJump />
       </Card>
 
       {/* 详情抽屉 */}

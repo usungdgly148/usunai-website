@@ -119,11 +119,31 @@ export function Card({ children, className = '', ...props }) {
   );
 }
 
-export function AdminPagination({ page, total, pageSize = 10, onPageChange }) {
+export function AdminPagination({ page, total, pageSize = 10, onPageChange, showJump = false }) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const current = Math.min(Math.max(1, page), totalPages);
   const start = total === 0 ? 0 : (current - 1) * pageSize + 1;
   const end = Math.min(current * pageSize, total);
+  // 跳页输入是组件内部 UI 状态：不污染列表页自己的 page（page 只由 onPageChange 改）。
+  const [jumpDraft, setJumpDraft] = useState('');
+  const [jumpError, setJumpError] = useState('');
+
+  const jumpToPage = () => {
+    const raw = String(jumpDraft).trim();
+    const typed = Number(raw);
+    // 空值 / 非数字 / 小数都提示，不跳页 —— 避免「输错了却悄悄跑到别的页」。
+    if (!raw || !Number.isFinite(typed) || !Number.isInteger(typed)) {
+      setJumpError(`请输入 1-${totalPages} 之间的整数页码`);
+      return;
+    }
+    // 越界自动纠正到边界页；页码由 current 从 props 重算，不另存一份，避免翻页后显示不同步。
+    const target = Math.min(Math.max(1, typed), totalPages);
+    setJumpDraft('');
+    setJumpError('');
+    if (target !== current) onPageChange(target);
+  };
+
+  const jumpButtonClass = 'px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50';
   return (
     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-5 py-4 border-t border-slate-100 bg-slate-50/40 text-sm">
       <span className="text-slate-500">共 {total} 条，当前 {start}-{end} 条</span>
@@ -131,6 +151,22 @@ export function AdminPagination({ page, total, pageSize = 10, onPageChange }) {
         <button type="button" disabled={current <= 1} onClick={() => onPageChange(current - 1)} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50">上一页</button>
         <span className="min-w-20 text-center text-slate-600">第 {current} / {totalPages} 页</span>
         <button type="button" disabled={current >= totalPages} onClick={() => onPageChange(current + 1)} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50">下一页</button>
+        {showJump && (
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              inputMode="numeric"
+              value={jumpDraft}
+              onChange={(e) => { setJumpDraft(e.target.value); setJumpError(''); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') jumpToPage(); }}
+              placeholder="页码"
+              aria-label="跳转页码"
+              className="w-14 px-2 py-1.5 rounded-lg border border-slate-200 bg-white text-center text-slate-600 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+            />
+            <button type="button" onClick={jumpToPage} className={jumpButtonClass}>跳转</button>
+          </div>
+        )}
+        {showJump && jumpError && <span role="alert" className="text-xs text-rose-600">{jumpError}</span>}
       </div>
     </div>
   );
