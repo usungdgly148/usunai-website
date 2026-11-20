@@ -13,6 +13,20 @@ import { cardSurfaceCss, gradientCss, resolveMaskOpacity } from '../cardGradient
 
 const COLOR_OPTIONS = ['bg-blue-600', 'bg-rose-600', 'bg-emerald-600', 'bg-amber-600', 'bg-violet-600', 'bg-slate-700', 'bg-cyan-600', 'bg-teal-600'];
 
+// DeepSeek 模型口径与服务端 index.mjs 保持一致：白名单 + 历史名归一。
+// 🔴 切换平台时必须把模型一起归位，否则界面下拉看着是 deepseek-flash，
+//    提交的却是上一种平台遗留的模型名 → 服务端白名单拦截 → 保存 500。
+const DEEPSEEK_MODEL_DEFAULT = 'deepseek-flash';
+const DEEPSEEK_MODEL_OPTIONS = ['deepseek-flash', 'deepseek-v4-pro'];
+const DEEPSEEK_MODEL_ALIASES = {
+  'deepseek-v4-flash': 'deepseek-flash',
+  'deepseek-v4-flash-vision-exp': 'deepseek-flash',
+};
+function normalizeDeepseekModel(model) {
+  const name = String(model == null ? '' : model).trim();
+  return DEEPSEEK_MODEL_ALIASES[name] || name;
+}
+
 const blankForm = {
   name: '', desc: '', category: 'copy', icon: 'FileText', iconColor: 'bg-blue-600',
   avatar: '', tags: [], published: false, vip: false,
@@ -217,6 +231,9 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
     if (key === 'coze-old' && !form.baseUrl.trim()) patch.baseUrl = 'https://api.coze.cn';
     // 中转站的模型名由用户在模型列表里选，不能沿用 DeepSeek 的默认值（重复点同一张卡不清空）。
     if (key === 'relay-native' && form.platform !== 'relay-native') patch.model = '';
+    // 反向同理：从中转站/Coze 切到 DeepSeek 时必须把遗留模型名换成在售模型。
+    // 不换的话 <select> 因无匹配项仍显示 deepseek-flash，提交的却是旧模型名 → 服务端 500。
+    if (key === 'deepseek-native' && form.platform !== 'deepseek-native') patch.model = DEEPSEEK_MODEL_DEFAULT;
     set(patch);
     setFetchMsg(null);
   };
@@ -356,7 +373,14 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
   // 因此这里必须 await，否则拿到的会是 Promise 而非真实 id。
   const persist = async () => {
     if (!form.name.trim()) { window.alert('请先填写名称'); return null; }
-    if (form.platform === 'deepseek-native' && !form.authProviderId) { window.alert('请先选择 DeepSeek 授权凭证'); return null; }
+    if (form.platform === 'deepseek-native') {
+      if (!form.authProviderId) { window.alert('请先选择 DeepSeek 授权凭证'); return null; }
+      // 存量配置可能带历史模型名（服务端也会归一）；这里同口径校验，避免把无效值提交成 500。
+      if (!DEEPSEEK_MODEL_OPTIONS.includes(normalizeDeepseekModel(form.model))) {
+        window.alert('DeepSeek 模型无效，请重新选择模型');
+        return null;
+      }
+    }
     if (form.platform === 'relay-native') {
       if (!form.authProviderId) { window.alert('请先选择中转站授权凭证'); return null; }
       if (!String(form.model || '').trim()) { window.alert('请选择或填写模型名称'); return null; }
@@ -705,8 +729,7 @@ export default function AdminAgentEdit({ isNew: isNewProp }) {
                 </Field>
                 <Field label="模型">
                   <select value={form.model} onChange={e => set({ model: e.target.value })} className={inputCls}>
-                    <option value="deepseek-flash">deepseek-flash</option>
-                    <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+                    {DEEPSEEK_MODEL_OPTIONS.map(m => <option key={m} value={m}>{m}</option>)}
                   </select>
                 </Field>
                 <p className="text-xs text-slate-600 bg-violet-50 border border-violet-100 rounded-lg px-3 py-2">

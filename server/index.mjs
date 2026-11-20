@@ -5473,6 +5473,9 @@ const server = http.createServer(async (req, res) => {
           const providersStored = await KV.kvGet('authProviders');
           const providers = Array.isArray(providersStored) ? providersStored : Object.values(providersStored || {});
           const providerById = new Map(providers.filter(Boolean).map((item) => [String(item.id || ''), item]));
+          // 配置校验失败是「提交内容不对」，不是服务端崩溃：回 400 并带上原因，
+          // 否则前台只拿到 HTTP 500，主人根本看不出是模型名还是凭证的问题（2026-11-20 排查踩过）。
+          const invalidConfig = (msg) => Object.assign(new Error(msg), { statusCode: 400 });
           for (const item of items) {
             if (!item || item.platform !== DEEPSEEK_PLATFORM) continue;
             // 整个 agents 集合是「整份保存」的，存量里只要还有一个已下线的旧模型名，后台就再也存不进去。
@@ -5482,17 +5485,17 @@ const server = http.createServer(async (req, res) => {
               console.log(`[deepseek] migrate agent ${item.id || item.name || ''} model ${item.model || '(empty)'} -> ${normalizedModel}`);
               item.model = normalizedModel;
             }
-            if (!DEEPSEEK_MODELS.has(item.model)) throw new Error(`原生模型智能体「${item.name || item.id || ''}」的模型无效`);
+            if (!DEEPSEEK_MODELS.has(item.model)) throw invalidConfig(`原生模型智能体「${item.name || item.id || ''}」的模型无效`);
             const provider = providerById.get(String(item.authProviderId || ''));
             if (!provider || provider.type !== 'deepseek' || provider.status === 'disabled' || !provider.apiKeyEncrypted) {
-              throw new Error(`原生模型智能体「${item.name || item.id || ''}」必须绑定有效的 DeepSeek 凭证`);
+              throw invalidConfig(`原生模型智能体「${item.name || item.id || ''}」必须绑定有效的 DeepSeek 凭证`);
             }
             if (item.ragEnabled === true) {
               const kbIds = Array.isArray(item.knowledgeBaseIds) ? item.knowledgeBaseIds.filter(Boolean) : [];
-              if (kbIds.length === 0) throw new Error(`原生模型智能体「${item.name || item.id || ''}」启用知识库后必须至少选择一个知识库`);
+              if (kbIds.length === 0) throw invalidConfig(`原生模型智能体「${item.name || item.id || ''}」启用知识库后必须至少选择一个知识库`);
               for (const kbId of kbIds) {
                 const kb = await KV.kvGet(`rag_kb_${kbId}`);
-                if (!kb) throw new Error(`原生模型智能体「${item.name || item.id || ''}」绑定的知识库不存在`);
+                if (!kb) throw invalidConfig(`原生模型智能体「${item.name || item.id || ''}」绑定的知识库不存在`);
               }
             }
           }
@@ -5510,10 +5513,11 @@ const server = http.createServer(async (req, res) => {
       } catch (e) {
         // 之前这里没 catch，导致 500 但 Node 进程没把堆栈打到 journal → 主人看见红条却没人能 debug。
         // 现在 catch 后 console.error，systemd 会收，journalctl -o cat 能看。
-        console.error('[put-config] CRASH key=' + (req && req.url) + ' err=' + (e && (e.stack || e.message || e)));
-        res.statusCode = 500;
+        const invalid = Boolean(e && e.statusCode === 400);
+        if (!invalid) console.error('[put-config] CRASH key=' + (req && req.url) + ' err=' + (e && (e.stack || e.message || e)));
+        res.statusCode = invalid ? 400 : 500;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ ok: false, msg: 'put-config crashed: ' + (e && (e.message || e)) }));
+        res.end(JSON.stringify({ ok: false, msg: invalid ? e.message : 'put-config crashed: ' + (e && (e.message || e)) }));
         return;
       }
     }

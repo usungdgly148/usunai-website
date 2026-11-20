@@ -920,7 +920,13 @@ export function StoreProvider({ children }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, value }),
       });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (!r.ok) {
+        // 服务端 400 会把具体校验原因放进 msg（如「原生模型智能体…的模型无效」）——
+        // 只显示 HTTP 状态码会让主人完全看不出错在哪，2026-11-20 排查时踩过。
+        let detail = '';
+        try { const e = await r.json(); detail = e && e.msg ? '：' + e.msg : ''; } catch { /* 非 JSON 响应忽略 */ }
+        throw new Error('HTTP ' + r.status + detail);
+      }
       const j = await r.json();
       if (!j || !j.ok) throw new Error((j && j.msg) || '服务端返回失败');
       return { ok: true };
